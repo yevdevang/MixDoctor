@@ -28,6 +28,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		CB63F9A12EA68F1200C68A0F /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
 		CB7EADB52EA2A91500AE28CF /* MixDoctor.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MixDoctor.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		CB7EADC22EA2A91600AE28CF /* MixDoctorTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MixDoctorTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		CB7EADCC2EA2A91600AE28CF /* MixDoctorUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MixDoctorUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -80,6 +81,7 @@
 		CB7EADAC2EA2A91500AE28CF = {
 			isa = PBXGroup;
 			children = (
+				CB63F9A12EA68F1200C68A0F /* Config.xcconfig */,
 				CB7EADB72EA2A91500AE28CF /* MixDoctor */,
 				CB7EADC52EA2A91600AE28CF /* MixDoctorTests */,
 				CB7EADCF2EA2A91600AE28CF /* MixDoctorUITests */,
@@ -240,6 +242,24 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		CB63F9A22EA68F1300C68A0F /* Inject API Key into Info.plist */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Inject API Key into Info.plist";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Post-process Info.plist to inject API key\n# This runs after Resources phase but ProcessInfoPlistFile runs later\n# We'll use a marker file to trigger a final injection\n\nMARKER_FILE=\"${TARGET_TEMP_DIR}/inject_api_key.flag\"\n\nif [ -n \"${OPENAI_API_KEY}\" ] && [ \"${OPENAI_API_KEY}\" != \"YOUR_OPENAI_API_KEY_HERE\" ]; then\n    # Save the API key to a marker file\n    echo \"${OPENAI_API_KEY}\" > \"$MARKER_FILE\"\n    echo \"✅ API Key prepared for injection\"\n    \n    # Also try to inject directly if Info.plist exists\n    INFO_PLIST=\"${TARGET_BUILD_DIR}/${INFOPLIST_PATH}\"\n    if [ -f \"$INFO_PLIST\" ]; then\n        /usr/libexec/PlistBuddy -c \"Delete :OPENAI_API_KEY\" \"$INFO_PLIST\" 2>/dev/null || true\n        /usr/libexec/PlistBuddy -c \"Add :OPENAI_API_KEY string ${OPENAI_API_KEY}\" \"$INFO_PLIST\" 2>/dev/null && echo \"✅ Injected API Key into Info.plist\" || echo \"ℹ️  Info.plist will be processed later\"\n    fi\nelse\n    echo \"⚠️  Warning: OPENAI_API_KEY not set or invalid\"\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		CB7EADB12EA2A91500AE28CF /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -396,6 +416,7 @@
 		};
 		CB7EADD72EA2A91600AE28CF /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = CB63F9A12EA68F1200C68A0F /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -406,7 +427,8 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = MixDoctor.xcodeproj/Info.plist;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -417,6 +439,7 @@
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_OPENAI_API_KEY = "$(OPENAI_API_KEY)";
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
@@ -440,6 +463,7 @@
 		};
 		CB7EADD82EA2A91600AE28CF /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = CB63F9A12EA68F1200C68A0F /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -450,7 +474,8 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = MixDoctor.xcodeproj/Info.plist;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -461,6 +486,7 @@
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_OPENAI_API_KEY = "$(OPENAI_API_KEY)";
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
