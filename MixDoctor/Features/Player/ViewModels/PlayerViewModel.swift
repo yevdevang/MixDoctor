@@ -21,6 +21,7 @@ final class PlayerViewModel {
     var currentTime: TimeInterval = 0
     var duration: TimeInterval = 0
     var progress: Double = 0
+    var loadError: String?
     var playbackRate: Double = 1.0 {
         didSet {
             audioPlayer?.rate = Float(playbackRate)
@@ -65,12 +66,52 @@ final class PlayerViewModel {
     
     private func setupAudioPlayer() {
         do {
+            // Check if file exists
+            let fileManager = FileManager.default
+            guard fileManager.fileExists(atPath: audioFile.fileURL.path) else {
+                print("Audio file does not exist at path: \(audioFile.fileURL.path)")
+                return
+            }
+            
+            #if os(iOS)
+            // Configure audio session for iOS
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(.playback, mode: .default)
+            try audioSession.setActive(true)
+            #endif
+            
+            // Try to access security-scoped resource if needed
+            let shouldStopAccessing = audioFile.fileURL.startAccessingSecurityScopedResource()
+            defer {
+                if shouldStopAccessing {
+                    audioFile.fileURL.stopAccessingSecurityScopedResource()
+                }
+            }
+            
+            // Create audio player
             audioPlayer = try AVAudioPlayer(contentsOf: audioFile.fileURL)
             audioPlayer?.prepareToPlay()
             audioPlayer?.enableRate = true
             duration = audioPlayer?.duration ?? 0
-        } catch {
-            print("Failed to setup audio player: \(error)")
+            
+            loadError = nil
+            print("✅ Successfully loaded audio file: \(audioFile.fileName)")
+            print("   Duration: \(duration) seconds")
+            print("   File path: \(audioFile.fileURL.path)")
+        } catch let error as NSError {
+            let errorMsg = "Failed to load audio: \(error.localizedDescription)"
+            loadError = errorMsg
+            
+            print("❌ Failed to setup audio player: \(error)")
+            print("   Error code: \(error.code)")
+            print("   Error domain: \(error.domain)")
+            print("   File URL: \(audioFile.fileURL)")
+            print("   File path: \(audioFile.fileURL.path)")
+            
+            // Try to get more details about the error
+            if let underlyingError = error.userInfo[NSUnderlyingErrorKey] as? NSError {
+                print("   Underlying error: \(underlyingError)")
+            }
         }
     }
     
