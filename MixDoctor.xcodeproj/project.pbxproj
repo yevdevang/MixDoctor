@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		CBDD0A842EA68E8500C68A0F /* OpenAI in Frameworks */ = {isa = PBXBuildFile; productRef = CBDD0A832EA68E8500C68A0F /* OpenAI */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		CB7EADC32EA2A91600AE28CF /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -52,6 +56,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CBDD0A842EA68E8500C68A0F /* OpenAI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -112,6 +117,7 @@
 			);
 			name = MixDoctor;
 			packageProductDependencies = (
+				CBDD0A832EA68E8500C68A0F /* OpenAI */,
 			);
 			productName = MixDoctor;
 			productReference = CB7EADB52EA2A91500AE28CF /* MixDoctor.app */;
@@ -195,6 +201,9 @@
 			);
 			mainGroup = CB7EADAC2EA2A91500AE28CF;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				CBDD0A822EA68E8500C68A0F /* XCRemoteSwiftPackageReference "OpenAI" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = CB7EADB62EA2A91500AE28CF /* Products */;
 			projectDirPath = "";
@@ -615,6 +624,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		CBDD0A822EA68E8500C68A0F /* XCRemoteSwiftPackageReference "OpenAI" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/MacPaw/OpenAI.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.4.6;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		CBDD0A832EA68E8500C68A0F /* OpenAI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CBDD0A822EA68E8500C68A0F /* XCRemoteSwiftPackageReference "OpenAI" */;
+			productName = OpenAI;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = CB7EADAD2EA2A91500AE28CF /* Project object */;
 }

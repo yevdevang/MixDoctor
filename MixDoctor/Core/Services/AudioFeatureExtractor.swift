@@ -40,6 +40,12 @@ final class AudioFeatureExtractor {
         // Mid-side ratio
         let midSideRatio = midEnergy / (sideEnergy + 0.0001)
         
+        print("   📊 Stereo Features:")
+        print("      Correlation: \(correlation)")
+        print("      Stereo Width: \(stereoWidth)")
+        print("      L/R Balance: \(leftRightBalance)")
+        print("      Mid/Side Ratio: \(midSideRatio)")
+        
         return StereoFeatures(
             stereoWidth: stereoWidth,
             correlation: correlation,
@@ -58,7 +64,7 @@ final class AudioFeatureExtractor {
     }
     
     func extractFrequencyFeatures(audio: [Float], sampleRate: Double) throws -> FrequencyFeatures {
-        let fftSize = Constants.fftSize
+        let fftSize = 8192  // FFT size for analysis
         let log2n = vDSP_Length(log2(Float(fftSize)))
         
         guard let fftSetup = vDSP_create_fftsetup(log2n, FFTRadix(kFFTRadix2)) else {
@@ -80,7 +86,7 @@ final class AudioFeatureExtractor {
         vDSP_vmul(audioChunk, 1, window, 1, &windowedAudio, 1, vDSP_Length(fftSize))
         
         // Calculate magnitude spectrum
-        let magnitudes = realp.withUnsafeMutableBufferPointer { realpPtr in
+        var magnitudes = realp.withUnsafeMutableBufferPointer { realpPtr in
             imagp.withUnsafeMutableBufferPointer { imagpPtr in
                 var output = DSPSplitComplex(realp: realpPtr.baseAddress!, imagp: imagpPtr.baseAddress!)
                 

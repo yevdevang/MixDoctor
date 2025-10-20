@@ -16,15 +16,55 @@ struct MixDoctorApp: App {
         let iCloudEnabled = UserDefaults.standard.bool(forKey: "iCloudSyncEnabled")
         
         do {
-            let schema = Schema([AudioFile.self, AnalysisResult.self])
+            let schema = Schema([AudioFile.self])
+            
+            // Get the application support directory
+            let appSupportURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            let storeURL = appSupportURL.appendingPathComponent("MixDoctor.store")
+            
+            // If there's a corrupted store, delete it
+            if FileManager.default.fileExists(atPath: storeURL.path) {
+                // Check if we had a migration failure before
+                if UserDefaults.standard.bool(forKey: "hadMigrationFailure") {
+                    try? FileManager.default.removeItem(at: storeURL)
+                    UserDefaults.standard.removeObject(forKey: "hadMigrationFailure")
+                    print("Removed corrupted database")
+                }
+            }
+            
             let modelConfiguration = ModelConfiguration(
                 schema: schema,
-                isStoredInMemoryOnly: false,
+                url: storeURL,
                 cloudKitDatabase: iCloudEnabled ? .automatic : .none
             )
-            modelContainer = try ModelContainer(for: schema, configurations: [modelConfiguration])
+            
+            modelContainer = try ModelContainer(
+                for: schema,
+                configurations: [modelConfiguration]
+            )
         } catch {
-            fatalError("Could not create ModelContainer: \(error)")
+            print("Initial ModelContainer creation failed: \(error)")
+            // Mark that we had a failure and try to delete and recreate
+            UserDefaults.standard.set(true, forKey: "hadMigrationFailure")
+            
+            // Delete the store and try again
+            do {
+                let appSupportURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+                let storeURL = appSupportURL.appendingPathComponent("MixDoctor.store")
+                try? FileManager.default.removeItem(at: storeURL)
+                
+                let schema = Schema([AudioFile.self])
+                let modelConfiguration = ModelConfiguration(
+                    schema: schema,
+                    url: storeURL
+                )
+                modelContainer = try ModelContainer(for: schema, configurations: [modelConfiguration])
+                
+                // Clear the failure flag since it worked
+                UserDefaults.standard.removeObject(forKey: "hadMigrationFailure")
+            } catch {
+                fatalError("Could not create ModelContainer even after deleting store: \(error)")
+            }
         }
     }
     

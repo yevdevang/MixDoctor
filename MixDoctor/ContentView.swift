@@ -31,5 +31,5 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
-        .modelContainer(for: [AudioFile.self, AnalysisResult.self])
+        .modelContainer(for: [AudioFile.self])
 }

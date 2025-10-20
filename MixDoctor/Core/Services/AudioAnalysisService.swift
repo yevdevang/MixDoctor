@@ -2,383 +2,208 @@
 //  AudioAnalysisService.swift
 //  MixDoctor
 //
-//  Service for analyzing audio files and generating mix quality reports
+//  Main service for audio analysis orchestration
 //
 
 import Foundation
-import AVFoundation
-import CoreMedia
-import Accelerate
+import Observation
 
-@MainActor
+@Observable
 final class AudioAnalysisService {
     
-    // MARK: - Analysis Errors
+    private let processor = AudioProcessor()
+    private let featureExtractor = AudioFeatureExtractor()
     
-    enum AnalysisError: LocalizedError {
-        case fileNotFound
-        case unsupportedFormat
-        case analysisFailure(String)
-        case insufficientData
-        
-        var errorDescription: String? {
-            switch self {
-            case .fileNotFound:
-                return "Audio file not found"
-            case .unsupportedFormat:
-                return "Audio format not supported for analysis"
-            case .analysisFailure(let reason):
-                return "Analysis failed: \(reason)"
-            case .insufficientData:
-                return "Insufficient audio data for analysis"
-            }
-        }
-    }
+    var isAnalyzing: Bool = false
+    var analysisProgress: Double = 0
     
-    // MARK: - Public Methods
+    // MARK: - Main Analysis
     
     func analyzeAudio(_ audioFile: AudioFile) async throws -> AnalysisResult {
-        // Simulate analysis delay for demo purposes
-        try await Task.sleep(for: .seconds(2))
+        isAnalyzing = true
+        analysisProgress = 0
         
-        guard FileManager.default.fileExists(atPath: audioFile.fileURL.path) else {
-            throw AnalysisError.fileNotFound
+        defer {
+            isAnalyzing = false
+            analysisProgress = 0
         }
         
-        // Load audio data
-        let audioData = try await loadAudioData(from: audioFile.fileURL)
+        // Verify file exists before attempting analysis
+        let fileURL = audioFile.fileURL
         
-        // Perform analysis
-        let analysisResult = try await performDetailedAnalysis(
-            audioData: audioData,
-            audioFile: audioFile
-        )
+        // Try both the original path and potential URL-decoded version
+        var fileExists = FileManager.default.fileExists(atPath: fileURL.path)
+        var actualURL = fileURL
         
-        return analysisResult
-    }
-    
-    // MARK: - Private Analysis Methods
-    
-    private func loadAudioData(from url: URL) async throws -> AudioData {
-        return try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                do {
-                    let audioData = try self.extractAudioData(from: url)
-                    continuation.resume(returning: audioData)
-                } catch {
-                    continuation.resume(throwing: error)
+        // If not found, try looking for files in the directory that match the decoded name
+        if !fileExists {
+            let fileName = fileURL.lastPathComponent
+            let directory = fileURL.deletingLastPathComponent()
+            
+            if let contents = try? FileManager.default.contentsOfDirectory(atPath: directory.path) {
+                // Look for a file that matches when URL-decoded
+                if let matchingFile = contents.first(where: { $0 == fileName.removingPercentEncoding }) {
+                    actualURL = directory.appendingPathComponent(matchingFile)
+                    fileExists = FileManager.default.fileExists(atPath: actualURL.path)
+                    if fileExists {
+                        print("   ✅ Found file with decoded name: \(matchingFile)")
+                    }
                 }
             }
         }
-    }
-    
-    private func extractAudioData(from url: URL) throws -> AudioData {
-        let asset = AVAsset(url: url)
-        let track = asset.tracks(withMediaType: .audio).first
         
-        guard let audioTrack = track else {
-            throw AnalysisError.unsupportedFormat
+        print("🔍 Pre-analysis file check:")
+        print("   File URL: \(fileURL)")
+        print("   File path: \(fileURL.path)")
+        print("   Actual URL: \(actualURL)")
+        print("   File exists: \(fileExists)")
+        
+        // If file doesn't exist, list directory contents for debugging
+        if !fileExists {
+            let directory = fileURL.deletingLastPathComponent()
+            print("❌ File not found. Directory: \(directory.path)")
+            if let contents = try? FileManager.default.contentsOfDirectory(atPath: directory.path) {
+                print("   Files in directory: \(contents.count)")
+                contents.prefix(10).forEach { print("   - \($0)") }
+            }
         }
         
-        // For demo purposes, generate synthetic audio data
-        // In a real implementation, you would extract actual PCM data
-        let sampleRate = 44100.0
-        let duration = CMTimeGetSeconds(asset.duration)
-        let sampleCount = Int(sampleRate * duration)
-        
-        // Generate synthetic stereo audio data for analysis
-        var leftChannel = [Float](repeating: 0.0, count: sampleCount)
-        var rightChannel = [Float](repeating: 0.0, count: sampleCount)
-        
-        // Add some synthetic content for realistic analysis
-        for i in 0..<sampleCount {
-            let t = Float(i) / Float(sampleRate)
-            leftChannel[i] = sin(2.0 * .pi * 440.0 * t) * 0.5 + Float.random(in: -0.1...0.1)
-            rightChannel[i] = sin(2.0 * .pi * 440.0 * t) * 0.3 + Float.random(in: -0.1...0.1)
+        guard fileExists else {
+            throw NSError(domain: "AudioAnalysisService", code: 404, userInfo: [
+                NSLocalizedDescriptionKey: "Audio file not found at path: \(fileURL.path). Please delete and re-import this file."
+            ])
         }
         
-        return AudioData(
-            leftChannel: leftChannel,
-            rightChannel: rightChannel,
-            sampleRate: sampleRate,
-            duration: duration
+        // Load and process audio using the actual URL that exists
+        analysisProgress = 0.1
+        let processedAudio = try processor.loadAudio(from: actualURL)
+        
+        // Extract features
+        analysisProgress = 0.3
+        let stereoFeatures = featureExtractor.extractStereoFeatures(
+            left: processedAudio.leftChannel,
+            right: processedAudio.rightChannel
         )
-    }
-    
-    private func performDetailedAnalysis(
-        audioData: AudioData,
-        audioFile: AudioFile
-    ) async throws -> AnalysisResult {
         
-        let result = AnalysisResult(audioFile: audioFile)
+        analysisProgress = 0.5
+        let frequencyFeatures = try featureExtractor.extractFrequencyFeatures(
+            audio: processedAudio.leftChannel,
+            sampleRate: processedAudio.sampleRate
+        )
         
-        // Perform various analyses
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask {
-                await self.analyzeStereoWidth(audioData: audioData, result: result)
-            }
-            
-            group.addTask {
-                await self.analyzePhaseCoherence(audioData: audioData, result: result)
-            }
-            
-            group.addTask {
-                await self.analyzeFrequencyBalance(audioData: audioData, result: result)
-            }
-            
-            group.addTask {
-                await self.analyzeDynamicRange(audioData: audioData, result: result)
-            }
-            
-            group.addTask {
-                await self.analyzeLoudness(audioData: audioData, result: result)
-            }
+        analysisProgress = 0.7
+        let loudnessFeatures = featureExtractor.extractLoudnessFeatures(
+            left: processedAudio.leftChannel,
+            right: processedAudio.rightChannel
+        )
+        
+        // Calculate technical metrics
+        let peakLevelDB = 20 * log10(loudnessFeatures.peakLevel + 0.0001)
+        let rmsLevelDB = 20 * log10(loudnessFeatures.rmsLevel + 0.0001)
+        
+        // Extract frequency band energies (use correct band ranges)
+        // Available bands: 20 (sub_bass), 60 (bass), 250 (low_mids), 500 (mids), 2000 (high_mids), 6000 (highs)
+        let subBass: Float = frequencyFeatures.frequencyBands[20.0] ?? 0
+        let bass: Float = frequencyFeatures.frequencyBands[60.0] ?? 0
+        let lowMids: Float = frequencyFeatures.frequencyBands[250.0] ?? 0
+        let mids: Float = frequencyFeatures.frequencyBands[500.0] ?? 0
+        let highMids: Float = frequencyFeatures.frequencyBands[2000.0] ?? 0
+        let highs: Float = frequencyFeatures.frequencyBands[6000.0] ?? 0
+        
+        // Combine for low/mid/high classification
+        let lowEnergy: Float = (subBass + bass) / 2.0  // 20-250 Hz
+        let midEnergy: Float = (lowMids + mids) / 2.0  // 250-2000 Hz
+        let highEnergy: Float = (highMids + highs) / 2.0  // 2000-20000 Hz
+        
+        print("   📊 Extracted Features:")
+        print("      Peak Level: \(peakLevelDB) dBFS")
+        print("      RMS Level: \(rmsLevelDB) dBFS")
+        print("      Dynamic Range: \(loudnessFeatures.dynamicRange) dB")
+        print("      Stereo Width: \(stereoFeatures.stereoWidth)")
+        print("      Phase Coherence: \(stereoFeatures.correlation)")
+        print("      Frequency Bands:")
+        print("        Sub Bass (20-60): \(subBass)")
+        print("        Bass (60-250): \(bass)")
+        print("        Low Mids (250-500): \(lowMids)")
+        print("        Mids (500-2k): \(mids)")
+        print("        High Mids (2k-6k): \(highMids)")
+        print("        Highs (6k-20k): \(highs)")
+        print("      Combined:")
+        print("        Low: \(lowEnergy)")
+        print("        Mid: \(midEnergy)")
+        print("        High: \(highEnergy)")
+        print("      Spectral Centroid: \(frequencyFeatures.spectralCentroid) Hz")
+        
+        // Analyze with OpenAI
+        analysisProgress = 0.8
+        print("   🤖 Analyzing with OpenAI GPT-5 Nano...")
+        
+        let aiResponse = try await OpenAIService.shared.analyzeAudioFeatures(
+            peakLevel: peakLevelDB,
+            rmsLevel: rmsLevelDB,
+            dynamicRange: loudnessFeatures.dynamicRange,
+            stereoWidth: stereoFeatures.stereoWidth,
+            lowFrequencyEnergy: lowEnergy,
+            midFrequencyEnergy: midEnergy,
+            highFrequencyEnergy: highEnergy,
+            spectralCentroid: frequencyFeatures.spectralCentroid,
+            zeroCrossingRate: 0.5,  // Placeholder
+            phaseCoherence: stereoFeatures.correlation
+        )
+        
+        // Create analysis result
+        analysisProgress = 0.9
+        let result = AnalysisResult(audioFile: audioFile, analysisVersion: "OpenAI-1.0")
+        
+        // Populate technical metrics
+        result.stereoWidthScore = Double(stereoFeatures.stereoWidth * 100)
+        result.phaseCoherence = Double(stereoFeatures.correlation)
+        result.dynamicRange = Double(loudnessFeatures.dynamicRange)
+        result.loudnessLUFS = Double(loudnessFeatures.lufs)
+        result.peakLevel = Double(peakLevelDB)
+        result.spectralCentroid = Double(frequencyFeatures.spectralCentroid)
+        result.hasClipping = loudnessFeatures.peakLevel >= 1.0
+        
+        // Normalize frequency bands to percentages (0-100)
+        // Calculate total energy and convert each band to percentage of total
+        let totalEnergy = lowEnergy + midEnergy + highEnergy
+        if totalEnergy > 0 {
+            result.lowEndBalance = Double((lowEnergy / totalEnergy) * 100)
+            result.midBalance = Double((midEnergy / totalEnergy) * 100)
+            result.highBalance = Double((highEnergy / totalEnergy) * 100)
+        } else {
+            // Fallback to equal distribution if no energy detected
+            result.lowEndBalance = 33.3
+            result.midBalance = 33.3
+            result.highBalance = 33.3
         }
         
-        // Calculate overall score and generate recommendations
-        await calculateOverallScore(result: result)
-        await generateRecommendations(result: result)
+        print("   📊 Frequency Balance (normalized):")
+        print("      Low: \(result.lowEndBalance)%")
+        print("      Mid: \(result.midBalance)%")
+        print("      High: \(result.highBalance)%")
+        
+        // Apply OpenAI analysis
+        result.overallScore = aiResponse.overallQuality
+        result.recommendations = aiResponse.recommendations
+        
+        // Set issue flags based on thresholds
+        result.hasPhaseIssues = stereoFeatures.correlation < 0.7
+        result.hasStereoIssues = stereoFeatures.stereoWidth < 0.3 || stereoFeatures.stereoWidth > 0.8
+        result.hasFrequencyImbalance = (lowEnergy > 0.5 || highEnergy > 0.5)
+        result.hasDynamicRangeIssues = (loudnessFeatures.dynamicRange < 6.0 || 
+                                       loudnessFeatures.dynamicRange > 16.0)
+        
+        print("   ✅ OpenAI Analysis Complete:")
+        print("      Overall Quality: \(aiResponse.overallQuality)/100")
+        print("      Stereo: \(aiResponse.stereoAnalysis)")
+        print("      Frequency: \(aiResponse.frequencyAnalysis)")
+        print("      Dynamics: \(aiResponse.dynamicsAnalysis)")
+        print("      Summary: \(aiResponse.detailedSummary)")
+        print("      Recommendations: \(aiResponse.recommendations.count)")
+        
+        analysisProgress = 1.0
         
         return result
     }
-    
-    // MARK: - Analysis Components
-    
-    private func analyzeStereoWidth(audioData: AudioData, result: AnalysisResult) async {
-        // Calculate stereo width using correlation between L and R channels
-        let correlation = calculateCorrelation(audioData.leftChannel, audioData.rightChannel)
-        let stereoWidth = max(0, (1.0 - abs(correlation)) * 100)
-        
-        result.stereoWidthScore = Double(stereoWidth)
-        result.hasStereoIssues = stereoWidth < 20 || stereoWidth > 90
-    }
-    
-    private func analyzePhaseCoherence(audioData: AudioData, result: AnalysisResult) async {
-        // Calculate phase coherence using cross-correlation
-        let coherence = calculatePhaseCoherence(audioData.leftChannel, audioData.rightChannel)
-        
-        result.phaseCoherence = coherence
-        result.hasPhaseIssues = coherence < 0.5
-    }
-    
-    private func analyzeFrequencyBalance(audioData: AudioData, result: AnalysisResult) async {
-        // Perform FFT analysis to check frequency balance
-        let leftSpectrum = performFFT(audioData.leftChannel)
-        let rightSpectrum = performFFT(audioData.rightChannel)
-        
-        // Calculate frequency band energies
-        let nyquist = audioData.sampleRate / 2
-        let lowEnd = calculateBandEnergy(leftSpectrum, rightSpectrum, 20, 250, nyquist)
-        let lowMid = calculateBandEnergy(leftSpectrum, rightSpectrum, 250, 500, nyquist)
-        let mid = calculateBandEnergy(leftSpectrum, rightSpectrum, 500, 2000, nyquist)
-        let highMid = calculateBandEnergy(leftSpectrum, rightSpectrum, 2000, 8000, nyquist)
-        let high = calculateBandEnergy(leftSpectrum, rightSpectrum, 8000, 20000, nyquist)
-        
-        result.lowEndBalance = lowEnd
-        result.lowMidBalance = lowMid
-        result.midBalance = mid
-        result.highMidBalance = highMid
-        result.highBalance = high
-        
-        // Check for significant imbalances
-        let totalEnergy = lowEnd + lowMid + mid + highMid + high
-        let idealBalance = totalEnergy / 5
-        let tolerance = idealBalance * 0.5
-        
-        result.hasFrequencyImbalance = abs(lowEnd - idealBalance) > tolerance ||
-                                     abs(mid - idealBalance) > tolerance ||
-                                     abs(high - idealBalance) > tolerance
-    }
-    
-    private func analyzeDynamicRange(audioData: AudioData, result: AnalysisResult) async {
-        // Calculate dynamic range using RMS and peak values
-        let leftRMS = calculateRMS(audioData.leftChannel)
-        let rightRMS = calculateRMS(audioData.rightChannel)
-        let avgRMS = (leftRMS + rightRMS) / 2.0
-        
-        let leftPeak = audioData.leftChannel.max() ?? 0
-        let rightPeak = audioData.rightChannel.max() ?? 0
-        let maxPeak = max(abs(leftPeak), abs(rightPeak))
-        
-        let dynamicRange = 20 * log10(maxPeak / avgRMS)
-        
-        result.dynamicRange = Double(min(max(dynamicRange, 0), 50)) // Clamp to reasonable range
-        result.hasDynamicRangeIssues = dynamicRange < 8 || dynamicRange > 30
-    }
-    
-    private func analyzeLoudness(audioData: AudioData, result: AnalysisResult) async {
-        // Calculate integrated loudness (LUFS approximation) and peak level
-        let leftRMS = calculateRMS(audioData.leftChannel)
-        let rightRMS = calculateRMS(audioData.rightChannel)
-        let avgRMS = (leftRMS + rightRMS) / 2.0
-        
-        // Convert to LUFS approximation
-        let lufs = -23 + 20 * log10(avgRMS / 0.1)
-        
-        // Calculate peak level
-        let leftPeak = audioData.leftChannel.max() ?? 0
-        let rightPeak = audioData.rightChannel.max() ?? 0
-        let maxPeak = max(abs(leftPeak), abs(rightPeak))
-        let peakdBFS = 20 * log10(maxPeak)
-        
-        result.loudnessLUFS = Double(lufs)
-        result.peakLevel = Double(peakdBFS)
-    }
-    
-    private func calculateOverallScore(result: AnalysisResult) async {
-        var score = 100.0
-        
-        // Deduct points for various issues
-        if result.hasPhaseIssues {
-            score -= 25
-        }
-        
-        if result.hasStereoIssues {
-            score -= 15
-        }
-        
-        if result.hasFrequencyImbalance {
-            score -= 20
-        }
-        
-        if result.hasDynamicRangeIssues {
-            score -= 15
-        }
-        
-        if result.peakLevel > -0.1 {
-            score -= 10 // Clipping penalty
-        }
-        
-        // Loudness penalty
-        if result.loudnessLUFS > -14 || result.loudnessLUFS < -30 {
-            score -= 10
-        }
-        
-        result.overallScore = max(0, score)
-    }
-    
-    private func generateRecommendations(result: AnalysisResult) async {
-        var recommendations: [String] = []
-        
-        if result.hasPhaseIssues {
-            recommendations.append("Check for phase cancellation between channels. Consider using a phase correlation meter.")
-        }
-        
-        if result.hasStereoIssues {
-            if result.stereoWidthScore < 20 {
-                recommendations.append("Stereo image is too narrow. Try widening stereo effects or panning instruments.")
-            } else {
-                recommendations.append("Stereo image may be too wide for mono compatibility. Check mono fold-down.")
-            }
-        }
-        
-        if result.hasFrequencyImbalance {
-            if result.lowEndBalance > result.midBalance * 1.5 {
-                recommendations.append("Low end appears dominant. Consider high-pass filtering or reducing bass.")
-            }
-            if result.highBalance < result.midBalance * 0.5 {
-                recommendations.append("High frequencies appear lacking. Consider brightening the mix.")
-            }
-        }
-        
-        if result.hasDynamicRangeIssues {
-            if result.dynamicRange < 8 {
-                recommendations.append("Mix appears over-compressed. Consider reducing compression or limiting.")
-            } else {
-                recommendations.append("Mix may benefit from gentle compression to control dynamics.")
-            }
-        }
-        
-        if result.peakLevel > -0.1 {
-            recommendations.append("Potential clipping detected. Reduce overall levels to prevent distortion.")
-        }
-        
-        if result.loudnessLUFS > -14 {
-            recommendations.append("Mix is quite loud. Consider reducing levels for streaming platform optimization.")
-        } else if result.loudnessLUFS < -30 {
-            recommendations.append("Mix appears quiet. Consider increasing overall levels or using gentle limiting.")
-        }
-        
-        result.recommendations = recommendations
-    }
-    
-    // MARK: - Audio Processing Utilities
-    
-    private func calculateCorrelation(_ left: [Float], _ right: [Float]) -> Float {
-        guard left.count == right.count, !left.isEmpty else { return 0 }
-        
-        let count = left.count
-        var correlation: Float = 0
-        
-        vDSP_dotpr(left, 1, right, 1, &correlation, vDSP_Length(count))
-        
-        var leftSum: Float = 0, rightSum: Float = 0
-        vDSP_sve(left, 1, &leftSum, vDSP_Length(count))
-        vDSP_sve(right, 1, &rightSum, vDSP_Length(count))
-        
-        return correlation / sqrt(leftSum * rightSum)
-    }
-    
-    private func calculatePhaseCoherence(_ left: [Float], _ right: [Float]) -> Double {
-        // Simplified phase coherence calculation
-        let correlation = calculateCorrelation(left, right)
-        return Double(abs(correlation))
-    }
-    
-    private func performFFT(_ signal: [Float]) -> [Float] {
-        let count = signal.count
-        let log2n = vDSP_Length(log2(Float(count)))
-        
-        guard let fftSetup = vDSP_create_fftsetup(log2n, Int32(kFFTRadix2)) else {
-            return []
-        }
-        
-        var realParts = signal
-        var imagParts = [Float](repeating: 0.0, count: count)
-        
-        var splitComplex = DSPSplitComplex(realp: &realParts, imagp: &imagParts)
-        
-        vDSP_fft_zip(fftSetup, &splitComplex, 1, log2n, Int32(FFT_FORWARD))
-        
-        var magnitudes = [Float](repeating: 0.0, count: count / 2)
-        vDSP_zvmags(&splitComplex, 1, &magnitudes, 1, vDSP_Length(count / 2))
-        
-        vDSP_destroy_fftsetup(fftSetup)
-        
-        return magnitudes
-    }
-    
-    private func calculateBandEnergy(
-        _ leftSpectrum: [Float],
-        _ rightSpectrum: [Float],
-        _ lowFreq: Double,
-        _ highFreq: Double,
-        _ nyquist: Double
-    ) -> Double {
-        let binSize = nyquist / Double(leftSpectrum.count)
-        let startBin = Int(lowFreq / binSize)
-        let endBin = min(Int(highFreq / binSize), leftSpectrum.count - 1)
-        
-        var energy: Double = 0
-        for i in startBin...endBin {
-            energy += Double(leftSpectrum[i] + rightSpectrum[i])
-        }
-        
-        return energy / Double(endBin - startBin + 1) * 100 // Normalize to percentage
-    }
-    
-    private func calculateRMS(_ signal: [Float]) -> Float {
-        var rms: Float = 0
-        vDSP_rmsqv(signal, 1, &rms, vDSP_Length(signal.count))
-        return rms
-    }
-}
-
-// MARK: - Supporting Types
-
-struct AudioData {
-    let leftChannel: [Float]
-    let rightChannel: [Float]
-    let sampleRate: Double
-    let duration: Double
 }

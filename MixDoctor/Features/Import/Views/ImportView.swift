@@ -229,25 +229,27 @@ private struct ImportedFileRow: View {
                     .font(.headline)
                     .lineLimit(1)
                 Spacer()
-                Text(FileManager.default.formatFileSize(audioFile.fileSize))
-                    .font(.caption)
-                    .foregroundStyle(Color.secondaryText)
             }
 
-            HStack(spacing: 12) {
-                Label(secondsText(duration: audioFile.duration), systemImage: "clock")
-                Label(sampleRateText(sampleRate: audioFile.sampleRate), systemImage: "waveform")
-                Label("\(audioFile.bitDepth)-bit", systemImage: "number")
-                Label(channelLabel(for: audioFile.numberOfChannels), systemImage: "headphones")
+            HStack(spacing: 8) {
+                Text(secondsText(duration: audioFile.duration))
+                Text("•")
+                Text(sampleRateText(sampleRate: audioFile.sampleRate))
+                Text("•")
+                Text("\(audioFile.bitDepth)-bit")
+                Text("•")
+                Text(channelLabel(for: audioFile.numberOfChannels))
+                Text("•")
+                Text(FileManager.default.formatFileSize(audioFile.fileSize))
+                
+                if audioFile.numberOfChannels < 2 {
+                    Text("•")
+                    Label("Mono", systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(Color.orange)
+                }
             }
             .font(.caption)
             .foregroundStyle(Color.secondaryText)
-
-            if audioFile.numberOfChannels < 2 {
-                Label("Mono import - limited analysis", systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(Color.orange)
-            }
         }
         .padding(.vertical, 8)
     }

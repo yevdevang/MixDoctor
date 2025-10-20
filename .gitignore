@@ -1,0 +1,38 @@
+# API Keys and Secrets
+Config.xcconfig
+Secrets.plist
+
+# Xcode
+*.xcodeproj/*
+!*.xcodeproj/project.pbxproj
+!*.xcodeproj/xcshareddata/
+!*.xcodeproj/project.xcworkspace/
+*.xcworkspace/*
+!*.xcworkspace/contents.xcworkspacedata
+!*.xcworkspace/xcshareddata/
+
+# User-specific files
+xcuserdata/
+*.xcuserdatad
+
+# macOS
+.DS_Store
+
+# Build products
+build/
+DerivedData/
+
+# CocoaPods
+Pods/
+
+# Swift Package Manager
+.swiftpm/
+.build/
+
+# Playgrounds
+timeline.xctimeline
+playground.xcworkspace
+
+# Test Audio Files (if generated)
+TestAudioFiles/*.wav
+TestAudioFiles/*.mp3
