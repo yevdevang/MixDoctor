@@ -51,10 +51,13 @@ final class AnalysisResult {
     var id: UUID
     var audioFile: AudioFile?
     var dateAnalyzed: Date
+    var analysisVersion: String  // Track which analysis method was used
     var overallScore: Double
 
     var stereoWidthScore: Double
     var phaseCoherence: Double
+    var spectralCentroid: Double
+    var hasClipping: Bool
     var lowEndBalance: Double
     var lowMidBalance: Double
     var midBalance: Double
@@ -71,13 +74,16 @@ final class AnalysisResult {
 
     var recommendations: [String]
 
-    init(audioFile: AudioFile?) {
+    init(audioFile: AudioFile?, analysisVersion: String = "1.0") {
         self.id = UUID()
         self.audioFile = audioFile
         self.dateAnalyzed = Date()
+        self.analysisVersion = analysisVersion
         self.overallScore = 0
         self.stereoWidthScore = 0
         self.phaseCoherence = 0
+        self.spectralCentroid = 0
+        self.hasClipping = false
     self.lowEndBalance = 0
     self.lowMidBalance = 0
     self.midBalance = 0
@@ -97,6 +103,14 @@ final class AnalysisResult {
 extension AnalysisResult {
     var frequencyBalanceSummary: [Double] {
         [lowEndBalance, lowMidBalance, midBalance, highMidBalance, highBalance]
+    }
+    
+    /// Overall frequency balance score (0-100)
+    /// Calculated as average of all frequency bands
+    var frequencyBalanceScore: Double {
+        let bands = [lowEndBalance, midBalance, highBalance]
+        let average = bands.reduce(0, +) / Double(bands.count)
+        return average
     }
     
     var hasAnyIssues: Bool {

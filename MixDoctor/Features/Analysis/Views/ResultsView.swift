@@ -13,8 +13,11 @@ struct ResultsView: View {
     let audioFile: AudioFile
     @State private var analysisResult: AnalysisResult?
     @State private var isAnalyzing = false
+    @State private var showError = false
+    @State private var errorMessage = ""
 
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
     private let analysisService = AudioAnalysisService()
 
     var body: some View {
@@ -29,19 +32,35 @@ struct ResultsView: View {
         }
         .navigationTitle("Analysis Results")
         .navigationBarTitleDisplayMode(.inline)
+        .alert("Analysis Error", isPresented: $showError) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(errorMessage)
+        }
         .task {
             print("📊 ResultsView appeared for: \(audioFile.fileName)")
             print("   File ID: \(audioFile.id)")
             print("   File URL: \(audioFile.fileURL)")
             print("   Has existing result: \(audioFile.analysisResult != nil)")
             
-            // Only analyze if no existing result
-            if audioFile.analysisResult == nil {
+            // Check if we need to re-analyze (no result OR old version without OpenAI)
+            let needsAnalysis: Bool
+            if let existingResult = audioFile.analysisResult {
+                let isOldVersion = existingResult.analysisVersion != "OpenAI-1.0"
+                needsAnalysis = isOldVersion
+                print("   📋 Existing analysis version: \(existingResult.analysisVersion)")
+                print("   🔄 Needs re-analysis: \(needsAnalysis ? "YES (old version)" : "NO")")
+            } else {
+                needsAnalysis = true
                 print("   ➡️ No result found, starting analysis...")
+            }
+            
+            if needsAnalysis {
+                print("   🚀 Starting OpenAI analysis...")
                 await performAnalysis()
             } else {
-                // Load existing result from the saved audioFile
-                print("   ✅ Loading cached result (score: \(audioFile.analysisResult?.overallScore ?? 0))")
+                // Load existing OpenAI result
+                print("   ✅ Loading cached OpenAI result (score: \(audioFile.analysisResult?.overallScore ?? 0))")
                 analysisResult = audioFile.analysisResult
             }
         }
@@ -208,7 +227,13 @@ struct ResultsView: View {
     }
 
     private func frequencyBalanceCard(result: AnalysisResult) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let _ = print("🎨 Rendering Frequency Balance Card:")
+        let _ = print("   Low: \(result.lowEndBalance)%")
+        let _ = print("   Mid: \(result.midBalance)%")
+        let _ = print("   High: \(result.highBalance)%")
+        let _ = print("   Score: \(result.frequencyBalanceScore)%")
+        
+        return VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Image(systemName: "chart.bar.fill")
                     .foregroundStyle(.blue)
@@ -218,14 +243,28 @@ struct ResultsView: View {
 
                 Spacer()
 
-                if result.hasFrequencyImbalance {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-                }
+                Image(systemName: result.hasFrequencyImbalance ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                    .foregroundStyle(result.hasFrequencyImbalance ? .orange : .green)
             }
 
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(String(format: "%.1f", result.frequencyBalanceScore))
+                    .font(.system(size: 32, weight: .bold))
+
+                Text("%")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(frequencyBalanceDescription(result.frequencyBalanceScore))
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            Divider()
+                .padding(.vertical, 4)
+
             // Frequency bars
-            VStack(spacing: 8) {
+            VStack(spacing: 10) {
                 FrequencyBar(label: "Low", value: result.lowEndBalance, color: .red)
                 FrequencyBar(label: "Mid", value: result.midBalance, color: .green)
                 FrequencyBar(label: "High", value: result.highBalance, color: .blue)
@@ -334,12 +373,32 @@ struct ResultsView: View {
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
+            .disabled(isAnalyzing)
 
-            Button(action: { Task { await performAnalysis() } }) {
-                Label("Re-analyze", systemImage: "arrow.clockwise")
+            Button(action: { 
+                print("🔄 Re-analyze button tapped")
+                Task { await performAnalysis() } 
+            }) {
+                HStack {
+                    if isAnalyzing {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                    }
+                    Label("Re-analyze", systemImage: "arrow.clockwise")
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(isAnalyzing)
+            
+            Button(role: .destructive, action: { 
+                deleteFile()
+            }) {
+                Label("Delete File", systemImage: "trash")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
+            .disabled(isAnalyzing)
         }
     }
 
@@ -360,6 +419,15 @@ struct ResultsView: View {
         case (-0.3)..<0.3: return "Possible phase issues"
         case 0.3..<0.7: return "Good phase relationship"
         default: return "Excellent phase coherence"
+        }
+    }
+
+    private func frequencyBalanceDescription(_ score: Double) -> String {
+        switch score {
+        case 0..<50: return "Significant frequency imbalance"
+        case 50..<70: return "Moderate frequency balance"
+        case 70..<85: return "Good frequency balance"
+        default: return "Excellent frequency balance"
         }
     }
 
@@ -403,12 +471,21 @@ struct ResultsView: View {
             print("✅ Analysis completed and saved for: \(audioFile.fileName)")
         } catch {
             print("❌ Analysis error for \(audioFile.fileName): \(error)")
+            errorMessage = error.localizedDescription
+            showError = true
         }
     }
     
     private func exportReport(_ result: AnalysisResult) {
         // TODO: Implement report export functionality
         print("Exporting report for \(audioFile.fileName)")
+    }
+    
+    private func deleteFile() {
+        print("🗑️ Deleting audio file: \(audioFile.fileName)")
+        modelContext.delete(audioFile)
+        try? modelContext.save()
+        dismiss()
     }
 }
 

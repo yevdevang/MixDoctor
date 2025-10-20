@@ -82,30 +82,30 @@ struct FrequencyBar: View {
     var body: some View {
         HStack(spacing: 12) {
             Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(width: 40, alignment: .leading)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(color)
+                .frame(width: 50, alignment: .leading)
 
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
                     Rectangle()
                         .fill(Color.gray.opacity(0.2))
-                        .frame(height: 8)
-                        .cornerRadius(4)
+                        .frame(height: 14)
+                        .cornerRadius(7)
 
                     Rectangle()
                         .fill(color.gradient)
-                        .frame(width: geometry.size.width * (value / 100), height: 8)
-                        .cornerRadius(4)
+                        .frame(width: max(geometry.size.width * (value / 100), 2), height: 14)
+                        .cornerRadius(7)
                         .animation(.easeOut, value: value)
                 }
             }
-            .frame(height: 8)
+            .frame(height: 14)
 
             Text(String(format: "%.0f%%", value))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(width: 40, alignment: .trailing)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(color)
+                .frame(width: 45, alignment: .trailing)
         }
     }
 }
@@ -135,7 +135,7 @@ struct StatCard: View {
                 .foregroundStyle(.secondary)
         }
         .padding()
-        .frame(width: 120)
+        .frame(maxWidth: .infinity, minHeight: 100)
         .background(Color.backgroundPrimary)
         .cornerRadius(12)
     }

@@ -5,6 +5,7 @@ enum AppConstants {
     static let supportedAudioFormats: Set<String> = ["wav", "aiff", "aif", "mp3", "m4a", "flac"]
     static let maxFileSizeMB: Int64 = 500
     static let minSampleRate: Double = 44_100.0
+    static let fftSize = 8192  // FFT size for frequency analysis
 
     // UI settings
     static let cornerRadius: CGFloat = 12

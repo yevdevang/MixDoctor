@@ -91,38 +91,39 @@ struct DashboardView: View {
     // MARK: - Statistics View
 
     private var statisticsView: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 12) {
-                StatCard(
-                    title: "Total Files",
-                    value: "\(audioFiles.count)",
-                    icon: "music.note.list",
-                    color: .blue
-                )
+        LazyVGrid(columns: [
+            GridItem(.flexible(), spacing: 12),
+            GridItem(.flexible(), spacing: 12)
+        ], spacing: 12) {
+            StatCard(
+                title: "Total Files",
+                value: "\(audioFiles.count)",
+                icon: "music.note.list",
+                color: .blue
+            )
 
-                StatCard(
-                    title: "Analyzed",
-                    value: "\(analyzedCount)",
-                    icon: "checkmark.circle.fill",
-                    color: .green
-                )
+            StatCard(
+                title: "Analyzed",
+                value: "\(analyzedCount)",
+                icon: "checkmark.circle.fill",
+                color: .green
+            )
 
-                StatCard(
-                    title: "Issues Found",
-                    value: "\(issuesCount)",
-                    icon: "exclamationmark.triangle.fill",
-                    color: .orange
-                )
+            StatCard(
+                title: "Issues Found",
+                value: "\(issuesCount)",
+                icon: "exclamationmark.triangle.fill",
+                color: .orange
+            )
 
-                StatCard(
-                    title: "Avg Score",
-                    value: String(format: "%.0f", averageScore),
-                    icon: "star.fill",
-                    color: .purple
-                )
-            }
-            .padding()
+            StatCard(
+                title: "Avg Score",
+                value: String(format: "%.0f", averageScore),
+                icon: "star.fill",
+                color: .purple
+            )
         }
+        .padding()
         .background(Color.backgroundSecondary)
     }
 
