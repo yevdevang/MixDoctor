@@ -182,20 +182,37 @@ final class AudioImportService {
             try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
         }
 
-        var destinationURL = directoryURL.appendingPathComponent(sourceURL.lastPathComponent)
+        // Get filename, handling special characters
+        let originalFileName = sourceURL.lastPathComponent
         let baseName = sourceURL.deletingPathExtension().lastPathComponent
         let fileExtension = sourceURL.pathExtension
+        
+        print("📁 Importing file:")
+        print("   Original: \(originalFileName)")
+        print("   Base name: \(baseName)")
+        print("   Extension: \(fileExtension)")
+        
+        var destinationURL = directoryURL.appendingPathComponent(originalFileName)
         var counter = 1
 
         while fileManager.fileExists(atPath: destinationURL.path) {
             let candidateName = "\(baseName)_\(counter).\(fileExtension)"
             destinationURL = directoryURL.appendingPathComponent(candidateName)
             counter += 1
+            print("   File exists, trying: \(candidateName)")
         }
 
         do {
             try fileManager.copyItem(at: sourceURL, to: destinationURL)
-            return destinationURL
+            
+            // Standardize the URL to ensure it can be read back
+            let standardizedURL = URL(fileURLWithPath: destinationURL.path)
+            
+            print("   ✅ Copied to: \(destinationURL.path)")
+            print("   Standardized: \(standardizedURL.path)")
+            print("   Verify exists: \(fileManager.fileExists(atPath: standardizedURL.path))")
+            
+            return standardizedURL
         } catch {
             throw AudioImportError.unknownError(error)
         }

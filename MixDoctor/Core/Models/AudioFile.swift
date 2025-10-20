@@ -13,9 +13,14 @@ final class AudioFile {
     var fileSize: Int64
     var dateImported: Date
     var dateAnalyzed: Date?
+    var tags: [String]
+    var notes: String?
 
     @Relationship(deleteRule: .cascade)
     var analysisResult: AnalysisResult?
+    
+    @Relationship(deleteRule: .cascade)
+    var analysisHistory: [AnalysisResult]
 
     init(
         fileName: String,
@@ -35,6 +40,9 @@ final class AudioFile {
         self.numberOfChannels = numberOfChannels
         self.fileSize = fileSize
         self.dateImported = Date()
+        self.tags = []
+        self.notes = ""
+        self.analysisHistory = []
     }
 }
 
@@ -89,5 +97,9 @@ final class AnalysisResult {
 extension AnalysisResult {
     var frequencyBalanceSummary: [Double] {
         [lowEndBalance, lowMidBalance, midBalance, highMidBalance, highBalance]
+    }
+    
+    var hasAnyIssues: Bool {
+        hasPhaseIssues || hasStereoIssues || hasFrequencyImbalance || hasDynamicRangeIssues
     }
 }

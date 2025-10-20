@@ -30,7 +30,20 @@ struct ResultsView: View {
         .navigationTitle("Analysis Results")
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            await performAnalysis()
+            print("📊 ResultsView appeared for: \(audioFile.fileName)")
+            print("   File ID: \(audioFile.id)")
+            print("   File URL: \(audioFile.fileURL)")
+            print("   Has existing result: \(audioFile.analysisResult != nil)")
+            
+            // Only analyze if no existing result
+            if audioFile.analysisResult == nil {
+                print("   ➡️ No result found, starting analysis...")
+                await performAnalysis()
+            } else {
+                // Load existing result from the saved audioFile
+                print("   ✅ Loading cached result (score: \(audioFile.analysisResult?.overallScore ?? 0))")
+                analysisResult = audioFile.analysisResult
+            }
         }
     }
 
@@ -363,13 +376,33 @@ struct ResultsView: View {
         defer { isAnalyzing = false }
 
         do {
+            print("🔍 Starting analysis for: \(audioFile.fileName)")
+            print("   File URL: \(audioFile.fileURL)")
+            
+            // Store existing result in history before overwriting (if re-analyzing)
+            if let existingResult = audioFile.analysisResult {
+                print("   Found existing result, adding to history")
+                audioFile.analysisHistory.append(existingResult)
+            }
+            
+            // Perform the analysis on the specific file
             let result = try await analysisService.analyzeAudio(audioFile)
+            
+            print("   Analysis complete. Score: \(result.overallScore)")
+            
+            // Update the local state
             analysisResult = result
+            
+            // Save to the persistent AudioFile model
             audioFile.analysisResult = result
             audioFile.dateAnalyzed = Date()
-            try? modelContext.save()
+            
+            // Save to SwiftData
+            try modelContext.save()
+            
+            print("✅ Analysis completed and saved for: \(audioFile.fileName)")
         } catch {
-            print("Analysis error: \(error)")
+            print("❌ Analysis error for \(audioFile.fileName): \(error)")
         }
     }
     

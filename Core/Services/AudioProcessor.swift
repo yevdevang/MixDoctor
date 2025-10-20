@@ -20,6 +20,9 @@ final class AudioProcessor {
     // MARK: - Audio Loading
     
     func loadAudio(from url: URL) throws -> ProcessedAudio {
+        print("🎵 AudioProcessor loading file from: \(url)")
+        print("   File exists: \(FileManager.default.fileExists(atPath: url.path))")
+        
         let audioFile = try AVAudioFile(forReading: url)
         let format = audioFile.processingFormat
         
@@ -28,6 +31,8 @@ final class AudioProcessor {
         }
         
         let frameCount = Int(audioFile.length)
+        print("   Frame count: \(frameCount), Sample rate: \(format.sampleRate)")
+        
         guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frameCount)) else {
             throw AudioProcessingError.bufferCreationFailed
         }
@@ -37,6 +42,12 @@ final class AudioProcessor {
         // Convert to float arrays
         let leftChannel = extractChannel(buffer: buffer, channel: 0)
         let rightChannel = format.channelCount > 1 ? extractChannel(buffer: buffer, channel: 1) : leftChannel
+        
+        // Log some sample values for debugging
+        let leftAvg = leftChannel.prefix(1000).reduce(0, +) / Float(min(1000, leftChannel.count))
+        let rightAvg = rightChannel.prefix(1000).reduce(0, +) / Float(min(1000, rightChannel.count))
+        print("   Left channel avg (first 1000): \(leftAvg)")
+        print("   Right channel avg (first 1000): \(rightAvg)")
         
         return ProcessedAudio(
             leftChannel: leftChannel,

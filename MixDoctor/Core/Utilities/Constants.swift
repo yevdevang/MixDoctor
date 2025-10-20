@@ -10,4 +10,12 @@ enum AppConstants {
     static let cornerRadius: CGFloat = 12
     static let defaultPadding: CGFloat = 16
     static let animationDuration: Double = 0.3
+    
+    // Versioning
+    static let appVersion = "1.0.0"
+    static let analysisVersion = "1.0"
+    
+    // Storage
+    static let maxStorageGB: Int64 = 10
+    static let backupRetentionDays = 30
 }

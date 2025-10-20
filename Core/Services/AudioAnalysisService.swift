@@ -31,6 +31,33 @@ final class AudioAnalysisService {
             analysisProgress = 0
         }
         
+        // Verify file exists before attempting analysis
+        // Standardize URL to handle legacy percent-encoded URLs
+        let fileURL = audioFile.fileURL
+        let standardizedURL = URL(fileURLWithPath: fileURL.path)
+        let fileExists = FileManager.default.fileExists(atPath: standardizedURL.path)
+        
+        print("🔍 Pre-analysis file check:")
+        print("   Original URL: \(fileURL)")
+        print("   Standardized URL: \(standardizedURL)")
+        print("   File exists: \(fileExists)")
+        
+        // If file doesn't exist, list directory contents for debugging
+        if !fileExists {
+            let directory = standardizedURL.deletingLastPathComponent()
+            print("❌ File not found. Directory: \(directory.path)")
+            if let contents = try? FileManager.default.contentsOfDirectory(atPath: directory.path) {
+                print("   Files in directory: \(contents.count)")
+                contents.prefix(5).forEach { print("   - \($0)") }
+            }
+        }
+        
+        guard fileExists else {
+            throw NSError(domain: "AudioAnalysisService", code: 404, userInfo: [
+                NSLocalizedDescriptionKey: "Audio file not found at path: \(standardizedURL.path). Please delete and re-import this file."
+            ])
+        }
+        
         // Load and process audio
         analysisProgress = 0.1
         let processedAudio = try processor.loadAudio(from: audioFile.fileURL)
@@ -87,6 +114,15 @@ final class AudioAnalysisService {
         result.hasDynamicRangeIssues = loudnessFeatures.dynamicRange < Constants.Analysis.dynamicRangeMin || 
                                        loudnessFeatures.dynamicRange > Constants.Analysis.dynamicRangeMax
         
+        print("   🔍 Detailed Analysis Breakdown:")
+        print("      Stereo Width: \(stereoFeatures.stereoWidth) → Classification: \(stereoResult.classification)")
+        print("      Phase Correlation: \(stereoFeatures.correlation) → Has Issue: \(phaseResult.hasIssue), Severity: \(phaseResult.severity)")
+        print("      Bass Ratio: \(frequencyResult.bassRatio), Mids: \(frequencyResult.midsRatio), Highs: \(frequencyResult.highsRatio)")
+        print("      Frequency Issues: \(frequencyResult.issues.count) issues - \(frequencyResult.issues)")
+        print("      Dynamic Range: \(loudnessFeatures.dynamicRange) dB (min: \(Constants.Analysis.dynamicRangeMin), max: \(Constants.Analysis.dynamicRangeMax))")
+        print("      Peak Level: \(loudnessFeatures.peakLevel) → dBFS: \(result.peakLevel)")
+        print("      LUFS: \(loudnessFeatures.lufs)")
+        
         // Aggregate recommendations
         var recommendations: [String] = []
         recommendations.append(stereoResult.recommendation)
@@ -109,6 +145,14 @@ final class AudioAnalysisService {
         
         // Calculate overall score
         result.overallScore = calculateOverallScore(result: result)
+        
+        print("   🎯 Overall Score Calculation:")
+        print("      Phase Issues: \(result.hasPhaseIssues) (coherence: \(result.phaseCoherence))")
+        print("      Stereo Issues: \(result.hasStereoIssues)")
+        print("      Frequency Imbalance: \(result.hasFrequencyImbalance)")
+        print("      Dynamic Range Issues: \(result.hasDynamicRangeIssues) (range: \(result.dynamicRange))")
+        print("      Peak Level: \(result.peakLevel)")
+        print("      ➡️ Final Score: \(result.overallScore)")
         
         analysisProgress = 1.0
         

@@ -13,6 +13,9 @@ final class AnalysisResult: Identifiable {
     let audioFile: AudioFile
     let analysisDate: Date
     
+    // Analysis Version Tracking
+    var analysisVersion: String
+    
     // Stereo Analysis
     var stereoWidthScore: Double = 0
     var phaseCoherence: Double = 0
@@ -24,6 +27,15 @@ final class AnalysisResult: Identifiable {
     var dynamicRange: Double = 0
     var loudnessLUFS: Double = 0
     var peakLevel: Double = 0
+    var crestFactor: Double = 0
+    
+    // Additional Metrics
+    var spectralCentroid: Double = 0
+    var hasClipping: Bool = false
+    
+    // Raw Data for Visualizations
+    var waveformData: Data?
+    var spectrumData: Data?
     
     // Overall Assessment
     var overallScore: Double = 0
@@ -35,9 +47,10 @@ final class AnalysisResult: Identifiable {
     var hasFrequencyImbalance: Bool = false
     var hasDynamicRangeIssues: Bool = false
     
-    init(audioFile: AudioFile) {
+    init(audioFile: AudioFile, analysisVersion: String = "1.0") {
         self.audioFile = audioFile
         self.analysisDate = Date()
+        self.analysisVersion = analysisVersion
     }
     
     var hasAnyIssues: Bool {
