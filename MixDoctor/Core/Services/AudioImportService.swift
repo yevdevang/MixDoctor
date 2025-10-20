@@ -1,184 +1,209 @@
 import AVFoundation
+import CoreMedia
 import Foundation
+import Observation
 import SwiftData
 
 enum AudioImportError: LocalizedError, Equatable {
-    case fileNotFound
+    static func == (lhs: AudioImportError, rhs: AudioImportError) -> Bool {
+        return true
+    }
+    
     case unsupportedFormat
-    case fileTooLarge(maxSizeMB: Int64)
-    case metadataUnavailable
-    case invalidSampleRate(minimum: Double)
-    case copyFailed
+    case fileTooLarge
+    case invalidAudioFile
+    case sampleRateTooLow
+    case accessDenied
+    case unknownError(Error)
 
     var errorDescription: String? {
         switch self {
-        case .fileNotFound:
-            return "The selected audio file could not be found."
         case .unsupportedFormat:
-            return "The selected file format is not supported."
-        case let .fileTooLarge(maxSizeMB):
-            return "The selected file exceeds the maximum size of \(maxSizeMB) MB."
-        case .metadataUnavailable:
-            return "Unable to extract metadata from the audio file."
-        case let .invalidSampleRate(minimum):
-            return "The audio file must have a sample rate of at least \(Int(minimum)) Hz."
-        case .copyFailed:
-            return "Unable to copy the audio file into the app's storage."
+            return "Audio format not supported"
+        case .fileTooLarge:
+            return "File exceeds maximum size of 500 MB"
+        case .invalidAudioFile:
+            return "File is not a valid audio file"
+        case .sampleRateTooLow:
+            return "Sample rate must be at least 44.1 kHz"
+        case .accessDenied:
+            return "Cannot access file. Please grant permission."
+        case let .unknownError(error):
+            return "Import failed: \(error.localizedDescription)"
         }
     }
 }
 
-protocol AudioImporting {
-    func importAudioFile(from url: URL) throws -> AudioFile
-}
+@MainActor
+@Observable
+final class AudioImportService {
 
-struct AudioImportService: AudioImporting {
-    private let fileManager: FileManager
-    private let importsDirectoryName = "ImportedAudio"
-    private static let timestampFormatter: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter
-    }()
-
-    init(fileManager: FileManager = .default) {
-        self.fileManager = fileManager
+    struct AudioMetadata: Equatable {
+        let duration: TimeInterval
+        let sampleRate: Double
+        let bitDepth: Int
+        let numberOfChannels: Int
+        let fileSize: Int64
+        let format: String
+    }
+    
+    nonisolated init() {
     }
 
-    func importAudioFile(from url: URL) throws -> AudioFile {
-        guard url.isFileURL else {
-            throw AudioImportError.fileNotFound
+    // MARK: - Public API
+
+    func importAudioFile(from url: URL) async throws -> AudioFile {
+        guard url.startAccessingSecurityScopedResource() else {
+            throw AudioImportError.accessDenied
         }
-
-        guard fileManager.fileExists(atPath: url.path) else {
-            throw AudioImportError.fileNotFound
-        }
-
-        try validateFileExtension(for: url)
-    try validateFileSize(for: url)
-
-    let destinationURL = try copyToPersistentLocation(sourceURL: url)
-    let metadata = try extractMetadata(for: destinationURL)
-
-        let audioFile = AudioFile(
-            fileName: destinationURL.lastPathComponent,
-            fileURL: destinationURL,
-            duration: metadata.duration,
-            sampleRate: metadata.sampleRate,
-            bitDepth: metadata.bitDepth,
-            numberOfChannels: metadata.channels,
-            fileSize: metadata.fileSize
-        )
-
-        return audioFile
-    }
-
-    private func validateFileExtension(for url: URL) throws {
-        let ext = url.pathExtension.lowercased()
-        guard AppConstants.supportedAudioFormats.contains(ext) else {
-            throw AudioImportError.unsupportedFormat
-        }
-    }
-
-    private func validateFileSize(for url: URL) throws {
-        let attributes = try fileManager.attributesOfItem(atPath: url.path)
-        let fileSize = (attributes[.size] as? NSNumber)?.int64Value ?? 0
-        let maximumBytes = AppConstants.maxFileSizeMB * 1_048_576
-
-        guard fileSize <= maximumBytes else {
-            throw AudioImportError.fileTooLarge(maxSizeMB: AppConstants.maxFileSizeMB)
-        }
-    }
-
-    private func copyToPersistentLocation(sourceURL: URL) throws -> URL {
-        let directory = try makeImportsDirectory()
-        let targetURL = uniqueTargetURL(for: sourceURL, in: directory)
+        defer { url.stopAccessingSecurityScopedResource() }
 
         do {
-            if fileManager.fileExists(atPath: targetURL.path) {
-                try fileManager.removeItem(at: targetURL)
-            }
-            try fileManager.copyItem(at: sourceURL, to: targetURL)
-            return targetURL
+            try validateAudioFile(url)
+            let metadata = try await extractMetadata(from: url)
+            let destinationURL = try copyToDocuments(from: url)
+
+            let audioFile = AudioFile(
+                fileName: destinationURL.lastPathComponent,
+                fileURL: destinationURL,
+                duration: metadata.duration,
+                sampleRate: metadata.sampleRate,
+                bitDepth: metadata.bitDepth,
+                numberOfChannels: metadata.numberOfChannels,
+                fileSize: metadata.fileSize
+            )
+
+            return audioFile
+        } catch let error as AudioImportError {
+            throw error
         } catch {
-            throw AudioImportError.copyFailed
+            throw AudioImportError.unknownError(error)
         }
     }
 
-    private func makeImportsDirectory() throws -> URL {
-        let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first
-        guard let baseURL = documentsURL else {
-            throw AudioImportError.copyFailed
+    func importMultipleFiles(_ urls: [URL]) async throws -> [AudioFile] {
+        var importedFiles: [AudioFile] = []
+        var capturedError: Error?
+
+        for url in urls {
+            do {
+                let audioFile = try await importAudioFile(from: url)
+                importedFiles.append(audioFile)
+            } catch {
+                capturedError = capturedError ?? error
+            }
         }
 
-        let directoryURL = baseURL.appendingPathComponent(importsDirectoryName, isDirectory: true)
+        if importedFiles.isEmpty, let capturedError {
+            throw capturedError
+        }
+
+        return importedFiles
+    }
+
+    // MARK: - Validation
+
+    @discardableResult
+    func validateAudioFile(_ url: URL) throws -> Bool {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            throw AudioImportError.invalidAudioFile
+        }
+
+        let fileSize = try getFileSize(url)
+        let maxSize = AppConstants.maxFileSizeMB * 1_048_576
+        guard fileSize <= maxSize else {
+            throw AudioImportError.fileTooLarge
+        }
+
+        let fileExtension = url.pathExtension.lowercased()
+        guard AppConstants.supportedAudioFormats.contains(fileExtension) else {
+            throw AudioImportError.unsupportedFormat
+        }
+
+        let asset = AVURLAsset(url: url)
+        guard asset.isReadable else {
+            throw AudioImportError.invalidAudioFile
+        }
+
+        return true
+    }
+
+    // MARK: - Metadata
+
+    private func extractMetadata(from url: URL) async throws -> AudioMetadata {
+        let asset = AVURLAsset(url: url)
+
+        let duration = try await asset.load(.duration).seconds
+        guard duration.isFinite, duration > 0 else {
+            throw AudioImportError.invalidAudioFile
+        }
+
+        let tracks = try await asset.loadTracks(withMediaType: .audio)
+        guard let track = tracks.first else {
+            throw AudioImportError.invalidAudioFile
+        }
+
+        let formatDescriptions = try await track.load(.formatDescriptions)
+        guard let formatDescription = formatDescriptions.first else {
+            throw AudioImportError.invalidAudioFile
+        }
+
+        let asbdPointer = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription)
+        guard let asbd = asbdPointer?.pointee else {
+            throw AudioImportError.invalidAudioFile
+        }
+
+        let sampleRate = asbd.mSampleRate
+        guard sampleRate >= AppConstants.minSampleRate else {
+            throw AudioImportError.sampleRateTooLow
+        }
+
+        let channelCount = Int(max(1, asbd.mChannelsPerFrame))
+        let bitDepth = asbd.mBitsPerChannel > 0 ? Int(asbd.mBitsPerChannel) : 16
+        let fileSize = try getFileSize(url)
+
+        return AudioMetadata(
+            duration: duration,
+            sampleRate: sampleRate,
+            bitDepth: bitDepth,
+            numberOfChannels: channelCount,
+            fileSize: fileSize,
+            format: url.pathExtension.uppercased()
+        )
+    }
+
+    // MARK: - File Management
+
+    private func copyToDocuments(from sourceURL: URL) throws -> URL {
+        let fileManager = FileManager.default
+        let directoryURL = FileManager.audioFilesDirectory()
 
         if !fileManager.fileExists(atPath: directoryURL.path) {
             try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
         }
 
-        return directoryURL
-    }
+        var destinationURL = directoryURL.appendingPathComponent(sourceURL.lastPathComponent)
+        let baseName = sourceURL.deletingPathExtension().lastPathComponent
+        let fileExtension = sourceURL.pathExtension
+        var counter = 1
 
-    private func uniqueTargetURL(for sourceURL: URL, in directory: URL) -> URL {
-        let fileName = sourceURL.deletingPathExtension().lastPathComponent
-        let ext = sourceURL.pathExtension
-
-    let timestamp = Self.timestampFormatter.string(from: Date())
-        let uniqueName = "\(fileName)_\(timestamp).\(ext)"
-        return directory.appendingPathComponent(uniqueName)
-    }
-
-    private func extractMetadata(for url: URL) throws -> (duration: TimeInterval, sampleRate: Double, bitDepth: Int, channels: Int, fileSize: Int64) {
-        let audioFile: AVAudioFile
+        while fileManager.fileExists(atPath: destinationURL.path) {
+            let candidateName = "\(baseName)_\(counter).\(fileExtension)"
+            destinationURL = directoryURL.appendingPathComponent(candidateName)
+            counter += 1
+        }
 
         do {
-            audioFile = try AVAudioFile(forReading: url)
+            try fileManager.copyItem(at: sourceURL, to: destinationURL)
+            return destinationURL
         } catch {
-            throw AudioImportError.metadataUnavailable
+            throw AudioImportError.unknownError(error)
         }
-        let format = audioFile.processingFormat
-
-        let sampleRate = format.sampleRate
-        guard sampleRate >= AppConstants.minSampleRate else {
-            throw AudioImportError.invalidSampleRate(minimum: AppConstants.minSampleRate)
-        }
-
-        let frameLength = Double(audioFile.length)
-        let durationSeconds = frameLength > 0 ? frameLength / sampleRate : 0
-        guard durationSeconds.isFinite, durationSeconds > 0 else {
-            throw AudioImportError.metadataUnavailable
-        }
-
-        let channelCount = max(1, Int(format.channelCount))
-        let inferredBitDepth = format.settings[AVLinearPCMBitDepthKey] as? Int ?? Int(format.commonFormat.bitDepth)
-        let bitDepth = inferredBitDepth > 0 ? inferredBitDepth : 16
-        let attributes = try fileManager.attributesOfItem(atPath: url.path)
-        let fileSize = (attributes[.size] as? NSNumber)?.int64Value ?? 0
-
-        return (
-            duration: durationSeconds,
-            sampleRate: sampleRate,
-            bitDepth: bitDepth,
-            channels: channelCount,
-            fileSize: fileSize
-        )
     }
-}
 
-private extension AVAudioCommonFormat {
-    var bitDepth: Int {
-        switch self {
-        case .pcmFormatFloat32:
-            return 32
-        case .pcmFormatFloat64:
-            return 64
-        case .pcmFormatInt16:
-            return 16
-        case .pcmFormatInt32:
-            return 32
-        default:
-            return 0
-        }
+    private func getFileSize(_ url: URL) throws -> Int64 {
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        let number = attributes[.size] as? NSNumber
+        return number?.int64Value ?? 0
     }
 }

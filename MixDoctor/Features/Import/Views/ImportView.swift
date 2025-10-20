@@ -1,382 +1,281 @@
+import Observation
 import SwiftUI
+import SwiftData
 import UniformTypeIdentifiers
 
 struct ImportView: View {
-    @State private var importedItems: [ImportedAudioItem] = ImportedAudioItem.mock
-    @State private var isImporterPresented = false
-    @State private var isShowingError = false
-    @State private var errorMessage: String?
-
-    private let gridColumns = [
-        GridItem(.flexible(), spacing: 12, alignment: .top),
-        GridItem(.flexible(), spacing: 12, alignment: .top)
-    ]
+    @Environment(\.modelContext) private var modelContext
+    @State private var viewModel: ImportViewModel?
+    @State private var isShowingDocumentPicker = false
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    headerSection
-                    dropZoneSection
-                    metricsSection
-                    guidelinesSection
-                    recentImportsSection
+            Group {
+                if let viewModel {
+                    contentView(viewModel: viewModel)
+                } else {
+                    ProgressView("Preparing import tools…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .task {
+                            await initializeViewModel()
+                        }
                 }
-                .padding(.horizontal, AppConstants.defaultPadding)
-                .padding(.top, 32)
-                .padding(.bottom, 48)
             }
-            .background(Color.backgroundPrimary.ignoresSafeArea())
-            .navigationTitle("Import")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("Import Audio")
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Browse Files") {
+                        isShowingDocumentPicker = true
+                    }
+                    .disabled(viewModel?.isImporting == true)
+                }
+            }
         }
         .fileImporter(
-            isPresented: $isImporterPresented,
+            isPresented: $isShowingDocumentPicker,
             allowedContentTypes: [.audio],
-            allowsMultipleSelection: false
+            allowsMultipleSelection: true
         ) { result in
-            switch result {
-            case let .success(urls):
-                guard let url = urls.first else { return }
-                appendImportedItem(for: url)
-            case let .failure(error):
-                errorMessage = error.localizedDescription
-                isShowingError = true
-            }
+            handleFileImport(result)
         }
-        .alert("Import Failed", isPresented: $isShowingError) {
-            Button("OK", role: .cancel) {}
+        .alert("Import Error", isPresented: errorBinding) {
+            Button("OK", role: .cancel) { }
         } message: {
-            Text(errorMessage ?? "Something went wrong while importing the file.")
+            Text(viewModel?.errorMessage ?? "Unknown error occurred")
         }
+        .background(Color.backgroundPrimary.ignoresSafeArea())
     }
 
-    private var headerSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Add New Audio")
-                .font(.largeTitle.bold())
-                .foregroundStyle(.primary)
+    // MARK: - Subviews
 
-            Text("Select or drop files to analyze balance, loudness, and stereo performance before you mix.")
-                .font(.callout)
-                .foregroundStyle(Color.secondaryText)
-        }
-    }
+    @ViewBuilder
+    private func contentView(viewModel: ImportViewModel) -> some View {
+        @Bindable var viewModel = viewModel
 
-    private var dropZoneSection: some View {
-        Button {
-            isImporterPresented = true
-        } label: {
-            VStack(spacing: 16) {
-                RoundedRectangle(cornerRadius: AppConstants.cornerRadius)
-                    .strokeBorder(style: StrokeStyle(lineWidth: 2, dash: [8, 8]))
-                    .foregroundStyle(Color.primaryAccent.opacity(0.35))
-                    .frame(height: 160)
-                    .overlay(dropZoneContent)
-
-                HStack(spacing: 12) {
-                    Image(systemName: "square.and.arrow.down")
-                        .font(.title3)
-                        .foregroundStyle(Color.primaryAccent)
-                    Text("Browse files or drag & drop")
-                        .font(.headline)
-                        .foregroundStyle(Color.primaryAccent)
-                    Spacer()
-                }
-            }
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var dropZoneContent: some View {
-        VStack(spacing: 12) {
-            Circle()
-                .fill(Color.primaryAccent.opacity(0.12))
-                .frame(width: 64, height: 64)
-                .overlay(
-                    Image(systemName: "waveform")
-                        .font(.title2)
-                        .foregroundStyle(Color.primaryAccent)
-                )
-
-            VStack(spacing: 4) {
-                Text("Drop audio here")
-                    .font(.headline)
-                    .foregroundStyle(.primary)
-                Text("Supports WAV, AIFF, FLAC, MP3, and M4A")
-                    .font(.footnote)
-                    .foregroundStyle(Color.secondaryText)
-            }
-        }
-        .padding(.horizontal, 24)
-    }
-
-    private var metricsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Import Overview")
-                .font(.title3.bold())
-                .foregroundStyle(.primary)
-
-            LazyVGrid(columns: gridColumns, spacing: 12) {
-                ForEach(MetricCard.sampleMetrics) { metric in
-                    MetricCardView(metric: metric)
-                }
-            }
-        }
-    }
-
-    private var guidelinesSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Import Guidelines")
-                .font(.title3.bold())
-                .foregroundStyle(.primary)
-
-            VStack(alignment: .leading, spacing: 12) {
-                ForEach(GuidelineItem.allGuidelines) { guideline in
-                    HStack(alignment: .top, spacing: 12) {
-                        Image(systemName: guideline.iconName)
-                            .font(.headline)
-                            .frame(width: 28, height: 28)
-                            .foregroundStyle(Color.primaryAccent)
-                            .padding(8)
-                            .background(Color.primaryAccent.opacity(0.1), in: Circle())
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(guideline.title)
-                                .font(.headline)
-                                .foregroundStyle(.primary)
-                            Text(guideline.subtitle)
-                                .font(.footnote)
-                                .foregroundStyle(Color.secondaryText)
-                        }
-                    }
-                }
-            }
-            .padding(20)
-            .background(Color.backgroundSecondary, in: RoundedRectangle(cornerRadius: AppConstants.cornerRadius))
-        }
-    }
-
-    private var recentImportsSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Text("Recent Imports")
-                    .font(.title3.bold())
-                    .foregroundStyle(.primary)
-                Spacer()
-                Button("View All") {}
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(Color.primaryAccent)
+        VStack(spacing: 0) {
+            if viewModel.isImporting {
+                importProgressView(progress: viewModel.importProgress)
             }
 
-            if importedItems.isEmpty {
-                EmptyRecentState()
+            if viewModel.importedFiles.isEmpty {
+                dropZoneView
+                    .padding()
             } else {
-                VStack(spacing: 12) {
-                    ForEach(importedItems) { item in
-                        RecentImportRow(item: item)
+                importedFilesList(viewModel: viewModel)
+            }
+        }
+        .task {
+            if viewModel.importedFiles.isEmpty {
+                viewModel.loadImports()
+            }
+        }
+    }
+
+    private var dropZoneView: some View {
+        VStack(spacing: 24) {
+            Spacer()
+
+            Image(systemName: "waveform.circle.fill")
+                .font(.system(size: 80))
+                .foregroundStyle(Color.primaryAccent)
+
+            VStack(spacing: 8) {
+                Text("Import Audio Files")
+                    .font(.title2.weight(.semibold))
+
+                Text("Drag and drop files here or tap Browse Files to begin.")
+                    .font(.subheadline)
+                    .foregroundStyle(Color.secondaryText)
+                    .multilineTextAlignment(.center)
+            }
+
+            Button {
+                isShowingDocumentPicker = true
+            } label: {
+                Label("Browse Files", systemImage: "folder")
+                    .frame(maxWidth: 220)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+
+            supportedFormatsView
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
+    }
+
+    private func importedFilesList(viewModel: ImportViewModel) -> some View {
+        @Bindable var viewModel = viewModel
+
+        return List {
+            Section {
+                ForEach(viewModel.importedFiles) { file in
+                    ImportedFileRow(audioFile: file)
+                }
+                .onDelete { indexSet in
+                    deleteFiles(at: indexSet, viewModel: viewModel)
+                }
+            } header: {
+                HStack {
+                    Text("\(viewModel.importedFiles.count) files imported")
+                    Spacer()
+                    Button("Import More") {
+                        isShowingDocumentPicker = true
                     }
+                    .font(.subheadline)
+                    .disabled(viewModel.isImporting)
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .overlay {
+            if viewModel.importedFiles.isEmpty {
+                EmptyImportState()
+            }
+        }
+    }
+
+    private var supportedFormatsView: some View {
+        VStack(spacing: 12) {
+            Text("Supported Formats")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color.secondaryText)
+
+            HStack(spacing: 8) {
+                ForEach(AppConstants.supportedAudioFormats.sorted(), id: \.self) { format in
+                    Text(format.uppercased())
+                        .font(.caption2.weight(.medium))
+                        .padding(.vertical, 4)
+                        .padding(.horizontal, 8)
+                        .background(Color.backgroundSecondary, in: RoundedRectangle(cornerRadius: 6))
                 }
             }
         }
     }
 
-    private func appendImportedItem(for url: URL) {
-        let newItem = ImportedAudioItem(
-            name: url.lastPathComponent,
-            subtitle: "Queued for analysis",
-            status: .pending
-        )
-        importedItems.insert(newItem, at: 0)
-    }
-}
-
-private struct MetricCard: Identifiable {
-    enum MetricTrend {
-        case up
-        case down
-        case steady
-
-        var iconName: String {
-            switch self {
-            case .up:
-                "arrow.up.right"
-            case .down:
-                "arrow.down.right"
-            case .steady:
-                "minus"
-            }
-        }
-
-        var tint: Color {
-            switch self {
-            case .up:
-                Color.green
-            case .down:
-                Color.red
-            case .steady:
-                Color.secondaryText
-            }
-        }
-    }
-
-    let id = UUID()
-    let title: String
-    let value: String
-    let caption: String
-    let trend: MetricTrend
-
-    static let sampleMetrics: [MetricCard] = [
-        MetricCard(title: "Average Loudness", value: "-14.2 LUFS", caption: "Compared to last import", trend: .steady),
-        MetricCard(title: "Stereo Width", value: "72%", caption: "Showing optimal balance", trend: .up),
-        MetricCard(title: "Peak Level", value: "-1.1 dB", caption: "Safe headroom detected", trend: .steady),
-        MetricCard(title: "Dynamic Range", value: "11 dB", caption: "Needs review", trend: .down)
-    ]
-}
-
-private struct MetricCardView: View {
-    let metric: MetricCard
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text(metric.title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Color.secondaryText)
-                Spacer()
-                Image(systemName: metric.trend.iconName)
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(metric.trend.tint)
-            }
-
-            Text(metric.value)
-                .font(.title2.bold())
-                .foregroundStyle(.primary)
-
-            Text(metric.caption)
-                .font(.footnote)
-                .foregroundStyle(Color.secondaryText)
-        }
-        .padding(20)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.backgroundSecondary, in: RoundedRectangle(cornerRadius: AppConstants.cornerRadius))
-    }
-}
-
-private struct GuidelineItem: Identifiable {
-    let id = UUID()
-    let iconName: String
-    let title: String
-    let subtitle: String
-
-    static let allGuidelines: [GuidelineItem] = [
-        GuidelineItem(iconName: "clock", title: "Recommended duration", subtitle: "Keep mixes under 15 minutes to speed up analysis."),
-        GuidelineItem(iconName: "waveform.path.ecg", title: "Optimal sample rate", subtitle: "Use 44.1kHz or 48kHz with 24-bit depth for best results."),
-        GuidelineItem(iconName: "music.quarternote.3", title: "Channel balance", subtitle: "Ensure stereo tracks are bounced without mastering to avoid clipping."),
-        GuidelineItem(iconName: "lock.fill", title: "Secure storage", subtitle: "Files are saved locally in the ImportedAudio folder and never shared.")
-    ]
-}
-
-private struct ImportedAudioItem: Identifiable {
-    enum Status {
-        case pending
-        case completed
-        case failed
-
-        var label: String {
-            switch self {
-            case .pending:
-                "Pending"
-            case .completed:
-                "Analyzed"
-            case .failed:
-                "Failed"
-            }
-        }
-
-        var color: Color {
-            switch self {
-            case .pending:
-                Color.primaryAccent
-            case .completed:
-                Color.green
-            case .failed:
-                Color.red
-            }
-        }
-
-        var iconName: String {
-            switch self {
-            case .pending:
-                "clock"
-            case .completed:
-                "checkmark.circle.fill"
-            case .failed:
-                "exclamationmark.triangle"
-            }
-        }
-    }
-
-    let id: UUID
-    let name: String
-    let subtitle: String
-    let status: Status
-    let timestamp: Date
-
-    init(id: UUID = UUID(), name: String, subtitle: String, status: Status, timestamp: Date = .now) {
-        self.id = id
-        self.name = name
-        self.subtitle = subtitle
-        self.status = status
-        self.timestamp = timestamp
-    }
-
-    static let mock: [ImportedAudioItem] = [
-        ImportedAudioItem(name: "LeadVox_Final.wav", subtitle: "Analyzed 5 minutes ago", status: .completed),
-        ImportedAudioItem(name: "Acoustic_Guitar_02.aiff", subtitle: "Pending analysis", status: .pending),
-        ImportedAudioItem(name: "DrumBus_Print.flac", subtitle: "Import failed - unsupported bit depth", status: .failed)
-    ]
-}
-
-private struct RecentImportRow: View {
-    let item: ImportedAudioItem
-
-    var body: some View {
-        HStack(spacing: 16) {
-            Circle()
-                .fill(Color.primaryAccent.opacity(0.15))
-                .frame(width: 44, height: 44)
-                .overlay(
-                    Image(systemName: "music.note")
+    private func importProgressView(progress: Double) -> some View {
+        VStack(spacing: 12) {
+            if progress > 0 {
+                ProgressView(value: progress, total: 1) {
+                    Text("Importing files…")
                         .font(.headline)
-                        .foregroundStyle(Color.primaryAccent)
-                )
+                }
+                .progressViewStyle(.linear)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(item.name)
-                    .font(.headline)
-                    .foregroundStyle(.primary)
-                Text(item.subtitle)
-                    .font(.footnote)
+                Text("\(Int(progress * 100))% complete")
+                    .font(.caption)
                     .foregroundStyle(Color.secondaryText)
+            } else {
+                ProgressView {
+                    Text("Importing files…")
+                        .font(.headline)
+                }
+                .progressViewStyle(.linear)
             }
-            Spacer()
-            Label(item.status.label, systemImage: item.status.iconName)
-                .font(.footnote.weight(.semibold))
-                .padding(.vertical, 6)
-                .padding(.horizontal, 10)
-                .foregroundStyle(item.status == .failed ? Color.red : .white)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(item.status == .failed ? Color.red.opacity(0.12) : item.status.color.opacity(0.9))
-                )
         }
-        .padding(16)
-        .background(Color.backgroundSecondary, in: RoundedRectangle(cornerRadius: AppConstants.cornerRadius))
+        .padding()
+        .frame(maxWidth: .infinity)
+        .background(Color.backgroundSecondary)
+    }
+
+    // MARK: - Actions
+
+    @MainActor
+    private func initializeViewModel() async {
+        guard viewModel == nil else { return }
+        let newViewModel = ImportViewModel(modelContext: modelContext)
+        newViewModel.loadImports()
+        viewModel = newViewModel
+    }
+
+    private func handleFileImport(_ result: Result<[URL], Error>) {
+        guard let viewModel else { return }
+
+        switch result {
+        case .success(let urls):
+            Task {
+                await viewModel.importFiles(urls)
+            }
+        case .failure(let error):
+            viewModel.errorMessage = error.localizedDescription
+            viewModel.showError = true
+        }
+    }
+
+    private func deleteFiles(at offsets: IndexSet, viewModel: ImportViewModel) {
+        for index in offsets {
+            let file = viewModel.importedFiles[index]
+            viewModel.removeImportedFile(file)
+        }
+    }
+
+    private var errorBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel?.showError ?? false },
+            set: { newValue in viewModel?.showError = newValue }
+        )
     }
 }
 
-private struct EmptyRecentState: View {
+// MARK: - Supporting Views
+
+private struct ImportedFileRow: View {
+    let audioFile: AudioFile
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(audioFile.fileName)
+                    .font(.headline)
+                    .lineLimit(1)
+                Spacer()
+                Text(FileManager.default.formatFileSize(audioFile.fileSize))
+                    .font(.caption)
+                    .foregroundStyle(Color.secondaryText)
+            }
+
+            HStack(spacing: 12) {
+                Label(secondsText(duration: audioFile.duration), systemImage: "clock")
+                Label(sampleRateText(sampleRate: audioFile.sampleRate), systemImage: "waveform")
+                Label("\(audioFile.bitDepth)-bit", systemImage: "number")
+                Label(channelLabel(for: audioFile.numberOfChannels), systemImage: "headphones")
+            }
+            .font(.caption)
+            .foregroundStyle(Color.secondaryText)
+
+            if audioFile.numberOfChannels < 2 {
+                Label("Mono import - limited analysis", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(Color.orange)
+            }
+        }
+        .padding(.vertical, 8)
+    }
+
+    private func secondsText(duration: TimeInterval) -> String {
+        let totalSeconds = Int(duration.rounded())
+        let minutes = totalSeconds / 60
+        let seconds = totalSeconds % 60
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+
+    private func sampleRateText(sampleRate: Double) -> String {
+        sampleRate >= 1000 ? "\(Int(sampleRate / 1000)) kHz" : "\(Int(sampleRate)) Hz"
+    }
+
+    private func channelLabel(for count: Int) -> String {
+        switch count {
+        case 1:
+            return "Mono"
+        case 2:
+            return "Stereo"
+        default:
+            return "\(count) ch"
+        }
+    }
+}
+
+private struct EmptyImportState: View {
     var body: some View {
         VStack(spacing: 12) {
             Image(systemName: "tray")
@@ -384,19 +283,17 @@ private struct EmptyRecentState: View {
                 .foregroundStyle(Color.secondaryText)
             Text("No imports yet")
                 .font(.headline)
-                .foregroundStyle(.primary)
-            Text("Start by uploading a mix to see analysis summaries and recent activity here.")
+            Text("Import a mix to begin phase analysis and keep track of your uploads here.")
                 .font(.footnote)
-                .multilineTextAlignment(.center)
                 .foregroundStyle(Color.secondaryText)
-                .padding(.horizontal, 24)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
         }
-        .frame(maxWidth: .infinity)
-        .padding(32)
-        .background(Color.backgroundSecondary, in: RoundedRectangle(cornerRadius: AppConstants.cornerRadius))
+        .padding()
     }
 }
 
 #Preview {
     ImportView()
+        .modelContainer(for: [AudioFile.self])
 }
