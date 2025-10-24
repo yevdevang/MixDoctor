@@ -137,6 +137,15 @@ final class AudioAnalysisService {
         // Analyze with OpenAI
         analysisProgress = 0.8
         print("   🤖 Analyzing with OpenAI GPT-5 Nano...")
+        print("   📤 Sending to OpenAI:")
+        print("      Peak Level: \(peakLevelDB) dBFS")
+        print("      RMS Level: \(rmsLevelDB) dBFS")
+        print("      Dynamic Range: \(loudnessFeatures.dynamicRange) dB")
+        print("      Stereo Width: \(stereoFeatures.stereoWidth * 100)%")
+        print("      Phase Coherence: \(stereoFeatures.correlation)")
+        print("      Low Energy: \(lowEnergy)")
+        print("      Mid Energy: \(midEnergy)")
+        print("      High Energy: \(highEnergy)")
         
         let aiResponse = try await OpenAIService.shared.analyzeAudioFeatures(
             peakLevel: peakLevelDB,
@@ -150,6 +159,109 @@ final class AudioAnalysisService {
             zeroCrossingRate: 0.5,  // Placeholder
             phaseCoherence: stereoFeatures.correlation
         )
+        
+        print("   📥 OpenAI Response:")
+        print("      Score: \(aiResponse.overallQuality)")
+        print("      Stereo: \(aiResponse.stereoAnalysis)")
+        print("      Frequency: \(aiResponse.frequencyAnalysis)")
+        print("      Dynamics: \(aiResponse.dynamicsAnalysis)")
+        
+        // Calculate a technical score based on objective metrics as a sanity check
+        var technicalScore: Double = 100.0
+        
+        // Stereo width check (30-75% is ideal)
+        let stereoWidthPercent = Double(stereoFeatures.stereoWidth * 100)
+        if stereoWidthPercent < 25 {
+            technicalScore -= 20  // Very narrow stereo
+        } else if stereoWidthPercent < 30 {
+            technicalScore -= 10  // Narrow stereo
+        } else if stereoWidthPercent > 80 {
+            technicalScore -= 15  // Too wide (phase issues likely)
+        }
+        
+        // Phase coherence check (>0.5 is acceptable, >0.6 is good)
+        if stereoFeatures.correlation < 0.4 {
+            technicalScore -= 25  // Severe phase issues
+        } else if stereoFeatures.correlation < 0.5 {
+            technicalScore -= 15  // Phase issues
+        }
+        // 0.5-1.0 is fine, no penalty
+        
+        // Dynamic range check (4-18 dB is acceptable)
+        if loudnessFeatures.dynamicRange < 3 {
+            technicalScore -= 20  // Severely over-compressed
+        } else if loudnessFeatures.dynamicRange < 4 {
+            technicalScore -= 10  // Over-compressed
+        } else if loudnessFeatures.dynamicRange > 20 {
+            technicalScore -= 15  // Overly dynamic
+        } else if loudnessFeatures.dynamicRange > 18 {
+            technicalScore -= 5   // Very dynamic
+        }
+        
+        // Peak level check (should be reasonably loud)
+        if loudnessFeatures.peakLevel > 1.0 {
+            technicalScore -= 25  // Clipping
+        } else if peakLevelDB < -12 {
+            technicalScore -= 15  // Very quiet
+        } else if peakLevelDB < -10 {
+            technicalScore -= 5   // Quiet
+        }
+        
+        // Frequency balance check - CRITICAL for mix quality
+        // Calculate percentages of total energy
+        let totalFreqEnergy = lowEnergy + midEnergy + highEnergy
+        if totalFreqEnergy > 0 {
+            let lowPercent = Double(lowEnergy / totalFreqEnergy * 100)
+            let midPercent = Double(midEnergy / totalFreqEnergy * 100)
+            let highPercent = Double(highEnergy / totalFreqEnergy * 100)
+            
+            print("   📊 Checking frequency balance:")
+            print("      Low: \(String(format: "%.1f", lowPercent))%")
+            print("      Mid: \(String(format: "%.1f", midPercent))%")
+            print("      High: \(String(format: "%.1f", highPercent))%")
+            
+            // Ideal range: 25-45% per band (with some flexibility)
+            // Severely imbalanced: >60% or <15% in any band
+            if lowPercent > 60 {
+                technicalScore -= 30  // Extremely bass-heavy
+                print("      ❌ Extremely bass-heavy: -30 points")
+            } else if lowPercent > 50 {
+                technicalScore -= 20  // Very bass-heavy
+                print("      ⚠️ Very bass-heavy: -20 points")
+            } else if lowPercent < 15 {
+                technicalScore -= 20  // Lacking bass
+                print("      ⚠️ Lacking bass: -20 points")
+            }
+            
+            if midPercent < 20 {
+                technicalScore -= 25  // Severely lacking mids (vocals, instruments)
+                print("      ❌ Severely lacking mids: -25 points")
+            } else if midPercent < 25 {
+                technicalScore -= 15  // Lacking mids
+                print("      ⚠️ Lacking mids: -15 points")
+            } else if midPercent > 60 {
+                technicalScore -= 20  // Too mid-heavy
+                print("      ⚠️ Too mid-heavy: -20 points")
+            }
+            
+            if highPercent > 50 {
+                technicalScore -= 25  // Extremely harsh/bright
+                print("      ❌ Extremely harsh/bright: -25 points")
+            } else if highPercent > 45 {
+                technicalScore -= 15  // Very bright
+                print("      ⚠️ Very bright: -15 points")
+            } else if highPercent < 10 {
+                technicalScore -= 20  // Dull/muddy
+                print("      ⚠️ Dull/muddy mix: -20 points")
+            }
+        }
+        
+        print("   🔬 Technical Score (objective): \(Int(technicalScore))")
+        print("   🤖 AI Score: \(Int(aiResponse.overallQuality))")
+        
+        // Use the HIGHER of technical score or AI score to avoid unfair penalization
+        let finalScore = max(technicalScore, aiResponse.overallQuality)
+        print("   ⭐ Final Score (max of both): \(Int(finalScore))")
         
         // Create analysis result
         analysisProgress = 0.9
@@ -183,16 +295,33 @@ final class AudioAnalysisService {
         print("      Mid: \(result.midBalance)%")
         print("      High: \(result.highBalance)%")
         
-        // Apply OpenAI analysis
-        result.overallScore = aiResponse.overallQuality
-        result.recommendations = aiResponse.recommendations
+        // Apply OpenAI analysis (use our calculated final score instead of raw AI score)
+        result.overallScore = finalScore
         
-        // Set issue flags based on thresholds
-        result.hasPhaseIssues = stereoFeatures.correlation < 0.7
+        // If mix is excellent (85+), no need for recommendations
+        if finalScore >= 85 {
+            result.recommendations = ["Your mix sounds excellent! No significant improvements needed."]
+        } else if finalScore >= 75 {
+            // Good mix - only keep critical recommendations (max 3)
+            result.recommendations = Array(aiResponse.recommendations.prefix(3))
+        } else {
+            // Fair/poor mix - show all recommendations
+            result.recommendations = aiResponse.recommendations
+        }
+        
+        // Set issue flags based on REALISTIC professional thresholds
+        // Phase coherence: <0.5 is problematic, 0.5-0.6 is acceptable, 0.6+ is good
+        result.hasPhaseIssues = stereoFeatures.correlation < 0.5
+        
+        // Stereo width: <30% is narrow, 30-75% is good, >80% is too wide
         result.hasStereoIssues = stereoFeatures.stereoWidth < 0.3 || stereoFeatures.stereoWidth > 0.8
-        result.hasFrequencyImbalance = (lowEnergy > 0.5 || highEnergy > 0.5)
-        result.hasDynamicRangeIssues = (loudnessFeatures.dynamicRange < 6.0 || 
-                                       loudnessFeatures.dynamicRange > 16.0)
+        
+        // Frequency imbalance: Only flag if severely imbalanced (>60% in one band)
+        result.hasFrequencyImbalance = (lowEnergy > 0.6 || highEnergy > 0.6)
+        
+        // Dynamic range: 4-18 dB is acceptable range
+        result.hasDynamicRangeIssues = (loudnessFeatures.dynamicRange < 4.0 || 
+                                       loudnessFeatures.dynamicRange > 18.0)
         
         print("   ✅ OpenAI Analysis Complete:")
         print("      Overall Quality: \(aiResponse.overallQuality)/100")

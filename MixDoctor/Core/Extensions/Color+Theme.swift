@@ -4,7 +4,15 @@ import UIKit
 #endif
 
 extension Color {
-    static let primaryAccent = Color("AccentColor")
+    // Use system blue as fallback if AccentColor is not found
+    static let primaryAccent: Color = {
+        #if canImport(UIKit)
+        return Color(uiColor: .systemBlue)
+        #else
+        return Color.blue
+        #endif
+    }()
+    
     #if canImport(UIKit)
     static let backgroundPrimary = Color(UIColor.systemBackground)
     static let backgroundSecondary = Color(UIColor.secondarySystemBackground)

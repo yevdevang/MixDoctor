@@ -21,6 +21,7 @@ final class PlayerViewModel {
     var currentTime: TimeInterval = 0
     var duration: TimeInterval = 0
     var progress: Double = 0
+    var loadError: String?
     var playbackRate: Double = 1.0 {
         didSet {
             audioPlayer?.rate = Float(playbackRate)
@@ -64,13 +65,63 @@ final class PlayerViewModel {
     // MARK: - Setup
     
     private func setupAudioPlayer() {
+        print("🎵 PlayerViewModel: Setting up audio player")
+        print("   File: \(audioFile.fileName)")
+        print("   URL: \(audioFile.fileURL)")
+        print("   Path: \(audioFile.fileURL.path)")
+        
         do {
+            // Check if file exists
+            let fileManager = FileManager.default
+            let fileExists = fileManager.fileExists(atPath: audioFile.fileURL.path)
+            print("   File exists: \(fileExists)")
+            
+            guard fileExists else {
+                let errorMsg = "Audio file does not exist at path: \(audioFile.fileURL.path)"
+                loadError = errorMsg
+                print("❌ \(errorMsg)")
+                return
+            }
+            
+            #if os(iOS)
+            // Configure audio session for iOS
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(.playback, mode: .default)
+            try audioSession.setActive(true)
+            #endif
+            
+            // Try to access security-scoped resource if needed
+            let shouldStopAccessing = audioFile.fileURL.startAccessingSecurityScopedResource()
+            defer {
+                if shouldStopAccessing {
+                    audioFile.fileURL.stopAccessingSecurityScopedResource()
+                }
+            }
+            
+            // Create audio player
             audioPlayer = try AVAudioPlayer(contentsOf: audioFile.fileURL)
             audioPlayer?.prepareToPlay()
             audioPlayer?.enableRate = true
             duration = audioPlayer?.duration ?? 0
-        } catch {
-            print("Failed to setup audio player: \(error)")
+            
+            loadError = nil
+            print("✅ Successfully loaded audio file: \(audioFile.fileName)")
+            print("   Duration: \(duration) seconds")
+            print("   File path: \(audioFile.fileURL.path)")
+        } catch let error as NSError {
+            let errorMsg = "Failed to load audio: \(error.localizedDescription)"
+            loadError = errorMsg
+            
+            print("❌ Failed to setup audio player: \(error)")
+            print("   Error code: \(error.code)")
+            print("   Error domain: \(error.domain)")
+            print("   File URL: \(audioFile.fileURL)")
+            print("   File path: \(audioFile.fileURL.path)")
+            
+            // Try to get more details about the error
+            if let underlyingError = error.userInfo[NSUnderlyingErrorKey] as? NSError {
+                print("   Underlying error: \(underlyingError)")
+            }
         }
     }
     
@@ -83,6 +134,10 @@ final class PlayerViewModel {
     // MARK: - Playback Controls
     
     func togglePlayPause() {
+        print("🎵 Toggle play/pause. Current state: \(isPlaying ? "playing" : "paused")")
+        print("   Audio player exists: \(audioPlayer != nil)")
+        print("   Load error: \(loadError ?? "none")")
+        
         if isPlaying {
             pause()
         } else {
@@ -91,9 +146,17 @@ final class PlayerViewModel {
     }
     
     func play() {
-        audioPlayer?.play()
+        print("▶️ Play requested")
+        guard let player = audioPlayer else {
+            print("❌ No audio player available")
+            return
+        }
+        
+        print("   Playing audio...")
+        player.play()
         isPlaying = true
         startTimer()
+        print("   ✅ Playback started")
     }
     
     func pause() {

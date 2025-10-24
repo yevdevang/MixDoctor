@@ -7,6 +7,8 @@ struct ImportView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var viewModel: ImportViewModel?
     @State private var isShowingDocumentPicker = false
+    @Binding var selectedAudioFile: AudioFile?
+    @Binding var selectedTab: Int
 
     var body: some View {
         NavigationStack {
@@ -22,14 +24,6 @@ struct ImportView: View {
                 }
             }
             .navigationTitle("Import Audio")
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button("Browse Files") {
-                        isShowingDocumentPicker = true
-                    }
-                    .disabled(viewModel?.isImporting == true)
-                }
-            }
         }
         .fileImporter(
             isPresented: $isShowingDocumentPicker,
@@ -110,14 +104,23 @@ struct ImportView: View {
         return List {
             Section {
                 ForEach(viewModel.importedFiles) { file in
-                    ImportedFileRow(audioFile: file)
+                    ImportedFileRow(
+                        audioFile: file,
+                        onPlayTapped: {
+                            selectedAudioFile = file
+                            selectedTab = 2 // Navigate to Player tab
+                        }
+                    )
                 }
                 .onDelete { indexSet in
                     deleteFiles(at: indexSet, viewModel: viewModel)
                 }
             } header: {
-                HStack {
-                    Text("\(viewModel.importedFiles.count) files imported")
+                HStack(alignment: .center) {
+                    Text("\(viewModel.importedFiles.count) \(viewModel.importedFiles.count == 1 ? "Song" : "Songs")")
+                        .textCase(.none)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
                     Spacer()
                     Button("Import More") {
                         isShowingDocumentPicker = true
@@ -125,6 +128,7 @@ struct ImportView: View {
                     .font(.subheadline)
                     .disabled(viewModel.isImporting)
                 }
+                .padding(.vertical, 4)
             }
         }
         .listStyle(.insetGrouped)
@@ -221,37 +225,34 @@ struct ImportView: View {
 
 private struct ImportedFileRow: View {
     let audioFile: AudioFile
+    let onPlayTapped: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(audioFile.fileName)
                     .font(.headline)
                     .lineLimit(1)
-                Spacer()
-            }
 
-            HStack(spacing: 8) {
-                Text(secondsText(duration: audioFile.duration))
-                Text("•")
-                Text(sampleRateText(sampleRate: audioFile.sampleRate))
-                Text("•")
-                Text("\(audioFile.bitDepth)-bit")
-                Text("•")
-                Text(channelLabel(for: audioFile.numberOfChannels))
-                Text("•")
-                Text(FileManager.default.formatFileSize(audioFile.fileSize))
-                
-                if audioFile.numberOfChannels < 2 {
-                    Text("•")
-                    Label("Mono", systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(Color.orange)
-                }
+                // Metadata - allow wrapping to multiple lines if needed
+                Text("\(secondsText(duration: audioFile.duration)) • \(sampleRateText(sampleRate: audioFile.sampleRate)) • \(audioFile.bitDepth)-bit • \(channelLabel(for: audioFile.numberOfChannels)) • \(FileManager.default.formatFileSize(audioFile.fileSize))")
+                    .font(.caption)
+                    .foregroundStyle(Color.secondaryText)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .font(.caption)
-            .foregroundStyle(Color.secondaryText)
+            
+            Spacer(minLength: 8)
+            
+            Button(action: onPlayTapped) {
+                Image(systemName: "play.circle.fill")
+                    .font(.system(size: 36))
+                    .foregroundStyle(.blue)
+            }
+            .buttonStyle(.plain)
         }
         .padding(.vertical, 8)
+        .contentShape(Rectangle())
     }
 
     private func secondsText(duration: TimeInterval) -> String {
@@ -296,6 +297,9 @@ private struct EmptyImportState: View {
 }
 
 #Preview {
-    ImportView()
+    @Previewable @State var selectedAudioFile: AudioFile?
+    @Previewable @State var selectedTab = 1
+    
+    ImportView(selectedAudioFile: $selectedAudioFile, selectedTab: $selectedTab)
         .modelContainer(for: [AudioFile.self])
 }

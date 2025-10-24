@@ -9,22 +9,37 @@ import SwiftUI
 import SwiftData
 
 struct ContentView: View {
+    @State private var selectedAudioFile: AudioFile?
+    @State private var selectedTab = 0
+    
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
             DashboardView()
                 .tabItem {
                     Label("Dashboard", systemImage: "square.grid.2x2")
                 }
+                .tag(0)
             
-            ImportView()
+            ImportView(
+                selectedAudioFile: $selectedAudioFile,
+                selectedTab: $selectedTab
+            )
+            .tabItem {
+                Label("Import", systemImage: "square.and.arrow.down")
+            }
+            .tag(1)
+            
+            PlayerView(audioFile: selectedAudioFile)
                 .tabItem {
-                    Label("Import", systemImage: "square.and.arrow.down")
+                    Label("Player", systemImage: "play.circle")
                 }
+                .tag(2)
             
             SettingsView()
                 .tabItem {
                     Label("Settings", systemImage: "gear")
                 }
+                .tag(3)
         }
     }
 }

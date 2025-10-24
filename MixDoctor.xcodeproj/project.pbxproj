@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		CBDD0A842EA68E8500C68A0F /* OpenAI in Frameworks */ = {isa = PBXBuildFile; productRef = CBDD0A832EA68E8500C68A0F /* OpenAI */; };
+		CB9E75802EAA939A001E440E /* OpenAI in Frameworks */ = {isa = PBXBuildFile; productRef = CB9E757F2EAA939A001E440E /* OpenAI */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -28,6 +28,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		CB63F9A12EA68F1200C68A0F /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
 		CB7EADB52EA2A91500AE28CF /* MixDoctor.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MixDoctor.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		CB7EADC22EA2A91600AE28CF /* MixDoctorTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MixDoctorTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		CB7EADCC2EA2A91600AE28CF /* MixDoctorUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MixDoctorUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -56,7 +57,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				CBDD0A842EA68E8500C68A0F /* OpenAI in Frameworks */,
+				CB9E75802EAA939A001E440E /* OpenAI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -80,6 +81,7 @@
 		CB7EADAC2EA2A91500AE28CF = {
 			isa = PBXGroup;
 			children = (
+				CB63F9A12EA68F1200C68A0F /* Config.xcconfig */,
 				CB7EADB72EA2A91500AE28CF /* MixDoctor */,
 				CB7EADC52EA2A91600AE28CF /* MixDoctorTests */,
 				CB7EADCF2EA2A91600AE28CF /* MixDoctorUITests */,
@@ -117,7 +119,7 @@
 			);
 			name = MixDoctor;
 			packageProductDependencies = (
-				CBDD0A832EA68E8500C68A0F /* OpenAI */,
+				CB9E757F2EAA939A001E440E /* OpenAI */,
 			);
 			productName = MixDoctor;
 			productReference = CB7EADB52EA2A91500AE28CF /* MixDoctor.app */;
@@ -202,7 +204,7 @@
 			mainGroup = CB7EADAC2EA2A91500AE28CF;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				CBDD0A822EA68E8500C68A0F /* XCRemoteSwiftPackageReference "OpenAI" */,
+				CB9E757E2EAA939A001E440E /* XCRemoteSwiftPackageReference "OpenAI" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = CB7EADB62EA2A91500AE28CF /* Products */;
@@ -396,17 +398,25 @@
 		};
 		CB7EADD72EA2A91600AE28CF /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = CB63F9A12EA68F1200C68A0F /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = MixDoctor/MixDoctor.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 392G674982;
-				ENABLE_APP_SANDBOX = YES;
-				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_DEBUG_DYLIB = NO;
+				ENABLE_HARDENED_RUNTIME = NO;
 				ENABLE_PREVIEWS = YES;
+				"ENABLE_PREVIEWS[sdk=iphoneos*]" = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = MixDoctor.xcodeproj/Info.plist;
+				INFOPLIST_KEY_OPENAI_API_KEY = "$(OPENAI_API_KEY)";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -425,32 +435,40 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.yevgenylevin.animated.MixDoctor;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
-				SDKROOT = auto;
+				SDKROOT = iphoneos;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2,7";
-				XROS_DEPLOYMENT_TARGET = 26.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
 		};
 		CB7EADD82EA2A91600AE28CF /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = CB63F9A12EA68F1200C68A0F /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = MixDoctor/MixDoctor.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 392G674982;
-				ENABLE_APP_SANDBOX = YES;
-				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_DEBUG_DYLIB = NO;
+				ENABLE_HARDENED_RUNTIME = NO;
 				ENABLE_PREVIEWS = YES;
+				"ENABLE_PREVIEWS[sdk=iphoneos*]" = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = MixDoctor.xcodeproj/Info.plist;
+				INFOPLIST_KEY_OPENAI_API_KEY = "$(OPENAI_API_KEY)";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -469,16 +487,18 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.yevgenylevin.animated.MixDoctor;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
-				SDKROOT = auto;
+				SDKROOT = iphoneos;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2,7";
-				XROS_DEPLOYMENT_TARGET = 26.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
 		};
@@ -626,7 +646,7 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		CBDD0A822EA68E8500C68A0F /* XCRemoteSwiftPackageReference "OpenAI" */ = {
+		CB9E757E2EAA939A001E440E /* XCRemoteSwiftPackageReference "OpenAI" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/MacPaw/OpenAI.git";
 			requirement = {
@@ -637,9 +657,9 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		CBDD0A832EA68E8500C68A0F /* OpenAI */ = {
+		CB9E757F2EAA939A001E440E /* OpenAI */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = CBDD0A822EA68E8500C68A0F /* XCRemoteSwiftPackageReference "OpenAI" */;
+			package = CB9E757E2EAA939A001E440E /* XCRemoteSwiftPackageReference "OpenAI" */;
 			productName = OpenAI;
 		};
 /* End XCSwiftPackageProductDependency section */
