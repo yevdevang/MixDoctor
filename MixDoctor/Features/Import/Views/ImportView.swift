@@ -24,14 +24,6 @@ struct ImportView: View {
                 }
             }
             .navigationTitle("Import Audio")
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button("Browse Files") {
-                        isShowingDocumentPicker = true
-                    }
-                    .disabled(viewModel?.isImporting == true)
-                }
-            }
         }
         .fileImporter(
             isPresented: $isShowingDocumentPicker,
@@ -253,20 +245,13 @@ private struct ImportedFileRow: View {
             Spacer(minLength: 8)
             
             Button(action: onPlayTapped) {
-                ZStack {
-                    Circle()
-                        .fill(.white.opacity(0.2))
-                        .frame(width: 44, height: 44)
-                    
-                    Image(systemName: "play.fill")
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundStyle(.white)
-                        .offset(x: 2)
-                }
+                Image(systemName: "play.circle.fill")
+                    .font(.system(size: 36))
+                    .foregroundStyle(.blue)
             }
             .buttonStyle(.plain)
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 8)
         .contentShape(Rectangle())
     }
 

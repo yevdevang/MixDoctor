@@ -25,11 +25,32 @@ final class AudioFeatureExtractor {
         // Calculate correlation
         let correlation = calculateCorrelation(left: left, right: right)
         
-        // Calculate stereo width (based on side channel energy)
+        // Calculate stereo width using proper professional audio metrics
         let midSide = processor.convertToMidSide(left: left, right: right)
         let midEnergy = calculateRMS(midSide.mid)
         let sideEnergy = calculateRMS(midSide.side)
-        let stereoWidth = sideEnergy / (midEnergy + sideEnergy + 0.0001)
+        
+        // Professional stereo width calculation:
+        // - Good professional mixes: 40-70% (balanced mono/stereo content)
+        // - Mono: 0%
+        // - Extreme wide stereo: 90-100%
+        // Formula: Scale side energy ratio to percentage and apply perceptual curve
+        let rawSideRatio = sideEnergy / (midEnergy + sideEnergy + 0.0001)
+        
+        // Apply perceptual scaling to match professional standards
+        // A mix with 30% side energy should read as ~50-60% width (balanced)
+        // A mix with 50% side energy should read as ~70-80% width (wide)
+        let stereoWidth: Float
+        if rawSideRatio < 0.25 {
+            // Very mono (0-25% side energy -> 0-40% width)
+            stereoWidth = rawSideRatio * 1.6
+        } else if rawSideRatio < 0.40 {
+            // Balanced (25-40% side energy -> 40-65% width)
+            stereoWidth = 0.4 + (rawSideRatio - 0.25) * 1.67
+        } else {
+            // Wide stereo (40%+ side energy -> 65-100% width)
+            stereoWidth = 0.65 + (rawSideRatio - 0.40) * 0.583
+        }
         
         // Calculate balance
         let leftRMS = calculateRMS(left)
@@ -42,7 +63,8 @@ final class AudioFeatureExtractor {
         
         print("   📊 Stereo Features:")
         print("      Correlation: \(correlation)")
-        print("      Stereo Width: \(stereoWidth)")
+        print("      Raw Side Ratio: \(rawSideRatio) (\(Int(rawSideRatio * 100))%)")
+        print("      Stereo Width (Scaled): \(stereoWidth) (\(Int(stereoWidth * 100))%)")
         print("      L/R Balance: \(leftRightBalance)")
         print("      Mid/Side Ratio: \(midSideRatio)")
         
@@ -68,7 +90,9 @@ final class AudioFeatureExtractor {
         let log2n = vDSP_Length(log2(Float(fftSize)))
         
         guard let fftSetup = vDSP_create_fftsetup(log2n, FFTRadix(kFFTRadix2)) else {
-            throw AudioProcessingError.fftSetupFailed
+            throw NSError(domain: "AudioFeatureExtractor", code: -1, userInfo: [
+                NSLocalizedDescriptionKey: "Failed to setup FFT"
+            ])
         }
         defer { vDSP_destroy_fftsetup(fftSetup) }
         

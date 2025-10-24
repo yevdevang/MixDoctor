@@ -21,7 +21,11 @@ struct PlayerView: View {
                     ProgressView("Loading player...")
                         .task {
                             if let file = audioFile {
-                                viewModel = PlayerViewModel(audioFile: file)
+                                let newViewModel = PlayerViewModel(audioFile: file)
+                                viewModel = newViewModel
+                                // Auto-play when file is loaded
+                                try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 second delay
+                                newViewModel.play()
                             }
                         }
                 } else {
@@ -35,7 +39,12 @@ struct PlayerView: View {
                 // Stop current playback if any
                 viewModel?.stop()
                 // Create new view model with selected audio file
-                viewModel = PlayerViewModel(audioFile: newFile)
+                let newViewModel = PlayerViewModel(audioFile: newFile)
+                viewModel = newViewModel
+                // Auto-play the new file
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    newViewModel.play()
+                }
             }
         }
     }
@@ -136,7 +145,7 @@ struct PlayerView: View {
                         let isPlayed = Double(index) / Double(viewModel.waveformSamples.count) <= viewModel.progress
                         
                         RoundedRectangle(cornerRadius: 1)
-                            .fill(isPlayed ? .blue : .white.opacity(0.3))
+                            .fill(isPlayed ? .blue : Color.gray.opacity(0.4))
                             .frame(height: max(normalizedHeight * geometry.size.height, 2))
                     }
                 }

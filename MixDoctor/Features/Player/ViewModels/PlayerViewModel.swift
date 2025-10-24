@@ -65,11 +65,21 @@ final class PlayerViewModel {
     // MARK: - Setup
     
     private func setupAudioPlayer() {
+        print("🎵 PlayerViewModel: Setting up audio player")
+        print("   File: \(audioFile.fileName)")
+        print("   URL: \(audioFile.fileURL)")
+        print("   Path: \(audioFile.fileURL.path)")
+        
         do {
             // Check if file exists
             let fileManager = FileManager.default
-            guard fileManager.fileExists(atPath: audioFile.fileURL.path) else {
-                print("Audio file does not exist at path: \(audioFile.fileURL.path)")
+            let fileExists = fileManager.fileExists(atPath: audioFile.fileURL.path)
+            print("   File exists: \(fileExists)")
+            
+            guard fileExists else {
+                let errorMsg = "Audio file does not exist at path: \(audioFile.fileURL.path)"
+                loadError = errorMsg
+                print("❌ \(errorMsg)")
                 return
             }
             
@@ -124,6 +134,10 @@ final class PlayerViewModel {
     // MARK: - Playback Controls
     
     func togglePlayPause() {
+        print("🎵 Toggle play/pause. Current state: \(isPlaying ? "playing" : "paused")")
+        print("   Audio player exists: \(audioPlayer != nil)")
+        print("   Load error: \(loadError ?? "none")")
+        
         if isPlaying {
             pause()
         } else {
@@ -132,9 +146,17 @@ final class PlayerViewModel {
     }
     
     func play() {
-        audioPlayer?.play()
+        print("▶️ Play requested")
+        guard let player = audioPlayer else {
+            print("❌ No audio player available")
+            return
+        }
+        
+        print("   Playing audio...")
+        player.play()
         isPlaying = true
         startTimer()
+        print("   ✅ Playback started")
     }
     
     func pause() {

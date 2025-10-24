@@ -27,7 +27,7 @@ struct ResultsView: View {
             } else if let result = analysisResult {
                 resultContentView(result: result)
             } else {
-                emptyStateView
+                analysingView
             }
         }
         .navigationTitle("Analysis Results")
@@ -82,25 +82,6 @@ struct ResultsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
-    }
-
-    private var emptyStateView: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "waveform.circle")
-                .font(.system(size: 60))
-                .foregroundStyle(.secondary)
-
-            Text("No analysis available")
-                .font(.headline)
-
-            Button("Analyze Now") {
-                Task {
-                    await performAnalysis()
-                }
-            }
-            .buttonStyle(.borderedProminent)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - Results Content
