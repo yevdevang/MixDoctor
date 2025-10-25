@@ -22,13 +22,18 @@ struct MixDoctorApp: App {
             let appSupportURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
             let storeURL = appSupportURL.appendingPathComponent("MixDoctor.store")
             
-            // If there's a corrupted store, delete it
+            // Schema version tracking for migration
+            let currentSchemaVersion = 2  // Incremented due to AudioFile fileURL change
+            let lastSchemaVersion = UserDefaults.standard.integer(forKey: "lastSchemaVersion")
+            
+            // If there's a corrupted store or schema changed, delete it
             if FileManager.default.fileExists(atPath: storeURL.path) {
-                // Check if we had a migration failure before
-                if UserDefaults.standard.bool(forKey: "hadMigrationFailure") {
+                // Check if we had a migration failure or schema version changed
+                if UserDefaults.standard.bool(forKey: "hadMigrationFailure") || lastSchemaVersion < currentSchemaVersion {
                     try? FileManager.default.removeItem(at: storeURL)
                     UserDefaults.standard.removeObject(forKey: "hadMigrationFailure")
-                    print("Removed corrupted database")
+                    UserDefaults.standard.set(currentSchemaVersion, forKey: "lastSchemaVersion")
+                    print("🔄 Removed old database (schema v\(lastSchemaVersion) -> v\(currentSchemaVersion))")
                 }
             }
             
@@ -42,6 +47,9 @@ struct MixDoctorApp: App {
                 for: schema,
                 configurations: [modelConfiguration]
             )
+            
+            // Save schema version on successful initialization
+            UserDefaults.standard.set(currentSchemaVersion, forKey: "lastSchemaVersion")
         } catch {
             print("Initial ModelContainer creation failed: \(error)")
             // Mark that we had a failure and try to delete and recreate

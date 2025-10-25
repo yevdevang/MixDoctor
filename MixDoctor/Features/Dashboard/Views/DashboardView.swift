@@ -7,6 +7,9 @@
 
 import SwiftUI
 import SwiftData
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct DashboardView: View {
     @Environment(\.modelContext) private var modelContext
@@ -86,6 +89,20 @@ struct DashboardView: View {
                 }
             }
         }
+        .tint(Color(red: 0.435, green: 0.173, blue: 0.871))
+        .onAppear {
+            #if canImport(UIKit)
+            // Set navigation title color to purple
+            let appearance = UINavigationBarAppearance()
+            appearance.configureWithDefaultBackground()
+            appearance.largeTitleTextAttributes = [.foregroundColor: UIColor(red: 0.435, green: 0.173, blue: 0.871, alpha: 1.0)]
+            appearance.titleTextAttributes = [.foregroundColor: UIColor(red: 0.435, green: 0.173, blue: 0.871, alpha: 1.0)]
+            
+            UINavigationBar.appearance().standardAppearance = appearance
+            UINavigationBar.appearance().scrollEdgeAppearance = appearance
+            UINavigationBar.appearance().compactAppearance = appearance
+            #endif
+        }
     }
 
     // MARK: - Statistics View
@@ -154,6 +171,13 @@ struct DashboardView: View {
         }
         .pickerStyle(.segmented)
         .padding()
+        .onAppear {
+            #if canImport(UIKit)
+            UISegmentedControl.appearance().selectedSegmentTintColor = UIColor(red: 0.435, green: 0.173, blue: 0.871, alpha: 1.0)
+            UISegmentedControl.appearance().setTitleTextAttributes([.foregroundColor: UIColor.white], for: .selected)
+            UISegmentedControl.appearance().setTitleTextAttributes([.foregroundColor: UIColor(red: 0.435, green: 0.173, blue: 0.871, alpha: 1.0)], for: .normal)
+            #endif
+        }
     }
 
     // MARK: - Files List

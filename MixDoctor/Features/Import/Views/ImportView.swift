@@ -247,7 +247,7 @@ private struct ImportedFileRow: View {
             Button(action: onPlayTapped) {
                 Image(systemName: "play.circle.fill")
                     .font(.system(size: 36))
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(Color(red: 0.435, green: 0.173, blue: 0.871))
             }
             .buttonStyle(.plain)
         }

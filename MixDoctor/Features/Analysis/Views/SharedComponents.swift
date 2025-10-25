@@ -148,15 +148,40 @@ struct AudioFileRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            // Icon
+            // Waveform Icon
             ZStack {
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(statusColor.opacity(0.2))
+                    .fill(statusColor.opacity(0.15))
                     .frame(width: 50, height: 50)
 
-                Image(systemName: audioFile.analysisResult != nil ? "checkmark.circle.fill" : "clock.fill")
-                    .font(.title3)
-                    .foregroundStyle(statusColor)
+                // Mini waveform visualization
+                HStack(spacing: 2) {
+                    ForEach(0..<5) { index in
+                        RoundedRectangle(cornerRadius: 1)
+                            .fill(statusColor)
+                            .frame(width: 3, height: waveformHeight(for: index))
+                    }
+                }
+                
+                // Checkmark overlay for analyzed files
+                if audioFile.analysisResult != nil {
+                    VStack {
+                        HStack {
+                            Spacer()
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.white)
+                                .background(
+                                    Circle()
+                                        .fill(statusColor)
+                                        .frame(width: 16, height: 16)
+                                )
+                        }
+                        Spacer()
+                    }
+                    .frame(width: 50, height: 50)
+                    .padding(4)
+                }
             }
 
             // Info
@@ -198,6 +223,12 @@ struct AudioFileRow: View {
             return Color.scoreColor(for: result.overallScore)
         }
         return .gray
+    }
+    
+    private func waveformHeight(for index: Int) -> CGFloat {
+        // Create a mini waveform pattern with varying heights
+        let heights: [CGFloat] = [16, 24, 20, 28, 18]
+        return heights[index % heights.count]
     }
 
     private func formatDuration(_ duration: TimeInterval) -> String {

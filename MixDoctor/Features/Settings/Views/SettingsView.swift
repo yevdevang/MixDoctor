@@ -18,7 +18,7 @@ struct SettingsView: View {
                 Section {
                     Picker("Theme", selection: $viewModel.selectedTheme) {
                         ForEach(ThemeOption.allCases) { theme in
-                            Text(theme.rawValue).tag(theme.rawValue)
+                            Text(theme.rawValue).tag(theme.id)
                         }
                     }
                     
@@ -36,21 +36,6 @@ struct SettingsView: View {
                 } footer: {
                     if let sensitivity = AnalysisSensitivity.allCases.first(where: { $0.rawValue == viewModel.analysisSensitivity }) {
                         Text(sensitivity.description)
-                    }
-                }
-                
-                // MARK: - Export Section
-                Section {
-                    Picker("Default Export Format", selection: $viewModel.defaultExportFormat) {
-                        ForEach(ExportFormat.allCases) { format in
-                            Text(format.rawValue).tag(format.rawValue)
-                        }
-                    }
-                } header: {
-                    Text("Export")
-                } footer: {
-                    if let format = ExportFormat.allCases.first(where: { $0.rawValue == viewModel.defaultExportFormat }) {
-                        Text(format.description)
                     }
                 }
                 

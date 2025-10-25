@@ -11,6 +11,18 @@ import SwiftData
 struct ContentView: View {
     @State private var selectedAudioFile: AudioFile?
     @State private var selectedTab = 0
+    @AppStorage("theme") private var theme: String = "system"
+    
+    var colorScheme: ColorScheme? {
+        switch theme {
+        case "light":
+            return .light
+        case "dark":
+            return .dark
+        default:
+            return nil
+        }
+    }
     
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -41,6 +53,8 @@ struct ContentView: View {
                 }
                 .tag(3)
         }
+        .tint(Color(red: 0.435, green: 0.173, blue: 0.871))
+        .preferredColorScheme(colorScheme)
     }
 }
 

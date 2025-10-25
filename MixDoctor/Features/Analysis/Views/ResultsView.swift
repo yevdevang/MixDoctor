@@ -349,13 +349,6 @@ struct ResultsView: View {
 
     private func actionButtons(result: AnalysisResult) -> some View {
         VStack(spacing: 12) {
-            Button(action: { exportReport(result) }) {
-                Label("Export Report", systemImage: "square.and.arrow.up")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-            .disabled(isAnalyzing)
-
             Button(action: { 
                 print("🔄 Re-analyze button tapped")
                 Task { await performAnalysis() } 
@@ -455,11 +448,6 @@ struct ResultsView: View {
             errorMessage = error.localizedDescription
             showError = true
         }
-    }
-    
-    private func exportReport(_ result: AnalysisResult) {
-        // TODO: Implement report export functionality
-        print("Exporting report for \(audioFile.fileName)")
     }
     
     private func deleteFile() {
