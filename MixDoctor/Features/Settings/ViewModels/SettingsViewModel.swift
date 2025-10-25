@@ -37,14 +37,6 @@ final class SettingsViewModel {
         }
     }
     
-    var defaultExportFormat: String {
-        get { UserDefaults.standard.string(forKey: "defaultExportFormat") ?? "pdf" }
-        set {
-            UserDefaults.standard.set(newValue, forKey: "defaultExportFormat")
-            updatePreferences()
-        }
-    }
-    
     var iCloudSyncEnabled: Bool {
         get {
             UserDefaults.standard.bool(forKey: "iCloudSyncEnabled")
@@ -98,7 +90,6 @@ final class SettingsViewModel {
                 preferences.analysisSensitivity = analysisSensitivity
                 preferences.autoAnalyze = autoAnalyze
                 preferences.showDetailedMetrics = showDetailedMetrics
-                preferences.defaultExportFormat = defaultExportFormat
                 try await DataPersistenceService.shared.updateUserPreferences(preferences)
             } catch {
                 print("Failed to update preferences: \(error)")

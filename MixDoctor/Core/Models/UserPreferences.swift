@@ -41,7 +41,15 @@ enum ThemeOption: String, CaseIterable, Identifiable {
     case light = "Light"
     case dark = "Dark"
     
-    var id: String { rawValue }
+    var id: String { value }
+    
+    var value: String {
+        switch self {
+        case .system: return "system"
+        case .light: return "light"
+        case .dark: return "dark"
+        }
+    }
 }
 
 // MARK: - Analysis Sensitivity

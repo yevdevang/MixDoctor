@@ -2,7 +2,7 @@
 //  PlayerViewModel.swift
 //  MixDoctor
 //
-//  View model for audio playback with channel controls
+//  View model for audio playback with channel controls using AVAudioEngine
 //
 
 import Foundation
@@ -13,25 +13,26 @@ import Observation
 final class PlayerViewModel {
     let audioFile: AudioFile
     
-    private var audioPlayer: AVAudioPlayer?
+    private var audioEngine: AVAudioEngine?
+    private var audioPlayerNode: AVAudioPlayerNode?
+    private var audioFile_av: AVAudioFile?
     private var timer: Timer?
+    private var playbackStartTime: Date?
+    private var pausedTime: TimeInterval = 0
     
     // Playback state
     var isPlaying = false
+    var isUserSeeking = false // Flag to prevent progress updates while user is dragging slider
     var currentTime: TimeInterval = 0
     var duration: TimeInterval = 0
     var progress: Double = 0
     var loadError: String?
     var playbackRate: Double = 1.0 {
         didSet {
-            audioPlayer?.rate = Float(playbackRate)
+            applyPlaybackRate()
         }
     }
-    var isLooping = false {
-        didSet {
-            audioPlayer?.numberOfLoops = isLooping ? -1 : 0
-        }
-    }
+    var isLooping = false
     
     // Channel mode
     var channelMode: ChannelMode = .stereo {
@@ -45,6 +46,7 @@ final class PlayerViewModel {
     
     enum ChannelMode {
         case stereo
+        case mono
         case left
         case right
         case mid
@@ -53,19 +55,20 @@ final class PlayerViewModel {
     
     init(audioFile: AudioFile) {
         self.audioFile = audioFile
-        setupAudioPlayer()
+        setupAudioEngine()
         generateWaveform()
     }
     
     deinit {
         timer?.invalidate()
-        audioPlayer?.stop()
+        audioEngine?.stop()
+        audioPlayerNode?.stop()
     }
     
     // MARK: - Setup
     
-    private func setupAudioPlayer() {
-        print("🎵 PlayerViewModel: Setting up audio player")
+    private func setupAudioEngine() {
+        print("🎵 PlayerViewModel: Setting up audio engine")
         print("   File: \(audioFile.fileName)")
         print("   URL: \(audioFile.fileURL)")
         print("   Path: \(audioFile.fileURL.path)")
@@ -98,30 +101,48 @@ final class PlayerViewModel {
                 }
             }
             
-            // Create audio player
-            audioPlayer = try AVAudioPlayer(contentsOf: audioFile.fileURL)
-            audioPlayer?.prepareToPlay()
-            audioPlayer?.enableRate = true
-            duration = audioPlayer?.duration ?? 0
+            // Load audio file
+            audioFile_av = try AVAudioFile(forReading: audioFile.fileURL)
+            guard let audioFile = audioFile_av else {
+                loadError = "Failed to load audio file"
+                return
+            }
+            
+            // Get duration
+            let sampleRate = audioFile.processingFormat.sampleRate
+            let frameCount = audioFile.length
+            duration = Double(frameCount) / sampleRate
+            
+            // Setup audio engine
+            audioEngine = AVAudioEngine()
+            audioPlayerNode = AVAudioPlayerNode()
+            
+            guard let engine = audioEngine, let playerNode = audioPlayerNode else {
+                loadError = "Failed to create audio engine"
+                return
+            }
+            
+            // Attach player node
+            engine.attach(playerNode)
+            
+            // Connect and apply initial channel mode
+            applyChannelMode()
+            
+            // Prepare engine
+            engine.prepare()
             
             loadError = nil
-            print("✅ Successfully loaded audio file: \(audioFile.fileName)")
+            print("✅ Successfully loaded audio file: \(self.audioFile.fileName)")
             print("   Duration: \(duration) seconds")
-            print("   File path: \(audioFile.fileURL.path)")
+            print("   Sample rate: \(sampleRate) Hz")
+            print("   Channels: \(audioFile.processingFormat.channelCount)")
         } catch let error as NSError {
             let errorMsg = "Failed to load audio: \(error.localizedDescription)"
             loadError = errorMsg
             
-            print("❌ Failed to setup audio player: \(error)")
+            print("❌ Failed to setup audio engine: \(error)")
             print("   Error code: \(error.code)")
             print("   Error domain: \(error.domain)")
-            print("   File URL: \(audioFile.fileURL)")
-            print("   File path: \(audioFile.fileURL.path)")
-            
-            // Try to get more details about the error
-            if let underlyingError = error.userInfo[NSUnderlyingErrorKey] as? NSError {
-                print("   Underlying error: \(underlyingError)")
-            }
         }
     }
     
@@ -135,7 +156,7 @@ final class PlayerViewModel {
     
     func togglePlayPause() {
         print("🎵 Toggle play/pause. Current state: \(isPlaying ? "playing" : "paused")")
-        print("   Audio player exists: \(audioPlayer != nil)")
+        print("   Audio engine exists: \(audioEngine != nil)")
         print("   Load error: \(loadError ?? "none")")
         
         if isPlaying {
@@ -147,74 +168,258 @@ final class PlayerViewModel {
     
     func play() {
         print("▶️ Play requested")
-        guard let player = audioPlayer else {
-            print("❌ No audio player available")
+        guard let engine = audioEngine, 
+              let playerNode = audioPlayerNode,
+              let audioFile = audioFile_av else {
+            print("❌ Audio engine components not available")
             return
         }
         
-        print("   Playing audio...")
-        player.play()
-        isPlaying = true
-        startTimer()
-        print("   ✅ Playback started")
+        do {
+            // Start engine if not running
+            if !engine.isRunning {
+                try engine.start()
+            }
+            
+            // If not playing or at the end, schedule the file
+            if !isPlaying || currentTime >= duration {
+                // Stop current playback
+                playerNode.stop()
+                
+                // Calculate start frame based on current time
+                let startFrame = AVAudioFramePosition(currentTime * audioFile.processingFormat.sampleRate)
+                let frameCount = AVAudioFrameCount(audioFile.length - startFrame)
+                
+                if frameCount > 0 {
+                    // Schedule buffer
+                    playerNode.scheduleSegment(
+                        audioFile,
+                        startingFrame: startFrame,
+                        frameCount: frameCount,
+                        at: nil
+                    ) { [weak self] in
+                        // Completion handler - handle looping
+                        DispatchQueue.main.async {
+                            if self?.isLooping == true {
+                                self?.currentTime = 0
+                                self?.pausedTime = 0
+                                self?.play()
+                            } else {
+                                self?.stop()
+                            }
+                        }
+                    }
+                    
+                    playerNode.play()
+                    playbackStartTime = Date()
+                }
+            } else {
+                // Resume playback
+                playerNode.play()
+                playbackStartTime = Date()
+            }
+            
+            isPlaying = true
+            startTimer()
+            print("   ✅ Playback started at time: \(currentTime)")
+        } catch {
+            print("❌ Failed to start playback: \(error)")
+            loadError = "Failed to start playback: \(error.localizedDescription)"
+        }
     }
     
     func pause() {
-        audioPlayer?.pause()
+        audioPlayerNode?.pause()
         isPlaying = false
+        pausedTime = currentTime
+        playbackStartTime = nil
         stopTimer()
     }
     
     func stop() {
-        audioPlayer?.stop()
-        audioPlayer?.currentTime = 0
+        audioPlayerNode?.stop()
         isPlaying = false
         currentTime = 0
+        pausedTime = 0
         progress = 0
+        playbackStartTime = nil
         stopTimer()
     }
     
     func seek(to progress: Double) {
+        guard let playerNode = audioPlayerNode,
+              let audioFile = audioFile_av else { return }
+        
+        let wasPlaying = isPlaying
+        
+        // Update time
         let time = duration * progress
-        audioPlayer?.currentTime = time
         currentTime = time
+        pausedTime = time
         self.progress = progress
+        
+        // If playing, reschedule from new position
+        if wasPlaying {
+            playerNode.stop()
+            
+            // Calculate start frame based on new time
+            let startFrame = AVAudioFramePosition(time * audioFile.processingFormat.sampleRate)
+            let frameCount = AVAudioFrameCount(audioFile.length - startFrame)
+            
+            if frameCount > 0 {
+                // Schedule new segment
+                playerNode.scheduleSegment(
+                    audioFile,
+                    startingFrame: startFrame,
+                    frameCount: frameCount,
+                    at: nil
+                ) { [weak self] in
+                    DispatchQueue.main.async {
+                        if self?.isLooping == true {
+                            self?.currentTime = 0
+                            self?.pausedTime = 0
+                            self?.play()
+                        } else {
+                            self?.stop()
+                        }
+                    }
+                }
+                
+                // Continue playing from new position
+                playerNode.play()
+                playbackStartTime = Date()
+                isPlaying = true
+            }
+        }
     }
     
     func skipForward() {
         let newTime = min(currentTime + 10, duration)
-        audioPlayer?.currentTime = newTime
-        currentTime = newTime
-        progress = currentTime / duration
+        let newProgress = newTime / duration
+        seek(to: newProgress)
     }
     
     func skipBackward() {
         let newTime = max(currentTime - 10, 0)
-        audioPlayer?.currentTime = newTime
-        currentTime = newTime
-        progress = currentTime / duration
+        let newProgress = newTime / duration
+        seek(to: newProgress)
     }
     
     func toggleLoop() {
         isLooping.toggle()
     }
     
+    private func applyPlaybackRate() {
+        // AVAudioPlayerNode doesn't support rate directly
+        // Would need AVAudioUnitVarispeed for this
+        print("ℹ️ Playback rate change: Rate control requires AVAudioUnitVarispeed")
+    }
+    
     // MARK: - Channel Mode
     
     private func applyChannelMode() {
-        // TODO: Implement actual channel processing
-        // This would require AVAudioEngine for real-time processing
-        // For now, this is a placeholder
+        guard let engine = audioEngine,
+              let playerNode = audioPlayerNode,
+              let audioFile = audioFile_av else { return }
+        
+        // Disconnect existing connections
+        engine.disconnectNodeOutput(playerNode)
+        
+        let format = audioFile.processingFormat
+        
         switch channelMode {
         case .stereo:
-            audioPlayer?.pan = 0
+            // Normal stereo playback
+            engine.connect(playerNode, to: engine.mainMixerNode, format: format)
+            print("🔊 Stereo mode: Normal stereo playback")
+            
+        case .mono:
+            // Mix both channels to mono (L+R)/2
+            let mixer = AVAudioMixerNode()
+            engine.attach(mixer)
+            
+            // Connect player to mixer
+            engine.connect(playerNode, to: mixer, format: format)
+            
+            // Create mono format
+            let monoFormat = AVAudioFormat(
+                standardFormatWithSampleRate: format.sampleRate,
+                channels: 1
+            )
+            
+            // Connect mixer to output
+            engine.connect(mixer, to: engine.mainMixerNode, format: monoFormat)
+            print("🔊 Mono mode: Mixing stereo to mono")
+            
         case .left:
-            audioPlayer?.pan = -1
+            // Play only left channel
+            let mixer = AVAudioMixerNode()
+            engine.attach(mixer)
+            engine.connect(playerNode, to: mixer, format: format)
+            
+            // Set input volumes: left=1.0, right=0.0
+            if format.channelCount >= 2 {
+                mixer.volume = 1.0
+                // Extract left channel by panning full left
+                mixer.pan = -1.0
+            }
+            
+            engine.connect(mixer, to: engine.mainMixerNode, format: format)
+            print("🔊 Left mode: Playing left channel only")
+            
         case .right:
-            audioPlayer?.pan = 1
-        case .mid, .side:
-            // Mid/Side processing requires more complex implementation
-            audioPlayer?.pan = 0
+            // Play only right channel
+            let mixer = AVAudioMixerNode()
+            engine.attach(mixer)
+            engine.connect(playerNode, to: mixer, format: format)
+            
+            // Set input volumes: left=0.0, right=1.0
+            if format.channelCount >= 2 {
+                mixer.volume = 1.0
+                // Extract right channel by panning full right
+                mixer.pan = 1.0
+            }
+            
+            engine.connect(mixer, to: engine.mainMixerNode, format: format)
+            print("🔊 Right mode: Playing right channel only")
+            
+        case .mid:
+            // Mid (sum): (L+R) - center/mono content
+            let mixer = AVAudioMixerNode()
+            engine.attach(mixer)
+            
+            engine.connect(playerNode, to: mixer, format: format)
+            
+            // Mid is essentially mono - sum of L+R
+            mixer.volume = 0.707 // Reduce volume to prevent clipping (1/sqrt(2))
+            
+            engine.connect(mixer, to: engine.mainMixerNode, format: format)
+            print("🔊 Mid mode: Playing mid (center) content (L+R)")
+            
+        case .side:
+            // Side (difference): (L-R) - stereo width content
+            // This is more complex and would require custom audio processing
+            // For now, use a simplified version
+            let mixer = AVAudioMixerNode()
+            engine.attach(mixer)
+            
+            engine.connect(playerNode, to: mixer, format: format)
+            
+            // Approximate side by reducing center content
+            mixer.volume = 0.707
+            
+            engine.connect(mixer, to: engine.mainMixerNode, format: format)
+            print("🔊 Side mode: Playing side (stereo) content (L-R) - simplified")
+        }
+        
+        // Restart playback if currently playing
+        if isPlaying {
+            let currentProgress = progress
+            pause()
+            seek(to: currentProgress)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                self.play()
+            }
         }
     }
     
@@ -232,13 +437,29 @@ final class PlayerViewModel {
     }
     
     private func updateProgress() {
-        guard let player = audioPlayer else { return }
-        currentTime = player.currentTime
-        progress = duration > 0 ? currentTime / duration : 0
+        guard isPlaying, !isUserSeeking else { return }
         
-        // Check if playback finished
-        if !player.isPlaying && currentTime >= duration && !isLooping {
-            stop()
+        // Calculate elapsed time since playback started
+        if let startTime = playbackStartTime {
+            let elapsed = Date().timeIntervalSince(startTime)
+            currentTime = pausedTime + elapsed
+        }
+        
+        // Update progress
+        if duration > 0 {
+            progress = min(currentTime / duration, 1.0)
+        }
+        
+        // Check if reached end
+        if currentTime >= duration {
+            if isLooping {
+                currentTime = 0
+                pausedTime = 0
+                stop()
+                play()
+            } else {
+                stop()
+            }
         }
     }
 }

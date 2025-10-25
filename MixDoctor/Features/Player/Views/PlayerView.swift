@@ -117,6 +117,7 @@ struct PlayerView: View {
                 .font(.title2.weight(.semibold))
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
+                .foregroundColor(Color(red: 0.435, green: 0.173, blue: 0.871))
             
             HStack(spacing: 4) {
                 Text("\(viewModel.audioFile.sampleRate / 1000, specifier: "%.1f") kHz")
@@ -126,17 +127,13 @@ struct PlayerView: View {
                 Text(channelLabel(for: viewModel.audioFile.numberOfChannels))
             }
             .font(.caption)
-            .foregroundStyle(Color.secondaryText)
+            .foregroundStyle(.secondary)
         }
         .padding(.top)
     }
     
     private func waveformSection(viewModel: PlayerViewModel) -> some View {
         VStack(spacing: 8) {
-            Text("Waveform")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            
             GeometryReader { geometry in
                 HStack(spacing: 2) {
                     ForEach(viewModel.waveformSamples.indices, id: \.self) { index in
@@ -145,7 +142,7 @@ struct PlayerView: View {
                         let isPlayed = Double(index) / Double(viewModel.waveformSamples.count) <= viewModel.progress
                         
                         RoundedRectangle(cornerRadius: 1)
-                            .fill(isPlayed ? .blue : Color.gray.opacity(0.4))
+                            .fill(isPlayed ? Color(red: 0.435, green: 0.173, blue: 0.871) : Color.gray.opacity(0.4))
                             .frame(height: max(normalizedHeight * geometry.size.height, 2))
                     }
                 }
@@ -157,27 +154,10 @@ struct PlayerView: View {
     }
     
     private func playbackProgressSection(viewModel: PlayerViewModel) -> some View {
-        @Bindable var viewModel = viewModel
-        
-        return VStack(spacing: 8) {
-            Slider(value: $viewModel.progress, in: 0...1) { editing in
-                if !editing {
-                    viewModel.seek(to: viewModel.progress)
-                }
-            }
-            .tint(.blue)
-            
-            HStack {
-                Text(timeString(from: viewModel.currentTime))
-                    .font(.caption.monospacedDigit())
-                Spacer()
-                Text(timeString(from: viewModel.duration))
-                    .font(.caption.monospacedDigit())
-            }
-            .foregroundStyle(Color.secondaryText)
-        }
-        .padding(.horizontal)
+        PlaybackProgressSlider(viewModel: viewModel)
     }
+    
+    // MARK: - Playback Controls
     
     private func playbackControlsSection(viewModel: PlayerViewModel) -> some View {
         HStack(spacing: 32) {
@@ -188,15 +168,7 @@ struct PlayerView: View {
                 Image(systemName: "gobackward.10")
                     .font(.title)
             }
-            .foregroundStyle(.blue)
-            
-            // Previous (placeholder)
-            Button {} label: {
-                Image(systemName: "backward.fill")
-                    .font(.title2)
-            }
-            .foregroundStyle(.secondary)
-            .disabled(true)
+            .foregroundStyle(Color(red: 0.435, green: 0.173, blue: 0.871))
             
             // Play/Pause
             Button {
@@ -205,15 +177,7 @@ struct PlayerView: View {
                 Image(systemName: viewModel.isPlaying ? "pause.circle.fill" : "play.circle.fill")
                     .font(.system(size: 72))
             }
-            .foregroundStyle(.blue)
-            
-            // Next (placeholder)
-            Button {} label: {
-                Image(systemName: "forward.fill")
-                    .font(.title2)
-            }
-            .foregroundStyle(.secondary)
-            .disabled(true)
+            .foregroundStyle(Color(red: 0.435, green: 0.173, blue: 0.871))
             
             // Skip forward
             Button {
@@ -222,48 +186,17 @@ struct PlayerView: View {
                 Image(systemName: "goforward.10")
                 .font(.title)
             }
-            .foregroundStyle(.blue)
+            .foregroundStyle(Color(red: 0.435, green: 0.173, blue: 0.871))
         }
     }
     
     private func additionalControlsSection(viewModel: PlayerViewModel) -> some View {
         HStack(spacing: 40) {
-            // Loop toggle
-            Button {
-                viewModel.toggleLoop()
-            } label: {
-                Image(systemName: viewModel.isLooping ? "repeat.1" : "repeat")
-                    .font(.title3)
-                    .foregroundStyle(viewModel.isLooping ? .blue : .secondary)
-            }
-            
-            // Playback rate
-            Menu {
-                ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { rate in
-                    Button {
-                        viewModel.playbackRate = rate
-                    } label: {
-                        HStack {
-                            Text("\(rate, specifier: "%.2f")×")
-                            if abs(viewModel.playbackRate - rate) < 0.01 {
-                                Image(systemName: "checkmark")
-                            }
-                        }
-                    }
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "gauge.with.dots.needle.bottom.50percent")
-                    Text("\(viewModel.playbackRate, specifier: "%.2f")×")
-                }
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
-            }
-            
             // Channel mode
             Menu {
                 ForEach([
                     PlayerViewModel.ChannelMode.stereo,
+                    .mono,
                     .left,
                     .right,
                     .mid,
@@ -286,7 +219,7 @@ struct PlayerView: View {
                     Text(channelModeLabel(viewModel.channelMode))
                 }
                 .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
+                .foregroundColor(.gray)
             }
         }
         .padding(.horizontal)
@@ -330,11 +263,62 @@ struct PlayerView: View {
     private func channelModeLabel(_ mode: PlayerViewModel.ChannelMode) -> String {
         switch mode {
         case .stereo: return "Stereo"
+        case .mono: return "Mono"
         case .left: return "Left"
         case .right: return "Right"
         case .mid: return "Mid"
         case .side: return "Side"
         }
+    }
+}
+
+// MARK: - Playback Progress Slider Component
+private struct PlaybackProgressSlider: View {
+    @Bindable var viewModel: PlayerViewModel
+    @State private var dragProgress: Double?
+    
+    var body: some View {
+        VStack(spacing: 8) {
+            Slider(
+                value: Binding(
+                    get: { dragProgress ?? viewModel.progress },
+                    set: { dragProgress = $0 }
+                ),
+                in: 0...1
+            ) { editing in
+                if editing {
+                    // Start dragging - save current progress
+                    dragProgress = viewModel.progress
+                    viewModel.isUserSeeking = true
+                } else {
+                    // End dragging - seek to new position
+                    if let finalProgress = dragProgress {
+                        viewModel.seek(to: finalProgress)
+                    }
+                    dragProgress = nil
+                    viewModel.isUserSeeking = false
+                }
+            }
+            .tint(Color(red: 0.435, green: 0.173, blue: 0.871))
+            .disabled(true)  // Disabled until seek functionality is fixed
+          
+            
+            HStack {
+                Text(timeString(from: dragProgress != nil ? viewModel.duration * (dragProgress ?? 0) : viewModel.currentTime))
+                    .font(.caption.monospacedDigit())
+                Spacer()
+                Text(timeString(from: viewModel.duration))
+                    .font(.caption.monospacedDigit())
+            }
+            .foregroundStyle(Color.secondaryText)
+        }
+        .padding(.horizontal)
+    }
+    
+    private func timeString(from seconds: TimeInterval) -> String {
+        let minutes = Int(seconds) / 60
+        let secs = Int(seconds) % 60
+        return String(format: "%d:%02d", minutes, secs)
     }
 }
 

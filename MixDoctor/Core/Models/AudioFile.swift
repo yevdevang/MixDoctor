@@ -1,11 +1,18 @@
 import Foundation
 import SwiftData
 
+/// Audio file model that stores metadata and references to imported audio files.
+/// 
+/// **File Persistence Strategy:**
+/// Files are copied to the app's Documents/AudioFiles directory during import.
+/// Only the filename is stored in the database (storedFileName), not the full path.
+/// The fileURL is computed dynamically to ensure it always points to the correct location,
+/// even if the app container changes (common in iOS Simulator).
 @Model
 final class AudioFile {
     var id: UUID
     var fileName: String
-    var fileURL: URL
+    private var storedFileName: String  // Store only the filename, not full path
     var duration: TimeInterval
     var sampleRate: Double
     var bitDepth: Int
@@ -21,6 +28,19 @@ final class AudioFile {
     
     @Relationship(deleteRule: .cascade)
     var analysisHistory: [AnalysisResult]
+    
+    // Computed property that always returns the correct URL based on current app container
+    @Transient
+    var fileURL: URL {
+        get {
+            let audioDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("AudioFiles", isDirectory: true)
+            return audioDir.appendingPathComponent(storedFileName)
+        }
+        set {
+            storedFileName = newValue.lastPathComponent
+        }
+    }
 
     init(
         fileName: String,
@@ -33,7 +53,7 @@ final class AudioFile {
     ) {
         self.id = UUID()
         self.fileName = fileName
-        self.fileURL = fileURL
+        self.storedFileName = fileURL.lastPathComponent
         self.duration = duration
         self.sampleRate = sampleRate
         self.bitDepth = bitDepth
