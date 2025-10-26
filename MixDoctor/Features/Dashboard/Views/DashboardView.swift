@@ -17,6 +17,7 @@ struct DashboardView: View {
 
     @State private var searchText = ""
     @State private var filterOption: FilterOption = .all
+    @State private var sortOption: SortOption = .date
     @State private var selectedFile: AudioFile?
 
     enum FilterOption: String, CaseIterable {
@@ -24,6 +25,12 @@ struct DashboardView: View {
         case analyzed = "Analyzed"
         case pending = "Pending"
         case issues = "Has Issues"
+    }
+    
+    enum SortOption: String, CaseIterable {
+        case date = "Sort by Date"
+        case name = "Sort by Name"
+        case score = "Sort by Score"
     }
 
     var filteredFiles: [AudioFile] {
@@ -47,6 +54,20 @@ struct DashboardView: View {
                 guard let result = $0.analysisResult else { return false }
                 return result.hasPhaseIssues || result.hasStereoIssues ||
                        result.hasFrequencyImbalance || result.hasDynamicRangeIssues
+            }
+        }
+        
+        // Apply sorting
+        switch sortOption {
+        case .date:
+            files.sort { $0.dateImported > $1.dateImported }
+        case .name:
+            files.sort { $0.fileName.localizedCaseInsensitiveCompare($1.fileName) == .orderedAscending }
+        case .score:
+            files.sort { (file1, file2) in
+                let score1 = file1.analysisResult?.overallScore ?? 0
+                let score2 = file2.analysisResult?.overallScore ?? 0
+                return score1 > score2
             }
         }
 
@@ -74,14 +95,23 @@ struct DashboardView: View {
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
-                        Button(action: { /* Sort options */ }) {
+                        Button(action: { sortOption = .date }) {
                             Label("Sort by Date", systemImage: "calendar")
+                            if sortOption == .date {
+                                Image(systemName: "checkmark")
+                            }
                         }
-                        Button(action: { /* Sort by name */ }) {
+                        Button(action: { sortOption = .name }) {
                             Label("Sort by Name", systemImage: "textformat")
+                            if sortOption == .name {
+                                Image(systemName: "checkmark")
+                            }
                         }
-                        Button(action: { /* Sort by score */ }) {
+                        Button(action: { sortOption = .score }) {
                             Label("Sort by Score", systemImage: "star")
+                            if sortOption == .score {
+                                Image(systemName: "checkmark")
+                            }
                         }
                     } label: {
                         Image(systemName: "ellipsis.circle")

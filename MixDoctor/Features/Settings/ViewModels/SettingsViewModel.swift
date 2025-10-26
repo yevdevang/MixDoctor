@@ -13,26 +13,10 @@ final class SettingsViewModel {
         }
     }
     
-    var analysisSensitivity: String {
-        get { UserDefaults.standard.string(forKey: "analysisSensitivity") ?? "medium" }
-        set {
-            UserDefaults.standard.set(newValue, forKey: "analysisSensitivity")
-            updatePreferences()
-        }
-    }
-    
     var autoAnalyze: Bool {
         get { UserDefaults.standard.bool(forKey: "autoAnalyze") }
         set {
             UserDefaults.standard.set(newValue, forKey: "autoAnalyze")
-            updatePreferences()
-        }
-    }
-    
-    var showDetailedMetrics: Bool {
-        get { UserDefaults.standard.bool(forKey: "showDetailedMetrics") }
-        set {
-            UserDefaults.standard.set(newValue, forKey: "showDetailedMetrics")
             updatePreferences()
         }
     }
@@ -55,9 +39,6 @@ final class SettingsViewModel {
         // Set default values if not set
         if UserDefaults.standard.object(forKey: "autoAnalyze") == nil {
             UserDefaults.standard.set(true, forKey: "autoAnalyze")
-        }
-        if UserDefaults.standard.object(forKey: "showDetailedMetrics") == nil {
-            UserDefaults.standard.set(true, forKey: "showDetailedMetrics")
         }
     }
     
@@ -87,9 +68,7 @@ final class SettingsViewModel {
             do {
                 let preferences = try await DataPersistenceService.shared.fetchUserPreferences()
                 preferences.theme = selectedTheme
-                preferences.analysisSensitivity = analysisSensitivity
                 preferences.autoAnalyze = autoAnalyze
-                preferences.showDetailedMetrics = showDetailedMetrics
                 try await DataPersistenceService.shared.updateUserPreferences(preferences)
             } catch {
                 print("Failed to update preferences: \(error)")

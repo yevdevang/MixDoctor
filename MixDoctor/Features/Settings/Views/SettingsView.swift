@@ -89,21 +89,9 @@ struct SettingsView: View {
                         }
                     }
                     
-                    Picker("Analysis Sensitivity", selection: $viewModel.analysisSensitivity) {
-                        ForEach(AnalysisSensitivity.allCases) { sensitivity in
-                            Text(sensitivity.rawValue).tag(sensitivity.rawValue)
-                        }
-                    }
-                    
                     Toggle("Auto-Analyze New Files", isOn: $viewModel.autoAnalyze)
-                    
-                    Toggle("Show Detailed Metrics", isOn: $viewModel.showDetailedMetrics)
                 } header: {
                     Text("Preferences")
-                } footer: {
-                    if let sensitivity = AnalysisSensitivity.allCases.first(where: { $0.rawValue == viewModel.analysisSensitivity }) {
-                        Text(sensitivity.description)
-                    }
                 }
                 
                 // MARK: - Storage Section
@@ -403,19 +391,16 @@ struct AboutView: View {
             ScrollView {
                 VStack(spacing: 24) {
                     // App Icon
-                    Image(systemName: "waveform.circle.fill")
-                        .font(.system(size: 80))
-                        .foregroundStyle(Color.accentColor)
+                    Image("AppIconDisplay")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 120, height: 120)
+                        .clipShape(RoundedRectangle(cornerRadius: 27, style: .continuous))
                         .padding(.top, 32)
                     
-                    VStack(spacing: 8) {
-                        Text("MixDoctor")
-                            .font(.title.weight(.bold))
-                        
-                        Text("Professional Audio Analysis")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
+                    Text("Professional Audio Analysis")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                     
                     VStack(alignment: .leading, spacing: 16) {
                         Text("Features")

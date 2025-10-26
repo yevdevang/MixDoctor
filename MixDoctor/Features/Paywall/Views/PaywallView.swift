@@ -22,16 +22,9 @@ struct PaywallView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                // Background gradient
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.435, green: 0.173, blue: 0.871).opacity(0.1),
-                        Color(red: 0.435, green: 0.173, blue: 0.871).opacity(0.05)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .ignoresSafeArea()
+                // Background
+                Color(red: 0xef/255, green: 0xe8/255, blue: 0xfd/255)
+                    .ignoresSafeArea()
                 
                 ScrollView {
                     VStack(spacing: 32) {
@@ -59,6 +52,7 @@ struct PaywallView: View {
                         footerSection
                     }
                     .padding()
+                    .padding(.top, -20)
                 }
             }
             .navigationTitle("Upgrade to Pro")
@@ -85,18 +79,11 @@ struct PaywallView: View {
     
     private var headerSection: some View {
         VStack(spacing: 16) {
-            Image(systemName: "waveform.circle.fill")
-                .font(.system(size: 80))
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [
-                            Color(red: 0.435, green: 0.173, blue: 0.871),
-                            Color(red: 0.6, green: 0.3, blue: 0.95)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+            Image("mix-doctor-bg")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 100, height: 100)
+                .clipShape(RoundedRectangle(cornerRadius: 22.5, style: .continuous))
             
             Text("Unlock Pro Features")
                 .font(.title.bold())
