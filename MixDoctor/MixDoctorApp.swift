@@ -13,6 +13,7 @@ struct MixDoctorApp: App {
     @State private var modelContainer: ModelContainer
     @State private var subscriptionService = SubscriptionService.shared
     @State private var showPaywall = false
+    @State private var showLaunchScreen = true
     
     init() {
         let iCloudEnabled = UserDefaults.standard.bool(forKey: "iCloudSyncEnabled")
@@ -80,27 +81,45 @@ struct MixDoctorApp: App {
     
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .modelContainer(modelContainer)
-                .sheet(isPresented: $showPaywall) {
-                    MockPaywallView {
-                        // On purchase complete, dismiss paywall
-                        showPaywall = false
+            ZStack {
+                ContentView()
+                    .modelContainer(modelContainer)
+                    .sheet(isPresented: $showPaywall) {
+                        MockPaywallView {
+                            // On purchase complete, dismiss paywall
+                            showPaywall = false
+                        }
+                    }
+                    .task {
+                        // Check subscription status on launch
+                        await subscriptionService.updateCustomerInfo()
+                        // Show paywall if user is not Pro
+                        if !subscriptionService.isProUser {
+                            // Small delay to ensure UI is ready
+                            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+                            showPaywall = true
+                        }
+                    }
+                    .onReceive(NotificationCenter.default.publisher(for: .iCloudSyncToggled)) { _ in
+                        // User needs to restart app for iCloud sync changes to take effect
+                    }
+                    .opacity(showLaunchScreen ? 0 : 1)
+                
+                // Launch Screen
+                if showLaunchScreen {
+                    LaunchScreenView()
+                        .transition(.opacity)
+                        .zIndex(1)
+                }
+            }
+            .onAppear {
+                // Hide launch screen after animation
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                    withAnimation(.easeOut(duration: 0.5)) {
+                        showLaunchScreen = false
                     }
                 }
-                .task {
-                    // Check subscription status on launch
-                    await subscriptionService.updateCustomerInfo()
-                    // Show paywall if user is not Pro
-                    if !subscriptionService.isProUser {
-                        // Small delay to ensure UI is ready
-                        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
-                        showPaywall = true
-                    }
-                }
-                .onReceive(NotificationCenter.default.publisher(for: .iCloudSyncToggled)) { _ in
-                    // User needs to restart app for iCloud sync changes to take effect
-                }
+            }
         }
     }
 }
