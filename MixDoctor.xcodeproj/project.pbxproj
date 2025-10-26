@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		CB349E782EAD23B200290982 /* ReceiptParser in Frameworks */ = {isa = PBXBuildFile; productRef = CB349E772EAD23B200290982 /* ReceiptParser */; };
+		CB349E7A2EAD23B200290982 /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = CB349E792EAD23B200290982 /* RevenueCat */; };
+		CB349E7C2EAD23B200290982 /* RevenueCatUI in Frameworks */ = {isa = PBXBuildFile; productRef = CB349E7B2EAD23B200290982 /* RevenueCatUI */; };
 		CB9E75802EAA939A001E440E /* OpenAI in Frameworks */ = {isa = PBXBuildFile; productRef = CB9E757F2EAA939A001E440E /* OpenAI */; };
 /* End PBXBuildFile section */
 
@@ -57,7 +60,10 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CB349E7C2EAD23B200290982 /* RevenueCatUI in Frameworks */,
+				CB349E782EAD23B200290982 /* ReceiptParser in Frameworks */,
 				CB9E75802EAA939A001E440E /* OpenAI in Frameworks */,
+				CB349E7A2EAD23B200290982 /* RevenueCat in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -120,6 +126,9 @@
 			name = MixDoctor;
 			packageProductDependencies = (
 				CB9E757F2EAA939A001E440E /* OpenAI */,
+				CB349E772EAD23B200290982 /* ReceiptParser */,
+				CB349E792EAD23B200290982 /* RevenueCat */,
+				CB349E7B2EAD23B200290982 /* RevenueCatUI */,
 			);
 			productName = MixDoctor;
 			productReference = CB7EADB52EA2A91500AE28CF /* MixDoctor.app */;
@@ -205,6 +214,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				CB9E757E2EAA939A001E440E /* XCRemoteSwiftPackageReference "OpenAI" */,
+				CB349E762EAD23B200290982 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = CB7EADB62EA2A91500AE28CF /* Products */;
@@ -646,6 +656,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		CB349E762EAD23B200290982 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/RevenueCat/purchases-ios-spm";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 5.44.1;
+			};
+		};
 		CB9E757E2EAA939A001E440E /* XCRemoteSwiftPackageReference "OpenAI" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/MacPaw/OpenAI.git";
@@ -657,6 +675,21 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		CB349E772EAD23B200290982 /* ReceiptParser */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CB349E762EAD23B200290982 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */;
+			productName = ReceiptParser;
+		};
+		CB349E792EAD23B200290982 /* RevenueCat */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CB349E762EAD23B200290982 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */;
+			productName = RevenueCat;
+		};
+		CB349E7B2EAD23B200290982 /* RevenueCatUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CB349E762EAD23B200290982 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */;
+			productName = RevenueCatUI;
+		};
 		CB9E757F2EAA939A001E440E /* OpenAI */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = CB9E757E2EAA939A001E440E /* XCRemoteSwiftPackageReference "OpenAI" */;
