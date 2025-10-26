@@ -15,6 +15,9 @@ struct ResultsView: View {
     @State private var isAnalyzing = false
     @State private var showError = false
     @State private var errorMessage = ""
+    @State private var showPaywall = false
+    // MARK: - Mock Testing - Switch to SubscriptionService.shared for production
+    @State private var mockService = MockSubscriptionService.shared
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
@@ -32,6 +35,13 @@ struct ResultsView: View {
         }
         .navigationTitle("Analysis Results")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showPaywall) {
+            MockPaywallView(onPurchaseComplete: {
+                Task {
+                    await performAnalysis()
+                }
+            })
+        }
         .alert("Analysis Error", isPresented: $showError) {
             Button("OK", role: .cancel) { }
         } message: {
@@ -414,6 +424,13 @@ struct ResultsView: View {
     }
 
     private func performAnalysis() async {
+        // Check if user can perform analysis
+        guard mockService.canPerformAnalysis() else {
+            print("⚠️ Free limit reached, showing paywall")
+            showPaywall = true
+            return
+        }
+        
         isAnalyzing = true
         defer { isAnalyzing = false }
 
@@ -431,6 +448,9 @@ struct ResultsView: View {
             let result = try await analysisService.analyzeAudio(audioFile)
             
             print("   Analysis complete. Score: \(result.overallScore)")
+            
+            // Increment usage count for free users
+            mockService.incrementAnalysisCount()
             
             // Update the local state
             analysisResult = result

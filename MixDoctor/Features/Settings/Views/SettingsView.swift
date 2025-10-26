@@ -2,6 +2,8 @@ import SwiftUI
 
 struct SettingsView: View {
     @State private var viewModel = SettingsViewModel()
+    // MARK: - Mock Testing - Switch to SubscriptionService.shared for production
+    @State private var mockService = MockSubscriptionService.shared
     @State private var storageInfo: StorageInfo?
     @State private var backups: [BackupInfo] = []
     @State private var isLoadingStorage = false
@@ -10,10 +12,75 @@ struct SettingsView: View {
     @State private var showRestoreBackupSheet = false
     @State private var showClearCacheAlert = false
     @State private var showDeleteOldFilesSheet = false
+    @State private var showPaywall = false
+    @State private var showCancelSubscriptionAlert = false
+    @State private var isCancelling = false
     
     var body: some View {
         NavigationStack {
             Form {
+                // MARK: - Subscription Section
+                Section {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Subscription Status")
+                                .font(.headline)
+                            Text(mockService.isProUser ? "Pro" : "Free (\(mockService.remainingFreeAnalyses)/5 analyses)")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        
+                        Spacer()
+                        
+                        if mockService.isProUser {
+                            Image(systemName: "checkmark.seal.fill")
+                                .foregroundStyle(Color(red: 0.435, green: 0.173, blue: 0.871))
+                                .font(.title2)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                    
+                    if !mockService.isProUser {
+                        Button {
+                            showPaywall = true
+                        } label: {
+                            HStack {
+                                Image(systemName: "star.fill")
+                                Text("Upgrade to Pro")
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    } else {
+                        Button("Manage Subscription") {
+                            if let url = URL(string: "https://apps.apple.com/account/subscriptions") {
+                                UIApplication.shared.open(url)
+                            }
+                        }
+                        
+                        // Mock testing: Cancel subscription button
+                        Button(role: .destructive) {
+                            showCancelSubscriptionAlert = true
+                        } label: {
+                            HStack {
+                                if isCancelling {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                    Text("Cancelling...")
+                                } else {
+                                    Image(systemName: "xmark.circle")
+                                    Text("Cancel Subscription")
+                                }
+                            }
+                        }
+                        .disabled(isCancelling)
+                    }
+                } header: {
+                    Text("Subscription")
+                }
+                
                 // MARK: - Preferences Section
                 Section {
                     Picker("Theme", selection: $viewModel.selectedTheme) {
@@ -230,6 +297,21 @@ struct SettingsView: View {
             .sheet(isPresented: $showDeleteOldFilesSheet) {
                 DeleteOldFilesView()
             }
+            .sheet(isPresented: $showPaywall) {
+                MockPaywallView(onPurchaseComplete: {
+                    // Mock service updates automatically
+                })
+            }
+            .alert("Cancel Subscription?", isPresented: $showCancelSubscriptionAlert) {
+                Button("Cancel Subscription", role: .destructive) {
+                    Task {
+                        await cancelSubscription()
+                    }
+                }
+                Button("Keep Subscription", role: .cancel) {}
+            } message: {
+                Text("Your Pro features will end immediately and you'll return to the Free tier with 5 analyses per month. You can resubscribe anytime.")
+            }
         }
     }
     
@@ -264,6 +346,19 @@ struct SettingsView: View {
             } catch {
                 print("Failed to create backup: \(error)")
             }
+        }
+    }
+    
+    private func cancelSubscription() async {
+        isCancelling = true
+        
+        let success = await mockService.mockCancelSubscription()
+        
+        isCancelling = false
+        
+        if success {
+            print("✓ Subscription cancelled successfully")
+            // UI will update automatically via @Observable
         }
     }
     

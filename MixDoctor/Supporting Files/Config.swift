@@ -29,4 +29,9 @@ enum Config {
             4. Rebuild the project in Xcode
             """)
     }
+    
+    /// RevenueCat API Key for subscription management
+    static var revenueCatAPIKey: String {
+        return "appl_qdVVvPCyMxWWSjogkPdkKribRUK"
+    }
 }

@@ -11,6 +11,7 @@ import SwiftData
 @main
 struct MixDoctorApp: App {
     @State private var modelContainer: ModelContainer
+    @State private var subscriptionService = SubscriptionService.shared
     
     init() {
         let iCloudEnabled = UserDefaults.standard.bool(forKey: "iCloudSyncEnabled")
