@@ -33,11 +33,16 @@ final class OpenAIService {
         highFrequencyEnergy: Float,
         spectralCentroid: Float,
         zeroCrossingRate: Float,
-        phaseCoherence: Float
+        phaseCoherence: Float,
+        isProUser: Bool = false
     ) async throws -> OpenAIAnalysisResponse {
         
         print("🚀🚀🚀 OPENAI ANALYSIS SERVICE CALLED 🚀🚀🚀")
-        print("📡 Using OpenAI GPT-4o model")
+        let modelToUse = isProUser ? Model.gpt4_o : Model.gpt4_o_mini
+        print("📡 Using OpenAI model: \(isProUser ? "GPT-4o (Pro)" : "GPT-4o-mini (Free)")")
+        
+        // Adjust recommendations count based on user tier
+        let maxRecommendations = isProUser ? 5 : 3
         
         let prompt = """
         You are an expert audio engineer analyzing a professionally mixed track. Based on the following technical measurements, provide a detailed analysis.
@@ -71,6 +76,8 @@ final class OpenAIService {
         
         BE FAIR: If measurements are within professional ranges, score accordingly (75-90). Only score below 60 if there are clear, objective technical problems.
         
+        IMPORTANT: Provide EXACTLY \(maxRecommendations) recommendations - no more, no less. Make them actionable and specific.
+        
         Respond ONLY with valid JSON in this exact format, no markdown formatting:
         {
             "overallQuality": 85,
@@ -81,9 +88,7 @@ final class OpenAIService {
             "recommendations": [
                 "actionable recommendation 1",
                 "actionable recommendation 2",
-                "actionable recommendation 3",
-                "actionable recommendation 4",
-                "actionable recommendation 5"
+                "actionable recommendation 3"\(isProUser ? ",\n                \"actionable recommendation 4\",\n                \"actionable recommendation 5\"" : "")
             ],
             "detailedSummary": "2-3 sentence overall assessment"
         }
@@ -93,11 +98,11 @@ final class OpenAIService {
             messages: [
                 .user(.init(content: .string(prompt)))
             ],
-            model: Model.gpt4_o,
+            model: modelToUse,
             responseFormat: .jsonObject
         )
         
-        print("📤 Sending request to OpenAI API with GPT-4o...")
+        print("📤 Sending request to OpenAI API with \(isProUser ? "GPT-4o" : "GPT-4o-mini")...")
         
         do {
             let result = try await openAI.chats(query: query)

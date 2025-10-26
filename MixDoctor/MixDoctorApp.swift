@@ -12,6 +12,7 @@ import SwiftData
 struct MixDoctorApp: App {
     @State private var modelContainer: ModelContainer
     @State private var subscriptionService = SubscriptionService.shared
+    @State private var showPaywall = false
     
     init() {
         let iCloudEnabled = UserDefaults.standard.bool(forKey: "iCloudSyncEnabled")
@@ -81,6 +82,22 @@ struct MixDoctorApp: App {
         WindowGroup {
             ContentView()
                 .modelContainer(modelContainer)
+                .sheet(isPresented: $showPaywall) {
+                    MockPaywallView {
+                        // On purchase complete, dismiss paywall
+                        showPaywall = false
+                    }
+                }
+                .task {
+                    // Check subscription status on launch
+                    await subscriptionService.updateCustomerInfo()
+                    // Show paywall if user is not Pro
+                    if !subscriptionService.isProUser {
+                        // Small delay to ensure UI is ready
+                        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+                        showPaywall = true
+                    }
+                }
                 .onReceive(NotificationCenter.default.publisher(for: .iCloudSyncToggled)) { _ in
                     // User needs to restart app for iCloud sync changes to take effect
                 }

@@ -20,7 +20,7 @@ final class SubscriptionService {
     var customerInfo: CustomerInfo?
     
     // Free tier limits
-    private let freeAnalysisLimit = 5
+    private let freeAnalysisLimit = 3
     private let monthlyResetKey = "lastMonthlyReset"
     private let analysisCountKey = "analysisCount"
     

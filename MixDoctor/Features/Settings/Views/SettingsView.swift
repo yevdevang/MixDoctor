@@ -25,7 +25,7 @@ struct SettingsView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Subscription Status")
                                 .font(.headline)
-                            Text(mockService.isProUser ? "Pro" : "Free (\(mockService.remainingFreeAnalyses)/5 analyses)")
+                            Text(mockService.subscriptionStatus)
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
@@ -310,7 +310,7 @@ struct SettingsView: View {
                 }
                 Button("Keep Subscription", role: .cancel) {}
             } message: {
-                Text("Your Pro features will end immediately and you'll return to the Free tier with 5 analyses per month. You can resubscribe anytime.")
+                Text("Your Pro features will end immediately and you'll return to the Free tier with 3 analyses per month. You can resubscribe anytime.")
             }
         }
     }

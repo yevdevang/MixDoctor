@@ -16,8 +16,8 @@ struct ResultsView: View {
     @State private var showError = false
     @State private var errorMessage = ""
     @State private var showPaywall = false
-    // MARK: - Mock Testing - Switch to SubscriptionService.shared for production
-    @State private var mockService = MockSubscriptionService.shared
+    // MARK: - Mock Testing - Access shared instance directly
+    private var mockService: MockSubscriptionService { MockSubscriptionService.shared }
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
@@ -35,7 +35,13 @@ struct ResultsView: View {
         }
         .navigationTitle("Analysis Results")
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: $showPaywall) {
+        .sheet(isPresented: $showPaywall, onDismiss: {
+            // If paywall was dismissed without purchase, return to dashboard
+            if !mockService.isProUser {
+                print("⚠️ Paywall dismissed without purchase, returning to dashboard")
+                dismiss()
+            }
+        }) {
             MockPaywallView(onPurchaseComplete: {
                 Task {
                     await performAnalysis()
@@ -52,6 +58,10 @@ struct ResultsView: View {
             print("   File ID: \(audioFile.id)")
             print("   File URL: \(audioFile.fileURL)")
             print("   Has existing result: \(audioFile.analysisResult != nil)")
+            print("   🔒 Subscription Status:")
+            print("      Is Pro: \(mockService.isProUser)")
+            print("      Remaining: \(mockService.remainingFreeAnalyses)")
+            print("      Can perform: \(mockService.canPerformAnalysis())")
             
             // Check if we need to re-analyze (no result OR old version without OpenAI)
             let needsAnalysis: Bool
@@ -361,6 +371,16 @@ struct ResultsView: View {
         VStack(spacing: 12) {
             Button(action: { 
                 print("🔄 Re-analyze button tapped")
+                print("   Current remaining: \(mockService.remainingFreeAnalyses)")
+                print("   Can perform: \(mockService.canPerformAnalysis())")
+                
+                // Check immediately before starting task
+                if !mockService.canPerformAnalysis() {
+                    print("   ⚠️ Cannot perform analysis, showing paywall")
+                    showPaywall = true
+                    return
+                }
+                
                 Task { await performAnalysis() } 
             }) {
                 HStack {
@@ -425,6 +445,11 @@ struct ResultsView: View {
 
     private func performAnalysis() async {
         // Check if user can perform analysis
+        print("🔍 Checking analysis permission:")
+        print("   Is Pro User: \(mockService.isProUser)")
+        print("   Remaining analyses: \(mockService.remainingFreeAnalyses)")
+        print("   Can perform: \(mockService.canPerformAnalysis())")
+        
         guard mockService.canPerformAnalysis() else {
             print("⚠️ Free limit reached, showing paywall")
             showPaywall = true
