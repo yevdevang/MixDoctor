@@ -4,16 +4,4 @@
    <FileRef
       location = "self:">
    </FileRef>
-   <FileRef
-      location = "group:AudioAnalysisService.swift">
-   </FileRef>
-   <FileRef
-      location = "group:MixDoctorApp.swift">
-   </FileRef>
-   <FileRef
-      location = "group:MixDoctorTests.swift">
-   </FileRef>
-   <FileRef
-      location = "group:Info.plist">
-   </FileRef>
 </Workspace>

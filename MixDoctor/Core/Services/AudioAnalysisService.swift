@@ -138,8 +138,8 @@ final class AudioAnalysisService {
         analysisProgress = 0.8
         
         // Check if user has Pro subscription
-        let subscriptionService = SubscriptionService.shared
-        let isProUser = subscriptionService.isProUser
+        let subscriptionService = await SubscriptionService.shared
+        let isProUser = await subscriptionService.isProUser
         
         print("   🤖 Analyzing with OpenAI \(isProUser ? "GPT-4o (Pro)" : "GPT-4o-mini (Free)")...")
         print("   📤 Sending to OpenAI:")

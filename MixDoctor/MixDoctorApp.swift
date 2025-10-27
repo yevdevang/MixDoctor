@@ -12,7 +12,7 @@ import SwiftData
 struct MixDoctorApp: App {
     @State private var modelContainer: ModelContainer
     @State private var subscriptionService = SubscriptionService.shared
-    @State private var showPaywall = false
+    @State private var showWelcomeMessage = false
     @State private var showLaunchScreen = true
     
     init() {
@@ -84,20 +84,26 @@ struct MixDoctorApp: App {
             ZStack {
                 ContentView()
                     .modelContainer(modelContainer)
-                    .sheet(isPresented: $showPaywall) {
-                        MockPaywallView {
-                            // On purchase complete, dismiss paywall
-                            showPaywall = false
+                    .alert("Welcome to Mix Doctor! 🎵", isPresented: $showWelcomeMessage) {
+                        Button("Got It!") {
+                            showWelcomeMessage = false
                         }
+                    } message: {
+                        Text("You have 3 free analyses to get started. Upgrade to Pro for unlimited analyses and advanced features!")
                     }
                     .task {
                         // Check subscription status on launch
                         await subscriptionService.updateCustomerInfo()
-                        // Show paywall if user is not Pro
+                        
+                        // Show welcome message only for first-time free users
                         if !subscriptionService.isProUser {
-                            // Small delay to ensure UI is ready
-                            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
-                            showPaywall = true
+                            let hasSeenWelcome = UserDefaults.standard.bool(forKey: "hasSeenWelcomeMessage")
+                            if !hasSeenWelcome {
+                                // Small delay to ensure UI is ready
+                                try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+                                showWelcomeMessage = true
+                                UserDefaults.standard.set(true, forKey: "hasSeenWelcomeMessage")
+                            }
                         }
                     }
                     .onReceive(NotificationCenter.default.publisher(for: .iCloudSyncToggled)) { _ in
