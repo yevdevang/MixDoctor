@@ -24,13 +24,17 @@ struct ResultsView: View {
     private let analysisService = AudioAnalysisService()
 
     var body: some View {
-        ScrollView {
+        ZStack {
             if isAnalyzing {
                 analysingView
-            } else if let result = analysisResult {
-                resultContentView(result: result)
             } else {
-                analysingView
+                ScrollView {
+                    if let result = analysisResult {
+                        resultContentView(result: result)
+                    } else {
+                        analysingView
+                    }
+                }
             }
         }
         .navigationTitle("Analysis Results")
@@ -89,19 +93,7 @@ struct ResultsView: View {
     // MARK: - Analysis Views
 
     private var analysingView: some View {
-        VStack(spacing: 20) {
-            ProgressView()
-                .scaleEffect(1.5)
-
-            Text("Analyzing audio...")
-                .font(.headline)
-
-            Text(audioFile.fileName)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding()
+        AnimatedGradientLoader(fileName: audioFile.fileName)
     }
 
     // MARK: - Results Content
@@ -520,5 +512,99 @@ struct ResultsView: View {
     return NavigationStack {
         ResultsView(audioFile: audioFile)
             .modelContainer(container)
+    }
+}
+
+// MARK: - Animated Gradient Loader
+
+private struct AnimatedGradientLoader: View {
+    let fileName: String
+    
+    @State private var animationOffset: CGFloat = 0
+    
+    var body: some View {
+        ZStack {
+            // Animated gradient background
+            LinearGradient(
+                gradient: Gradient(colors: [
+                    Color(red: 0.435, green: 0.173, blue: 0.871), // Purple
+                    Color(red: 0.6, green: 0.3, blue: 0.95),      // Light purple
+                    Color(red: 0.2, green: 0.8, blue: 0.6),       // Green/Teal
+                    Color(red: 0.435, green: 0.173, blue: 0.871)  // Purple again
+                ]),
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .hueRotation(.degrees(animationOffset))
+            .ignoresSafeArea()
+            .onAppear {
+                withAnimation(
+                    .linear(duration: 3.0)
+                    .repeatForever(autoreverses: false)
+                ) {
+                    animationOffset = 360
+                }
+            }
+            
+            // Content overlay
+            VStack(spacing: 24) {
+                // Pulsing circle with waveform icon
+                ZStack {
+                    Circle()
+                        .fill(Color.white.opacity(0.2))
+                        .frame(width: 120, height: 120)
+                        .scaleEffect(animationOffset > 0 ? 1.2 : 1.0)
+                        .animation(
+                            .easeInOut(duration: 1.5)
+                            .repeatForever(autoreverses: true),
+                            value: animationOffset
+                        )
+                    
+                    Circle()
+                        .fill(Color.white.opacity(0.3))
+                        .frame(width: 100, height: 100)
+                    
+                    Image(systemName: "waveform.circle.fill")
+                        .font(.system(size: 50))
+                        .foregroundColor(.white)
+                }
+                
+                VStack(spacing: 12) {
+                    Text("Analyzing Audio")
+                        .font(.title2.bold())
+                        .foregroundColor(.white)
+                    
+                    Text("Using advanced AI to analyze your mix...")
+                        .font(.subheadline)
+                        .foregroundColor(.white.opacity(0.9))
+                        .multilineTextAlignment(.center)
+                    
+                    Text(fileName)
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.7))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 32)
+                }
+                
+                // Loading indicator dots
+                HStack(spacing: 8) {
+                    ForEach(0..<3) { index in
+                        Circle()
+                            .fill(Color.white)
+                            .frame(width: 8, height: 8)
+                            .scaleEffect(animationOffset > 0 ? 1.0 : 0.5)
+                            .animation(
+                                .easeInOut(duration: 0.6)
+                                .repeatForever()
+                                .delay(Double(index) * 0.2),
+                                value: animationOffset
+                            )
+                    }
+                }
+                .padding(.top, 8)
+            }
+            .padding(32)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

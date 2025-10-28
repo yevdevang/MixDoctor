@@ -208,15 +208,30 @@ struct MockPaywallView: View {
                 .font(.caption2.bold())
                 .foregroundStyle(.secondary)
             
-            Button("Reset to Free") {
-                mockService.resetToFree()
+            HStack(spacing: 8) {
+                Button("Reset to Free") {
+                    mockService.resetToFree()
+                }
+                .font(.caption2)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(Color.orange.opacity(0.2))
+                .foregroundColor(.orange)
+                .cornerRadius(6)
+                
+                Button("Reset Analysis Count") {
+                    mockService.remainingFreeAnalyses = 3
+                    mockService.hasReachedFreeLimit = false
+                    UserDefaults.standard.set(3, forKey: "mock_remainingAnalyses")
+                    UserDefaults.standard.set(false, forKey: "mock_hasReachedLimit")
+                }
+                .font(.caption2)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(Color.blue.opacity(0.2))
+                .foregroundColor(.blue)
+                .cornerRadius(6)
             }
-            .font(.caption2)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-            .background(Color.orange.opacity(0.2))
-            .foregroundColor(.orange)
-            .cornerRadius(6)
         }
         .padding(.vertical, 8)
         .padding(.horizontal)
