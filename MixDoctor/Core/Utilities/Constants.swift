@@ -1,4 +1,5 @@
 import SwiftUI
+import Foundation
 
 enum AppConstants {
     // Audio settings
@@ -19,4 +20,9 @@ enum AppConstants {
     // Storage
     static let maxStorageGB: Int64 = 10
     static let backupRetentionDays = 30
+}
+
+// MARK: - Notification Names
+extension Notification.Name {
+    static let audioFileDeleted = Notification.Name("audioFileDeleted")
 }

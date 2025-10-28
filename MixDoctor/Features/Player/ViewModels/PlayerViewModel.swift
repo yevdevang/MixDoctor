@@ -198,33 +198,78 @@ final class PlayerViewModel {
             
             // Calculate start frame based on resume time
             let startFrame = AVAudioFramePosition(resumeTime * audioFile.processingFormat.sampleRate)
-            let frameCount = AVAudioFrameCount(audioFile.length - startFrame)
+            let totalFrames = audioFile.length
+            let remainingFrames = totalFrames - startFrame
             
-            print("   Resuming from time: \(resumeTime), startFrame: \(startFrame), frameCount: \(frameCount)")
+            print("   Resuming from time: \(resumeTime), startFrame: \(startFrame)")
+            print("   Total file length: \(totalFrames), Remaining frames: \(remainingFrames)")
+            print("   Sample rate: \(audioFile.processingFormat.sampleRate)")
+            print("   Expected playback duration: \(Double(remainingFrames) / audioFile.processingFormat.sampleRate) seconds")
             
-            if frameCount > 0 {
-                // Schedule buffer from current position
-                playerNode.scheduleSegment(
-                    audioFile,
-                    startingFrame: startFrame,
-                    frameCount: frameCount,
-                    at: nil
-                ) { [weak self] in
-                    // Completion handler - handle looping or natural end
-                    DispatchQueue.main.async {
-                        guard let self = self else { return }
-                        // Only handle completion if NOT rescheduling and actually playing
-                        if !self.isRescheduling && self.isPlaying {
-                            if self.isLooping {
-                                self.currentTime = 0
-                                self.pausedTime = 0
-                                self.play()
-                            } else {
-                                self.stop()
+            if remainingFrames > 0 {
+                // Use scheduleFile for better handling of large audio files
+                // This avoids UInt32 overflow issues with frameCount
+                if startFrame == 0 {
+                    // Playing from beginning - use scheduleFile
+                    playerNode.scheduleFile(
+                        audioFile,
+                        at: nil
+                    ) { [weak self] in
+                        // Completion handler - handle looping or natural end
+                        DispatchQueue.main.async {
+                            guard let self = self else { return }
+                            print("🎵 Playback completion handler called")
+                            print("   isRescheduling: \(self.isRescheduling)")
+                            print("   isPlaying: \(self.isPlaying)")
+                            print("   currentTime: \(self.currentTime)")
+                            print("   duration: \(self.duration)")
+                            // Only handle completion if NOT rescheduling and actually playing
+                            if !self.isRescheduling && self.isPlaying {
+                                if self.isLooping {
+                                    self.currentTime = 0
+                                    self.pausedTime = 0
+                                    self.play()
+                                } else {
+                                    self.stop()
+                                }
                             }
+                            // Reset rescheduling flag
+                            self.isRescheduling = false
                         }
-                        // Reset rescheduling flag
-                        self.isRescheduling = false
+                    }
+                } else {
+                    // Playing from middle - use scheduleSegment
+                    // Safe cast: if remainingFrames is too large, play what we can
+                    let safeFrameCount = min(remainingFrames, AVAudioFramePosition(UInt32.max))
+                    let frameCount = AVAudioFrameCount(safeFrameCount)
+                    
+                    playerNode.scheduleSegment(
+                        audioFile,
+                        startingFrame: startFrame,
+                        frameCount: frameCount,
+                        at: nil
+                    ) { [weak self] in
+                        // Completion handler - handle looping or natural end
+                        DispatchQueue.main.async {
+                            guard let self = self else { return }
+                            print("🎵 Playback completion handler called")
+                            print("   isRescheduling: \(self.isRescheduling)")
+                            print("   isPlaying: \(self.isPlaying)")
+                            print("   currentTime: \(self.currentTime)")
+                            print("   duration: \(self.duration)")
+                            // Only handle completion if NOT rescheduling and actually playing
+                            if !self.isRescheduling && self.isPlaying {
+                                if self.isLooping {
+                                    self.currentTime = 0
+                                    self.pausedTime = 0
+                                    self.play()
+                                } else {
+                                    self.stop()
+                                }
+                            }
+                            // Reset rescheduling flag
+                            self.isRescheduling = false
+                        }
                     }
                 }
                 
@@ -290,9 +335,14 @@ final class PlayerViewModel {
             
             // Calculate start frame based on new time
             let startFrame = AVAudioFramePosition(time * audioFile.processingFormat.sampleRate)
-            let frameCount = AVAudioFrameCount(audioFile.length - startFrame)
+            let totalFrames = audioFile.length
+            let remainingFrames = totalFrames - startFrame
             
-            if frameCount > 0 {
+            if remainingFrames > 0 {
+                // Safe cast: if remainingFrames is too large, play what we can
+                let safeFrameCount = min(remainingFrames, AVAudioFramePosition(UInt32.max))
+                let frameCount = AVAudioFrameCount(safeFrameCount)
+                
                 // Schedule new segment
                 playerNode.scheduleSegment(
                     audioFile,

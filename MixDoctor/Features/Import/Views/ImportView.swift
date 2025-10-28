@@ -9,6 +9,7 @@ struct ImportView: View {
     @State private var isShowingDocumentPicker = false
     @Binding var selectedAudioFile: AudioFile?
     @Binding var selectedTab: Int
+    @Binding var shouldAutoPlay: Bool
 
     var body: some View {
         NavigationStack {
@@ -24,6 +25,7 @@ struct ImportView: View {
                 }
             }
             .navigationTitle("Import Audio")
+            .navigationBarTitleDisplayMode(.inline)
         }
         .fileImporter(
             isPresented: $isShowingDocumentPicker,
@@ -62,6 +64,12 @@ struct ImportView: View {
             if viewModel.importedFiles.isEmpty {
                 viewModel.loadImports()
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .audioFileDeleted)) { _ in
+            // Reload files when a file is deleted from Dashboard
+            print("📥 Import view received audioFileDeleted notification")
+            viewModel.loadImports()
+            print("✅ Import view reloaded files. Count: \(viewModel.importedFiles.count)")
         }
     }
 
@@ -108,6 +116,7 @@ struct ImportView: View {
                         audioFile: file,
                         onPlayTapped: {
                             selectedAudioFile = file
+                            shouldAutoPlay = true
                             selectedTab = 2 // Navigate to Player tab
                         }
                     )
@@ -199,6 +208,11 @@ struct ImportView: View {
         case .success(let urls):
             Task {
                 await viewModel.importFiles(urls)
+                
+                // Just select the first file, don't auto-play or switch tabs
+                if !viewModel.importedFiles.isEmpty && selectedAudioFile == nil {
+                    selectedAudioFile = viewModel.importedFiles.first
+                }
             }
         case .failure(let error):
             viewModel.errorMessage = error.localizedDescription
@@ -299,7 +313,8 @@ private struct EmptyImportState: View {
 #Preview {
     @Previewable @State var selectedAudioFile: AudioFile?
     @Previewable @State var selectedTab = 1
+    @Previewable @State var shouldAutoPlay = false
     
-    ImportView(selectedAudioFile: $selectedAudioFile, selectedTab: $selectedTab)
+    ImportView(selectedAudioFile: $selectedAudioFile, selectedTab: $selectedTab, shouldAutoPlay: $shouldAutoPlay)
         .modelContainer(for: [AudioFile.self])
 }

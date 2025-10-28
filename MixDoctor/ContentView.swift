@@ -11,7 +11,10 @@ import SwiftData
 struct ContentView: View {
     @State private var selectedAudioFile: AudioFile?
     @State private var selectedTab = 0
+    @State private var isPlaying = false
+    @State private var shouldAutoPlay = false
     @AppStorage("theme") private var theme: String = "system"
+    @Query(sort: \AudioFile.dateImported, order: .reverse) private var allAudioFiles: [AudioFile]
     
     var colorScheme: ColorScheme? {
         switch theme {
@@ -34,16 +37,27 @@ struct ContentView: View {
             
             ImportView(
                 selectedAudioFile: $selectedAudioFile,
-                selectedTab: $selectedTab
+                selectedTab: $selectedTab,
+                shouldAutoPlay: $shouldAutoPlay
             )
             .tabItem {
                 Label("Import", systemImage: "square.and.arrow.down")
             }
             .tag(1)
             
-            PlayerView(audioFile: selectedAudioFile)
-                .tabItem {
-                    Label("Player", systemImage: "play.circle")
+            PlayerView(
+                audioFile: selectedAudioFile,
+                allAudioFiles: allAudioFiles,
+                shouldAutoPlay: $shouldAutoPlay,
+                onSelectAudioFile: { file in
+                    selectedAudioFile = file
+                },
+                onPlaybackStateChange: { playing in
+                    isPlaying = playing
+                }
+            )
+            .tabItem {
+                    Label("Player", systemImage: isPlaying ? "pause.circle" : "play.circle")
                 }
                 .tag(2)
             
@@ -60,5 +74,5 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
-        .modelContainer(for: [AudioFile.self])
+        .modelContainer(for: [AudioFile.self], inMemory: true)
 }

@@ -11,6 +11,7 @@ struct LaunchScreenView: View {
     @State private var isAnimating = false
     @State private var pulseAnimation = false
     @State private var fadeOut = false
+    @State private var showTagline = false
     
     var body: some View {
         ZStack {
@@ -48,7 +49,7 @@ struct LaunchScreenView: View {
                 Text("Professional Audio Analysis")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                    .opacity(isAnimating ? 1.0 : 0.0)
+                    .opacity(showTagline ? 1.0 : 0.0)
             }
             .opacity(fadeOut ? 0.0 : 1.0)
         }
@@ -56,6 +57,13 @@ struct LaunchScreenView: View {
             // Initial scale and fade in
             withAnimation(.spring(response: 0.6, dampingFraction: 0.7)) {
                 isAnimating = true
+            }
+            
+            // Show tagline with delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                withAnimation(.easeIn(duration: 0.5)) {
+                    showTagline = true
+                }
             }
             
             // Pulse animation

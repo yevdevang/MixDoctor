@@ -91,6 +91,7 @@ struct DashboardView: View {
                 }
             }
             .navigationTitle("Dashboard")
+            .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $searchText, prompt: "Search audio files")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
@@ -241,9 +242,14 @@ struct DashboardView: View {
     private func deleteFiles(at offsets: IndexSet) {
         for index in offsets {
             let file = filteredFiles[index]
+            print("🗑️ Deleting file from Dashboard: \(file.fileName)")
             modelContext.delete(file)
         }
         try? modelContext.save()
+        
+        // Notify other views that files were deleted
+        print("📢 Posting audioFileDeleted notification")
+        NotificationCenter.default.post(name: .audioFileDeleted, object: nil)
     }
 }
 
