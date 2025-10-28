@@ -15,6 +15,7 @@ final class MockSubscriptionService {
     
     // MARK: - Properties
     var isProUser: Bool = false
+    var isInTrialPeriod: Bool = false
     var remainingFreeAnalyses: Int = 3
     var hasReachedFreeLimit: Bool = false
     
@@ -29,8 +30,8 @@ final class MockSubscriptionService {
     }
     
     var mockPackages: [MockPackage] = [
-        MockPackage(id: "monthly", title: "Monthly", price: "$19.99", period: "per month"),
-        MockPackage(id: "annual", title: "Annual", price: "$16.00", period: "per month, billed annually at $192")
+        MockPackage(id: "monthly", title: "Monthly", price: "$5.99", period: "per month"),
+        MockPackage(id: "annual", title: "Annual", price: "$3.99", period: "per month, billed annually at $47.88")
     ]
     
     // MARK: - Initialization
@@ -42,13 +43,16 @@ final class MockSubscriptionService {
     // MARK: - Public Methods
     
     func canPerformAnalysis() -> Bool {
+        // Paid subscribers get unlimited
         if isProUser {
             return true
         }
+        // Trial users and free users have 3 analyses limit
         return remainingFreeAnalyses > 0
     }
     
     func incrementAnalysisCount() {
+        // Only increment for non-paid users (free tier and trial users)
         guard !isProUser else { return }
         
         print("📊 Incrementing analysis count:")
@@ -73,12 +77,25 @@ final class MockSubscriptionService {
         let success = Int.random(in: 1...10) <= 9
         
         if success {
-            isProUser = true
+            // Simulate starting a trial (not a paid subscription yet)
+            isInTrialPeriod = true
+            isProUser = false // Trial users don't get unlimited
             hasReachedFreeLimit = false
+            // Don't reset remaining analyses - trial users use the same 3-analysis limit
             saveState()
+            print("✅ Mock trial started - 3 analyses available")
         }
         
         return success
+    }
+    
+    func mockConvertTrialToPaid() {
+        // Simulate trial period ending and converting to paid subscription
+        isInTrialPeriod = false
+        isProUser = true // Now they get unlimited
+        hasReachedFreeLimit = false
+        saveState()
+        print("✅ Mock trial converted to paid subscription - unlimited analyses")
     }
     
     func mockRestore() async -> Bool {
@@ -89,6 +106,8 @@ final class MockSubscriptionService {
         let hasPurchase = Int.random(in: 1...10) <= 5
         
         if hasPurchase {
+            // Restore as paid subscriber (not trial)
+            isInTrialPeriod = false
             isProUser = true
             hasReachedFreeLimit = false
             saveState()
@@ -99,6 +118,7 @@ final class MockSubscriptionService {
     
     func resetToFree() {
         isProUser = false
+        isInTrialPeriod = false
         remainingFreeAnalyses = freeAnalysisLimit
         hasReachedFreeLimit = false
         // Clear initialization flag to force clean reset
@@ -128,7 +148,9 @@ final class MockSubscriptionService {
     
     var subscriptionStatus: String {
         if isProUser {
-            return "Pro"
+            return "Pro (Unlimited)"
+        } else if isInTrialPeriod {
+            return "Trial (\(remainingFreeAnalyses)/\(freeAnalysisLimit) analyses)"
         } else {
             return "Free (\(remainingFreeAnalyses)/\(freeAnalysisLimit) analyses)"
         }
@@ -138,12 +160,14 @@ final class MockSubscriptionService {
     
     private func saveState() {
         UserDefaults.standard.set(isProUser, forKey: "mock_isProUser")
+        UserDefaults.standard.set(isInTrialPeriod, forKey: "mock_isInTrial")
         UserDefaults.standard.set(remainingFreeAnalyses, forKey: "mock_remainingAnalyses")
         UserDefaults.standard.set(hasReachedFreeLimit, forKey: "mock_hasReachedLimit")
     }
     
     private func loadState() {
         isProUser = UserDefaults.standard.bool(forKey: "mock_isProUser")
+        isInTrialPeriod = UserDefaults.standard.bool(forKey: "mock_isInTrial")
         
         // Check if this is first launch (never saved before)
         let hasBeenInitialized = UserDefaults.standard.bool(forKey: "mock_hasBeenInitialized")
