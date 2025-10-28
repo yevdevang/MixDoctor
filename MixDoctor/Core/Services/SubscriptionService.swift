@@ -16,11 +16,12 @@ final class SubscriptionService {
     
     // MARK: - Properties
     var isProUser: Bool = false
+    var isInTrialPeriod: Bool = false
     var currentOffering: Offering?
     var customerInfo: CustomerInfo?
     
     // Free tier limits
-    private let freeAnalysisLimit = 5
+    private let freeAnalysisLimit = 3
     private let monthlyResetKey = "lastMonthlyReset"
     private let analysisCountKey = "analysisCount"
     
@@ -57,8 +58,25 @@ final class SubscriptionService {
         do {
             let info = try await Purchases.shared.customerInfo()
             customerInfo = info
-            isProUser = info.entitlements["pro"]?.isActive == true
-            print("✅ Updated customer info - Pro user: \(isProUser)")
+            
+            // Check if user has active pro entitlement
+            let hasProEntitlement = info.entitlements["pro"]?.isActive == true
+            
+            // Check if currently in trial period
+            if let proEntitlement = info.entitlements["pro"],
+               proEntitlement.isActive,
+               proEntitlement.periodType == .trial {
+                isInTrialPeriod = true
+                isProUser = false // Treat trial users as free tier for analysis limits
+            } else if hasProEntitlement {
+                isInTrialPeriod = false
+                isProUser = true // Paid subscribers get unlimited
+            } else {
+                isInTrialPeriod = false
+                isProUser = false
+            }
+            
+            print("✅ Updated customer info - Pro user: \(isProUser), In trial: \(isInTrialPeriod)")
         } catch {
             print("❌ Failed to get customer info: \(error)")
         }
@@ -77,8 +95,22 @@ final class SubscriptionService {
     func purchase(package: Package) async throws -> CustomerInfo {
         let result = try await Purchases.shared.purchase(package: package)
         customerInfo = result.customerInfo
-        isProUser = result.customerInfo.entitlements["pro"]?.isActive == true
-        print("✅ Purchase successful - Pro user: \(isProUser)")
+        
+        // Check if user has active pro entitlement
+        let hasProEntitlement = result.customerInfo.entitlements["pro"]?.isActive == true
+        
+        // Check if currently in trial period
+        if let proEntitlement = result.customerInfo.entitlements["pro"],
+           proEntitlement.isActive,
+           proEntitlement.periodType == .trial {
+            isInTrialPeriod = true
+            isProUser = false // Treat trial users as free tier for analysis limits
+        } else if hasProEntitlement {
+            isInTrialPeriod = false
+            isProUser = true // Paid subscribers get unlimited
+        }
+        
+        print("✅ Purchase successful - Pro user: \(isProUser), In trial: \(isInTrialPeriod)")
         return result.customerInfo
     }
     
@@ -87,13 +119,28 @@ final class SubscriptionService {
     func restorePurchases() async throws {
         let info = try await Purchases.shared.restorePurchases()
         customerInfo = info
-        isProUser = info.entitlements["pro"]?.isActive == true
-        print("✅ Restored purchases - Pro user: \(isProUser)")
+        
+        // Check if user has active pro entitlement
+        let hasProEntitlement = info.entitlements["pro"]?.isActive == true
+        
+        // Check if currently in trial period
+        if let proEntitlement = info.entitlements["pro"],
+           proEntitlement.isActive,
+           proEntitlement.periodType == .trial {
+            isInTrialPeriod = true
+            isProUser = false // Treat trial users as free tier for analysis limits
+        } else if hasProEntitlement {
+            isInTrialPeriod = false
+            isProUser = true // Paid subscribers get unlimited
+        }
+        
+        print("✅ Restored purchases - Pro user: \(isProUser), In trial: \(isInTrialPeriod)")
     }
     
     // MARK: - Usage Tracking
     
     func incrementAnalysisCount() {
+        // Only increment for non-paid users (free tier and trial users)
         guard !isProUser else { return }
         
         let currentCount = UserDefaults.standard.integer(forKey: analysisCountKey)
@@ -102,9 +149,11 @@ final class SubscriptionService {
     }
     
     func canPerformAnalysis() -> Bool {
+        // Paid subscribers get unlimited
         if isProUser {
             return true
         }
+        // Trial users and free users have 3 analyses limit
         return remainingFreeAnalyses > 0
     }
     
@@ -136,7 +185,9 @@ final class SubscriptionService {
     
     var subscriptionStatus: String {
         if isProUser {
-            return "Pro"
+            return "Pro (Unlimited)"
+        } else if isInTrialPeriod {
+            return "Trial (\(remainingFreeAnalyses)/\(freeAnalysisLimit) analyses)"
         } else {
             return "Free (\(remainingFreeAnalyses)/\(freeAnalysisLimit) analyses)"
         }

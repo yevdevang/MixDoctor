@@ -5,13 +5,8 @@ struct SettingsView: View {
     // MARK: - Mock Testing - Switch to SubscriptionService.shared for production
     @State private var mockService = MockSubscriptionService.shared
     @State private var storageInfo: StorageInfo?
-    @State private var backups: [BackupInfo] = []
     @State private var isLoadingStorage = false
-    @State private var isLoadingBackups = false
-    @State private var showCreateBackupAlert = false
-    @State private var showRestoreBackupSheet = false
     @State private var showClearCacheAlert = false
-    @State private var showDeleteOldFilesSheet = false
     @State private var showPaywall = false
     @State private var showCancelSubscriptionAlert = false
     @State private var isCancelling = false
@@ -25,7 +20,7 @@ struct SettingsView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Subscription Status")
                                 .font(.headline)
-                            Text(mockService.isProUser ? "Pro" : "Free (\(mockService.remainingFreeAnalyses)/5 analyses)")
+                            Text(mockService.subscriptionStatus)
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
@@ -89,21 +84,9 @@ struct SettingsView: View {
                         }
                     }
                     
-                    Picker("Analysis Sensitivity", selection: $viewModel.analysisSensitivity) {
-                        ForEach(AnalysisSensitivity.allCases) { sensitivity in
-                            Text(sensitivity.rawValue).tag(sensitivity.rawValue)
-                        }
-                    }
-                    
                     Toggle("Auto-Analyze New Files", isOn: $viewModel.autoAnalyze)
-                    
-                    Toggle("Show Detailed Metrics", isOn: $viewModel.showDetailedMetrics)
                 } header: {
                     Text("Preferences")
-                } footer: {
-                    if let sensitivity = AnalysisSensitivity.allCases.first(where: { $0.rawValue == viewModel.analysisSensitivity }) {
-                        Text(sensitivity.description)
-                    }
                 }
                 
                 // MARK: - Storage Section
@@ -156,46 +139,16 @@ struct SettingsView: View {
                     } label: {
                         Label("Clear Cache", systemImage: "trash")
                     }
-                    
-                    Button {
-                        showDeleteOldFilesSheet = true
-                    } label: {
-                        Label("Delete Old Files", systemImage: "clock.arrow.circlepath")
-                    }
                 } header: {
                     Text("Storage Management")
                 } footer: {
-                    Text("Free up space by clearing cache or deleting old files")
-                }
-                
-                // MARK: - Backup & Restore Section
-                Section {
-                    Button {
-                        createBackup()
-                    } label: {
-                        Label("Create Backup", systemImage: "externaldrive")
-                    }
-                    
-                    if !backups.isEmpty {
-                        Button {
-                            showRestoreBackupSheet = true
-                        } label: {
-                            HStack {
-                                Label("Restore from Backup", systemImage: "arrow.counterclockwise")
-                                Spacer()
-                                Text("\(backups.count)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                } header: {
-                    Text("Backup & Restore")
-                } footer: {
-                    Text("Create backups to preserve your analysis results and restore them later if needed")
+                    Text("Free up space by clearing cache")
                 }
                 
                 // MARK: - iCloud Section
+                // Commented out - Audio files are stored locally on each device
+                // Only SwiftData metadata syncs via CloudKit
+                /*
                 Section {
                     Toggle(isOn: $viewModel.iCloudSyncEnabled) {
                         HStack(spacing: 12) {
@@ -219,19 +172,7 @@ struct SettingsView: View {
                 } footer: {
                     Text("When enabled, your imported audio files and analysis results will be synced across all your devices using iCloud. You'll need to restart the app for changes to take effect.")
                 }
-                
-                // MARK: - Danger Zone Section
-                Section {
-                    Button(role: .destructive) {
-                        viewModel.showResetConfirmation = true
-                    } label: {
-                        Label("Clear All Data", systemImage: "trash.fill")
-                    }
-                } header: {
-                    Text("Danger Zone")
-                } footer: {
-                    Text("This will permanently delete all data and cannot be undone")
-                }
+                */
                 
                 // MARK: - About Section
                 Section {
@@ -259,21 +200,12 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
             .task {
                 await loadStorageInfo()
-                await loadBackups()
             }
             .refreshable {
                 await loadStorageInfo()
-                await loadBackups()
-            }
-            .confirmationDialog("Clear All Data", isPresented: $viewModel.showResetConfirmation, titleVisibility: .visible) {
-                Button("Clear All Data", role: .destructive) {
-                    viewModel.resetAllData()
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("This will permanently delete all imported audio files and analysis results. This action cannot be undone.")
             }
             .alert("Cache Cleared", isPresented: $showClearCacheAlert) {
                 Button("Clear Cache", role: .destructive) {
@@ -283,19 +215,8 @@ struct SettingsView: View {
             } message: {
                 Text("This will free up space by removing temporary files")
             }
-            .alert("Backup Created", isPresented: $showCreateBackupAlert) {
-                Button("OK") {}
-            } message: {
-                Text("Your data has been backed up successfully")
-            }
             .sheet(isPresented: $viewModel.showAbout) {
                 AboutView()
-            }
-            .sheet(isPresented: $showRestoreBackupSheet) {
-                RestoreBackupView(backups: backups)
-            }
-            .sheet(isPresented: $showDeleteOldFilesSheet) {
-                DeleteOldFilesView()
             }
             .sheet(isPresented: $showPaywall) {
                 MockPaywallView(onPurchaseComplete: {
@@ -310,7 +231,7 @@ struct SettingsView: View {
                 }
                 Button("Keep Subscription", role: .cancel) {}
             } message: {
-                Text("Your Pro features will end immediately and you'll return to the Free tier with 5 analyses per month. You can resubscribe anytime.")
+                Text("Your Pro features will end immediately and you'll return to the Free tier with 3 analyses per month. You can resubscribe anytime.")
             }
         }
     }
@@ -325,28 +246,6 @@ struct SettingsView: View {
             print("Failed to load storage info: \(error)")
         }
         isLoadingStorage = false
-    }
-    
-    private func loadBackups() async {
-        isLoadingBackups = true
-        do {
-            backups = try FileManagementService.shared.listBackups()
-        } catch {
-            print("Failed to load backups: \(error)")
-        }
-        isLoadingBackups = false
-    }
-    
-    private func createBackup() {
-        Task {
-            do {
-                _ = try FileManagementService.shared.createBackup()
-                showCreateBackupAlert = true
-                await loadBackups()
-            } catch {
-                print("Failed to create backup: \(error)")
-            }
-        }
     }
     
     private func cancelSubscription() async {
@@ -403,19 +302,16 @@ struct AboutView: View {
             ScrollView {
                 VStack(spacing: 24) {
                     // App Icon
-                    Image(systemName: "waveform.circle.fill")
-                        .font(.system(size: 80))
-                        .foregroundStyle(Color.accentColor)
+                    Image("AppIconDisplay")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 120, height: 120)
+                        .clipShape(RoundedRectangle(cornerRadius: 27, style: .continuous))
                         .padding(.top, 32)
                     
-                    VStack(spacing: 8) {
-                        Text("MixDoctor")
-                            .font(.title.weight(.bold))
-                        
-                        Text("Professional Audio Analysis")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
+                    Text("Professional Audio Analysis")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                     
                     VStack(alignment: .leading, spacing: 16) {
                         Text("Features")
@@ -495,146 +391,6 @@ struct StorageInfoRow: View {
 }
 
 // MARK: - Restore Backup View
-
-struct RestoreBackupView: View {
-    @Environment(\.dismiss) private var dismiss
-    let backups: [BackupInfo]
-    @State private var selectedBackup: BackupInfo?
-    @State private var showRestoreConfirmation = false
-    
-    var body: some View {
-        NavigationStack {
-            List {
-                ForEach(backups, id: \.url) { backup in
-                    Button {
-                        selectedBackup = backup
-                        showRestoreConfirmation = true
-                    } label: {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(backup.name)
-                                .font(.headline)
-                            
-                            HStack {
-                                Label(backup.formattedDate, systemImage: "calendar")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                
-                                Spacer()
-                                
-                                Label(backup.formattedSize, systemImage: "externaldrive")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
-                    .foregroundStyle(.primary)
-                }
-                .onDelete { indexSet in
-                    deleteBackups(at: indexSet)
-                }
-            }
-            .navigationTitle("Restore Backup")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    EditButton()
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                }
-            }
-            .alert("Restore Backup", isPresented: $showRestoreConfirmation) {
-                Button("Restore", role: .destructive) {
-                    restoreBackup()
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("This will replace all current data with the backup. This action cannot be undone.")
-            }
-        }
-    }
-    
-    private func deleteBackups(at offsets: IndexSet) {
-        for index in offsets {
-            let backup = backups[index]
-            try? FileManagementService.shared.deleteBackup(at: backup.url)
-        }
-    }
-    
-    private func restoreBackup() {
-        // Restoration logic would go here
-        // This is a placeholder for now
-        dismiss()
-    }
-}
-
-// MARK: - Delete Old Files View
-
-struct DeleteOldFilesView: View {
-    @Environment(\.dismiss) private var dismiss
-    @State private var selectedDays = 30
-    @State private var showConfirmation = false
-    
-    let dayOptions = [7, 14, 30, 60, 90, 180]
-    
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    Picker("Delete files older than", selection: $selectedDays) {
-                        ForEach(dayOptions, id: \.self) { days in
-                            Text("\(days) days").tag(days)
-                        }
-                    }
-                } header: {
-                    Text("Time Period")
-                } footer: {
-                    Text("Files imported more than \(selectedDays) days ago will be permanently deleted")
-                }
-                
-                Section {
-                    Button(role: .destructive) {
-                        showConfirmation = true
-                    } label: {
-                        Label("Delete Old Files", systemImage: "trash")
-                    }
-                }
-            }
-            .navigationTitle("Delete Old Files")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
-                }
-            }
-            .alert("Delete Old Files", isPresented: $showConfirmation) {
-                Button("Delete", role: .destructive) {
-                    deleteOldFiles()
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("This will permanently delete all files older than \(selectedDays) days. This action cannot be undone.")
-            }
-        }
-    }
-    
-    private func deleteOldFiles() {
-        Task {
-            do {
-                let deletedCount = try FileManagementService.shared.deleteOldFiles(olderThan: selectedDays)
-                print("Deleted \(deletedCount) files")
-                dismiss()
-            } catch {
-                print("Failed to delete old files: \(error)")
-            }
-        }
-    }
-}
 
 #Preview {
     SettingsView()

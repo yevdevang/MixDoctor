@@ -22,16 +22,9 @@ struct PaywallView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                // Background gradient
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.435, green: 0.173, blue: 0.871).opacity(0.1),
-                        Color(red: 0.435, green: 0.173, blue: 0.871).opacity(0.05)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .ignoresSafeArea()
+                // Background
+                Color(red: 0xef/255, green: 0xe8/255, blue: 0xfd/255)
+                    .ignoresSafeArea()
                 
                 ScrollView {
                     VStack(spacing: 32) {
@@ -59,14 +52,18 @@ struct PaywallView: View {
                         footerSection
                     }
                     .padding()
+                    .padding(.top, -20)
                 }
             }
             .navigationTitle("Upgrade to Pro")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") {
+                    Button {
                         dismiss()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(Color(red: 0.435, green: 0.173, blue: 0.871))
                     }
                 }
             }
@@ -85,18 +82,11 @@ struct PaywallView: View {
     
     private var headerSection: some View {
         VStack(spacing: 16) {
-            Image(systemName: "waveform.circle.fill")
-                .font(.system(size: 80))
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [
-                            Color(red: 0.435, green: 0.173, blue: 0.871),
-                            Color(red: 0.6, green: 0.3, blue: 0.95)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+            Image("mix-doctor-bg")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 100, height: 100)
+                .clipShape(RoundedRectangle(cornerRadius: 22.5, style: .continuous))
             
             Text("Unlock Pro Features")
                 .font(.title.bold())
@@ -136,19 +126,13 @@ struct PaywallView: View {
             )
             
             PaywallFeatureRow(
-                icon: "icloud",
-                title: "Cloud Sync",
-                description: "Access your analysis anywhere"
-            )
-            
-            PaywallFeatureRow(
                 icon: "star.fill",
                 title: "Priority Support",
                 description: "Get help when you need it"
             )
         }
         .padding()
-        .background(Color(.systemBackground))
+        .background(Color.white)
         .cornerRadius(16)
         .shadow(color: .black.opacity(0.05), radius: 10)
     }
@@ -182,7 +166,7 @@ struct PaywallView: View {
                     ProgressView()
                         .tint(.white)
                 } else {
-                    Text("Start Free Trial")
+                    Text("Start 7-Day Free Trial")
                         .font(.headline)
                 }
             }
@@ -229,19 +213,20 @@ struct PaywallView: View {
     
     private var footerSection: some View {
         VStack(spacing: 8) {
-            Text("Free tier: 5 analyses per month")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            // Updated footer text to reflect trial behavior
+            Text("7-day free trial with 3 analyses, then $5.99/month or $47.88/year ($3.99/month). After trial, you'll get 3 free analyses per month. Subscribe anytime for unlimited analyses with Pro AI features.")
+                .font(.caption2)
+                .foregroundColor(.gray)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
             
             HStack(spacing: 16) {
-                Link("Privacy Policy", destination: URL(string: "https://yourwebsite.com/privacy")!)
-                Text("•")
-                Link("Terms of Service", destination: URL(string: "https://yourwebsite.com/terms")!)
+                Button("Terms of Service") { }
+                Button("Privacy Policy") { }
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
+            .font(.caption2)
+            .foregroundColor(Color(red: 0.435, green: 0.173, blue: 0.871))
         }
-        .padding(.bottom)
     }
     
     // MARK: - Actions
@@ -303,17 +288,17 @@ private struct PaywallFeatureRow: View {
     let description: String
     
     var body: some View {
-        HStack(alignment: .top, spacing: 16) {
+        HStack(alignment: .center, spacing: 12) {
             Image(systemName: icon)
-                .font(.title2)
+                .font(.title3)
                 .foregroundStyle(Color(red: 0.435, green: 0.173, blue: 0.871))
-                .frame(width: 32)
+                .frame(width: 28)
             
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.headline)
+                    .font(.subheadline.weight(.semibold))
                 Text(description)
-                    .font(.subheadline)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             }
             
@@ -353,7 +338,7 @@ private struct PackageCard: View {
                             .font(.headline)
                         
                         if isAnnual {
-                            Text("BEST VALUE")
+                            Text("SAVE 33%")
                                 .font(.caption2.bold())
                                 .foregroundStyle(.white)
                                 .padding(.horizontal, 8)

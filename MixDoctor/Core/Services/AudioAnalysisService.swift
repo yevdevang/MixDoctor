@@ -136,7 +136,12 @@ final class AudioAnalysisService {
         
         // Analyze with OpenAI
         analysisProgress = 0.8
-        print("   🤖 Analyzing with OpenAI GPT-5 Nano...")
+        
+        // Check if user has Pro subscription
+        let subscriptionService = await SubscriptionService.shared
+        let isProUser = await subscriptionService.isProUser
+        
+        print("   🤖 Analyzing with OpenAI \(isProUser ? "GPT-4o (Pro)" : "GPT-4o-mini (Free)")...")
         print("   📤 Sending to OpenAI:")
         print("      Peak Level: \(peakLevelDB) dBFS")
         print("      RMS Level: \(rmsLevelDB) dBFS")
@@ -157,7 +162,8 @@ final class AudioAnalysisService {
             highFrequencyEnergy: highEnergy,
             spectralCentroid: frequencyFeatures.spectralCentroid,
             zeroCrossingRate: 0.5,  // Placeholder
-            phaseCoherence: stereoFeatures.correlation
+            phaseCoherence: stereoFeatures.correlation,
+            isProUser: isProUser
         )
         
         print("   📥 OpenAI Response:")

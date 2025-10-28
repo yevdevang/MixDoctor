@@ -11,6 +11,23 @@ import SwiftData
 struct PlayerView: View {
     @State private var viewModel: PlayerViewModel?
     let audioFile: AudioFile?
+    let allAudioFiles: [AudioFile]
+    @Binding var shouldAutoPlay: Bool
+    let onSelectAudioFile: (AudioFile?) -> Void
+    let onPlaybackStateChange: (Bool) -> Void
+    
+    private var currentIndex: Int? {
+        guard let audioFile else { return nil }
+        return allAudioFiles.firstIndex(where: { $0.id == audioFile.id })
+    }
+    
+    private var hasPrevious: Bool {
+        allAudioFiles.count > 1
+    }
+    
+    private var hasNext: Bool {
+        allAudioFiles.count > 1
+    }
     
     var body: some View {
         NavigationStack {
@@ -23,9 +40,6 @@ struct PlayerView: View {
                             if let file = audioFile {
                                 let newViewModel = PlayerViewModel(audioFile: file)
                                 viewModel = newViewModel
-                                // Auto-play when file is loaded
-                                try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 second delay
-                                newViewModel.play()
                             }
                         }
                 } else {
@@ -33,6 +47,13 @@ struct PlayerView: View {
                 }
             }
             .navigationTitle("Player")
+            .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                // Auto-select first file if none is selected but files exist
+                if audioFile == nil && !allAudioFiles.isEmpty {
+                    onSelectAudioFile(allAudioFiles[0])
+                }
+            }
         }
         .onChange(of: audioFile) { oldValue, newValue in
             if let newFile = newValue {
@@ -41,9 +62,31 @@ struct PlayerView: View {
                 // Create new view model with selected audio file
                 let newViewModel = PlayerViewModel(audioFile: newFile)
                 viewModel = newViewModel
-                // Auto-play the new file
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    newViewModel.play()
+                // Auto-play if flag is set
+                if shouldAutoPlay {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        newViewModel.play()
+                    }
+                    shouldAutoPlay = false // Reset flag
+                }
+            }
+        }
+        .onChange(of: viewModel?.isPlaying) { _, newValue in
+            onPlaybackStateChange(newValue ?? false)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .audioFileDeleted)) { _ in
+            // Check if current file still exists in allAudioFiles
+            if let currentFile = audioFile {
+                if !allAudioFiles.contains(where: { $0.id == currentFile.id }) {
+                    // Current file was deleted, clear it and load first available
+                    viewModel?.stop()
+                    viewModel = nil
+                    if let firstFile = allAudioFiles.first {
+                        onSelectAudioFile(firstFile)
+                    } else {
+                        // No files left, clear selection
+                        onSelectAudioFile(nil)
+                    }
                 }
             }
         }
@@ -104,14 +147,7 @@ struct PlayerView: View {
     private func fileInfoSection(viewModel: PlayerViewModel) -> some View {
         VStack(spacing: 8) {
             // Album art placeholder
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color(white: 0.9))
-                .frame(width: 200, height: 200)
-                .overlay {
-                    Image(systemName: "music.note")
-                        .font(.system(size: 60))
-                        .foregroundStyle(.secondary)
-                }
+            AlbumArtworkView()
             
             Text(viewModel.audioFile.fileName)
                 .font(.title2.weight(.semibold))
@@ -160,13 +196,23 @@ struct PlayerView: View {
     // MARK: - Playback Controls
     
     private func playbackControlsSection(viewModel: PlayerViewModel) -> some View {
-        HStack(spacing: 32) {
-            // Skip back
+        HStack(spacing: 20) {
+            // Previous track
+            Button {
+                playPreviousTrack()
+            } label: {
+                Image(systemName: "backward.fill")
+                    .font(.title2)
+            }
+            .foregroundStyle(hasPrevious ? Color(red: 0.435, green: 0.173, blue: 0.871) : Color.gray.opacity(0.3))
+            .disabled(!hasPrevious)
+            
+            // Skip back 10 seconds
             Button {
                 viewModel.skipBackward()
             } label: {
                 Image(systemName: "gobackward.10")
-                    .font(.title)
+                    .font(.title2)
             }
             .foregroundStyle(Color(red: 0.435, green: 0.173, blue: 0.871))
             
@@ -179,14 +225,24 @@ struct PlayerView: View {
             }
             .foregroundStyle(Color(red: 0.435, green: 0.173, blue: 0.871))
             
-            // Skip forward
+            // Skip forward 10 seconds
             Button {
                 viewModel.skipForward()
             } label: {
                 Image(systemName: "goforward.10")
-                .font(.title)
+                    .font(.title2)
             }
             .foregroundStyle(Color(red: 0.435, green: 0.173, blue: 0.871))
+            
+            // Next track
+            Button {
+                playNextTrack()
+            } label: {
+                Image(systemName: "forward.fill")
+                    .font(.title2)
+            }
+            .foregroundStyle(hasNext ? Color(red: 0.435, green: 0.173, blue: 0.871) : Color.gray.opacity(0.3))
+            .disabled(!hasNext)
         }
     }
     
@@ -244,6 +300,20 @@ struct PlayerView: View {
     }
     
     // MARK: - Helper Functions
+    
+    private func playPreviousTrack() {
+        guard let currentIndex = currentIndex, allAudioFiles.count > 1 else { return }
+        let previousIndex = (currentIndex - 1 + allAudioFiles.count) % allAudioFiles.count
+        let previousFile = allAudioFiles[previousIndex]
+        onSelectAudioFile(previousFile)
+    }
+    
+    private func playNextTrack() {
+        guard let currentIndex = currentIndex, allAudioFiles.count > 1 else { return }
+        let nextIndex = (currentIndex + 1) % allAudioFiles.count
+        let nextFile = allAudioFiles[nextIndex]
+        onSelectAudioFile(nextFile)
+    }
     
     private func timeString(from timeInterval: TimeInterval) -> String {
         let totalSeconds = Int(timeInterval.rounded())
@@ -322,7 +392,31 @@ private struct PlaybackProgressSlider: View {
     }
 }
 
+// MARK: - Album Artwork Component
+private struct AlbumArtworkView: View {
+    @Environment(\.colorScheme) var colorScheme
+    
+    var body: some View {
+        RoundedRectangle(cornerRadius: 12)
+            .fill(colorScheme == .dark ? Color(white: 0.15) : Color(red: 239/255, green: 232/255, blue: 253/255))
+            .frame(width: 200, height: 200)
+            .overlay {
+                Image(systemName: "music.quarternote.3")
+                    .font(.system(size: 60))
+                    .foregroundStyle(Color(red: 0.435, green: 0.173, blue: 0.871))
+            }
+    }
+}
+
 #Preview {
-    PlayerView(audioFile: nil)
-        .modelContainer(for: [AudioFile.self])
+    @Previewable @State var shouldAutoPlay = false
+    
+    PlayerView(
+        audioFile: nil,
+        allAudioFiles: [],
+        shouldAutoPlay: $shouldAutoPlay,
+        onSelectAudioFile: { _ in },
+        onPlaybackStateChange: { _ in }
+    )
+    .modelContainer(for: [AudioFile.self])
 }

@@ -19,6 +19,7 @@ final class PlayerViewModel {
     private var timer: Timer?
     private var playbackStartTime: Date?
     private var pausedTime: TimeInterval = 0
+    private var isRescheduling = false // Flag to prevent completion handler from running during manual reschedule
     
     // Playback state
     var isPlaying = false
@@ -158,6 +159,7 @@ final class PlayerViewModel {
         print("🎵 Toggle play/pause. Current state: \(isPlaying ? "playing" : "paused")")
         print("   Audio engine exists: \(audioEngine != nil)")
         print("   Load error: \(loadError ?? "none")")
+        print("   Current time: \(currentTime), Paused time: \(pausedTime)")
         
         if isPlaying {
             pause()
@@ -168,6 +170,7 @@ final class PlayerViewModel {
     
     func play() {
         print("▶️ Play requested")
+        print("   pausedTime at start: \(pausedTime)")
         guard let engine = audioEngine, 
               let playerNode = audioPlayerNode,
               let audioFile = audioFile_av else {
@@ -181,59 +184,127 @@ final class PlayerViewModel {
                 try engine.start()
             }
             
-            // If not playing or at the end, schedule the file
-            if !isPlaying || currentTime >= duration {
-                // Stop current playback
-                playerNode.stop()
-                
-                // Calculate start frame based on current time
-                let startFrame = AVAudioFramePosition(currentTime * audioFile.processingFormat.sampleRate)
-                let frameCount = AVAudioFrameCount(audioFile.length - startFrame)
-                
-                if frameCount > 0 {
-                    // Schedule buffer
+            // Save pausedTime before stopping (as stop might trigger completion handler)
+            let resumeTime = pausedTime
+            
+            // Set flag to prevent completion handler from running during reschedule
+            isRescheduling = true
+            
+            // Always stop and reschedule when resuming
+            playerNode.stop()
+            
+            // Restore current time
+            currentTime = resumeTime
+            
+            // Calculate start frame based on resume time
+            let startFrame = AVAudioFramePosition(resumeTime * audioFile.processingFormat.sampleRate)
+            let totalFrames = audioFile.length
+            let remainingFrames = totalFrames - startFrame
+            
+            print("   Resuming from time: \(resumeTime), startFrame: \(startFrame)")
+            print("   Total file length: \(totalFrames), Remaining frames: \(remainingFrames)")
+            print("   Sample rate: \(audioFile.processingFormat.sampleRate)")
+            print("   Expected playback duration: \(Double(remainingFrames) / audioFile.processingFormat.sampleRate) seconds")
+            
+            if remainingFrames > 0 {
+                // Use scheduleFile for better handling of large audio files
+                // This avoids UInt32 overflow issues with frameCount
+                if startFrame == 0 {
+                    // Playing from beginning - use scheduleFile
+                    playerNode.scheduleFile(
+                        audioFile,
+                        at: nil
+                    ) { [weak self] in
+                        // Completion handler - handle looping or natural end
+                        DispatchQueue.main.async {
+                            guard let self = self else { return }
+                            print("🎵 Playback completion handler called")
+                            print("   isRescheduling: \(self.isRescheduling)")
+                            print("   isPlaying: \(self.isPlaying)")
+                            print("   currentTime: \(self.currentTime)")
+                            print("   duration: \(self.duration)")
+                            // Only handle completion if NOT rescheduling and actually playing
+                            if !self.isRescheduling && self.isPlaying {
+                                if self.isLooping {
+                                    self.currentTime = 0
+                                    self.pausedTime = 0
+                                    self.play()
+                                } else {
+                                    self.stop()
+                                }
+                            }
+                            // Reset rescheduling flag
+                            self.isRescheduling = false
+                        }
+                    }
+                } else {
+                    // Playing from middle - use scheduleSegment
+                    // Safe cast: if remainingFrames is too large, play what we can
+                    let safeFrameCount = min(remainingFrames, AVAudioFramePosition(UInt32.max))
+                    let frameCount = AVAudioFrameCount(safeFrameCount)
+                    
                     playerNode.scheduleSegment(
                         audioFile,
                         startingFrame: startFrame,
                         frameCount: frameCount,
                         at: nil
                     ) { [weak self] in
-                        // Completion handler - handle looping
+                        // Completion handler - handle looping or natural end
                         DispatchQueue.main.async {
-                            if self?.isLooping == true {
-                                self?.currentTime = 0
-                                self?.pausedTime = 0
-                                self?.play()
-                            } else {
-                                self?.stop()
+                            guard let self = self else { return }
+                            print("🎵 Playback completion handler called")
+                            print("   isRescheduling: \(self.isRescheduling)")
+                            print("   isPlaying: \(self.isPlaying)")
+                            print("   currentTime: \(self.currentTime)")
+                            print("   duration: \(self.duration)")
+                            // Only handle completion if NOT rescheduling and actually playing
+                            if !self.isRescheduling && self.isPlaying {
+                                if self.isLooping {
+                                    self.currentTime = 0
+                                    self.pausedTime = 0
+                                    self.play()
+                                } else {
+                                    self.stop()
+                                }
                             }
+                            // Reset rescheduling flag
+                            self.isRescheduling = false
                         }
                     }
-                    
-                    playerNode.play()
-                    playbackStartTime = Date()
                 }
-            } else {
-                // Resume playback
+                
                 playerNode.play()
                 playbackStartTime = Date()
+                isPlaying = true
+                
+                // Clear rescheduling flag after a brief delay to ensure it's set when completion might fire
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    self.isRescheduling = false
+                }
+                
+                startTimer()
+                print("   ✅ Playback started at time: \(currentTime)")
+            } else {
+                isRescheduling = false
+                print("   ⚠️ No frames to play (at end of file)")
             }
-            
-            isPlaying = true
-            startTimer()
-            print("   ✅ Playback started at time: \(currentTime)")
         } catch {
+            isRescheduling = false
             print("❌ Failed to start playback: \(error)")
             loadError = "Failed to start playback: \(error.localizedDescription)"
         }
     }
     
     func pause() {
-        audioPlayerNode?.pause()
+        guard let playerNode = audioPlayerNode else { return }
+        
+        playerNode.pause()
         isPlaying = false
         pausedTime = currentTime
         playbackStartTime = nil
         stopTimer()
+        
+        print("⏸️ Paused at time: \(pausedTime)")
     }
     
     func stop() {
@@ -264,9 +335,14 @@ final class PlayerViewModel {
             
             // Calculate start frame based on new time
             let startFrame = AVAudioFramePosition(time * audioFile.processingFormat.sampleRate)
-            let frameCount = AVAudioFrameCount(audioFile.length - startFrame)
+            let totalFrames = audioFile.length
+            let remainingFrames = totalFrames - startFrame
             
-            if frameCount > 0 {
+            if remainingFrames > 0 {
+                // Safe cast: if remainingFrames is too large, play what we can
+                let safeFrameCount = min(remainingFrames, AVAudioFramePosition(UInt32.max))
+                let frameCount = AVAudioFrameCount(safeFrameCount)
+                
                 // Schedule new segment
                 playerNode.scheduleSegment(
                     audioFile,

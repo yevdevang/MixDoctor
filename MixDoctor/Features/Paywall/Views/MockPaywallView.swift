@@ -21,18 +21,11 @@ struct MockPaywallView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                // Background gradient
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.435, green: 0.173, blue: 0.871).opacity(0.1),
-                        Color(red: 0.435, green: 0.173, blue: 0.871).opacity(0.05)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .ignoresSafeArea()
+                // Background
+                Color(red: 0xef/255, green: 0xe8/255, blue: 0xfd/255)
+                    .ignoresSafeArea()
                 
-                ScrollView {
+                ScrollView(showsIndicators: false) {
                     VStack(spacing: 32) {
                         // Header
                         headerSection
@@ -55,15 +48,20 @@ struct MockPaywallView: View {
                         // Footer
                         footerSection
                     }
-                    .padding()
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+                    .padding(.bottom, 24)
                 }
             }
             .navigationTitle("Upgrade to Pro")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") {
+                    Button {
                         dismiss()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(Color(red: 0.435, green: 0.173, blue: 0.871))
                     }
                 }
             }
@@ -79,28 +77,20 @@ struct MockPaywallView: View {
     
     private var headerSection: some View {
         VStack(spacing: 16) {
-            Image(systemName: "waveform.circle.fill")
-                .font(.system(size: 80))
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [
-                            Color(red: 0.435, green: 0.173, blue: 0.871),
-                            Color(red: 0.6, green: 0.3, blue: 0.95)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+            Image("mix-doctor-bg")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 100, height: 100)
+                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
             
             Text("Unlock Pro Features")
                 .font(.title.bold())
             
-            Text("Get unlimited audio analyses and access to all premium features")
-                .font(.body)
+            Text("Get unlimited access to advanced AI-powered mix analysis and professional features")
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
         }
-        .padding(.top)
     }
     
     // MARK: - Features Section
@@ -109,7 +99,6 @@ struct MockPaywallView: View {
         VStack(alignment: .leading, spacing: 20) {
             Text("Premium Features")
                 .font(.headline)
-                .foregroundColor(.primary)
             
             MockFeatureRow(
                 icon: "waveform.badge.checkmark",
@@ -129,12 +118,6 @@ struct MockPaywallView: View {
                 description: "Get comprehensive mix analysis"
             )
             
-//            MockFeatureRow(
-//                icon: "icloud",
-//                title: "Cloud Sync",
-//                description: "Access your analysis anywhere"
-//            )
-            
             MockFeatureRow(
                 icon: "star.fill",
                 title: "Priority Support",
@@ -142,9 +125,8 @@ struct MockPaywallView: View {
             )
         }
         .padding()
-        .background(Color(.systemBackground))
+        .background(Color.white)
         .cornerRadius(16)
-        .shadow(color: .black.opacity(0.05), radius: 10)
     }
     
     // MARK: - Packages Section
@@ -176,7 +158,7 @@ struct MockPaywallView: View {
                     ProgressView()
                         .tint(.white)
                 } else {
-                    Text("Start Free Trial")
+                    Text("Start 7-Day Free Trial")
                         .font(.headline)
                 }
             }
@@ -221,40 +203,60 @@ struct MockPaywallView: View {
     // MARK: - Mock Controls
     
     private var mockControlsSection: some View {
-        VStack(spacing: 12) {
-            Text("🧪 Mock Testing Controls")
-                .font(.caption.bold())
+        VStack(spacing: 8) {
+            Text("🧪 Mock Testing")
+                .font(.caption2.bold())
                 .foregroundStyle(.secondary)
             
-            Button("Reset to Free User") {
-                mockService.resetToFree()
+            HStack(spacing: 8) {
+                Button("Reset to Free") {
+                    mockService.resetToFree()
+                }
+                .font(.caption2)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(Color.orange.opacity(0.2))
+                .foregroundColor(.orange)
+                .cornerRadius(6)
+                
+                Button("Reset Analysis Count") {
+                    mockService.remainingFreeAnalyses = 3
+                    mockService.hasReachedFreeLimit = false
+                    UserDefaults.standard.set(3, forKey: "mock_remainingAnalyses")
+                    UserDefaults.standard.set(false, forKey: "mock_hasReachedLimit")
+                }
+                .font(.caption2)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(Color.blue.opacity(0.2))
+                .foregroundColor(.blue)
+                .cornerRadius(6)
             }
-            .font(.caption)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(Color.orange.opacity(0.2))
-            .foregroundColor(.orange)
-            .cornerRadius(8)
         }
-        .padding()
+        .padding(.vertical, 8)
+        .padding(.horizontal)
         .background(Color.yellow.opacity(0.1))
-        .cornerRadius(12)
+        .cornerRadius(8)
     }
     
     // MARK: - Footer Section
     
     private var footerSection: some View {
         VStack(spacing: 8) {
-            Text("By subscribing, you agree to our Terms of Service and Privacy Policy")
-                .font(.caption)
+            Text("7-day free trial with 3 analyses, then \(selectedPackageId == "annual" ? "$47.88/year" : "$5.99/month")")
+                .font(.caption2.bold())
+                .foregroundStyle(.primary)
+            
+            Text("Test Pro features during trial. Continue with 3 analyses/month free or subscribe for unlimited.")
+                .font(.caption2)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
             
-            HStack(spacing: 16) {
+            HStack(spacing: 12) {
                 Button("Terms") { }
                 Button("Privacy") { }
             }
-            .font(.caption)
+            .font(.caption2)
             .foregroundColor(Color(red: 0.435, green: 0.173, blue: 0.871))
         }
     }
@@ -302,18 +304,18 @@ private struct MockFeatureRow: View {
     let description: String
     
     var body: some View {
-        HStack(alignment: .top, spacing: 16) {
+        HStack(spacing: 16) {
             Image(systemName: icon)
                 .font(.title2)
-                .foregroundStyle(Color(red: 0.435, green: 0.173, blue: 0.871))
+                .foregroundStyle(.blue.gradient)
                 .frame(width: 32)
             
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(.headline)
+                    .font(.subheadline.weight(.semibold))
                 
                 Text(description)
-                    .font(.subheadline)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             }
             
@@ -336,7 +338,7 @@ private struct MockPackageCard: View {
                             .font(.headline)
                         
                         if package.id == "annual" {
-                            Text("SAVE 20%")
+                            Text("SAVE 33%")
                                 .font(.caption.bold())
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 4)

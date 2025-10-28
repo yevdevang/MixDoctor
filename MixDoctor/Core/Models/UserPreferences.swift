@@ -12,11 +12,9 @@ import SwiftData
 final class UserPreferences {
     var id: UUID
     var theme: String // "system", "light", "dark"
-    var analysisSensitivity: String // "low", "medium", "high"
     var autoAnalyze: Bool
     var keepOriginalFiles: Bool
     var defaultExportFormat: String // "pdf", "csv", "json"
-    var showDetailedMetrics: Bool
     var enableNotifications: Bool
     var maxCacheSize: Int64 // in bytes
     var lastModified: Date
@@ -24,11 +22,9 @@ final class UserPreferences {
     init() {
         self.id = UUID()
         self.theme = "system"
-        self.analysisSensitivity = "medium"
         self.autoAnalyze = true
         self.keepOriginalFiles = true
         self.defaultExportFormat = "pdf"
-        self.showDetailedMetrics = true
         self.enableNotifications = true
         self.maxCacheSize = 1024 * 1024 * 1024 // 1GB default
         self.lastModified = Date()
@@ -48,37 +44,6 @@ enum ThemeOption: String, CaseIterable, Identifiable {
         case .system: return "system"
         case .light: return "light"
         case .dark: return "dark"
-        }
-    }
-}
-
-// MARK: - Analysis Sensitivity
-enum AnalysisSensitivity: String, CaseIterable, Identifiable {
-    case low = "Low"
-    case medium = "Medium"
-    case high = "High"
-    
-    var id: String { rawValue }
-    
-    var description: String {
-        switch self {
-        case .low:
-            return "Less strict analysis, fewer issues flagged"
-        case .medium:
-            return "Balanced analysis with standard thresholds"
-        case .high:
-            return "Strict analysis, more issues flagged"
-        }
-    }
-    
-    var thresholdMultiplier: Double {
-        switch self {
-        case .low:
-            return 0.7
-        case .medium:
-            return 1.0
-        case .high:
-            return 1.3
         }
     }
 }

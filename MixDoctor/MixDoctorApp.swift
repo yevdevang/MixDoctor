@@ -12,6 +12,8 @@ import SwiftData
 struct MixDoctorApp: App {
     @State private var modelContainer: ModelContainer
     @State private var subscriptionService = SubscriptionService.shared
+    @State private var showWelcomeMessage = false
+    @State private var showLaunchScreen = true
     
     init() {
         let iCloudEnabled = UserDefaults.standard.bool(forKey: "iCloudSyncEnabled")
@@ -79,11 +81,51 @@ struct MixDoctorApp: App {
     
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .modelContainer(modelContainer)
-                .onReceive(NotificationCenter.default.publisher(for: .iCloudSyncToggled)) { _ in
-                    // User needs to restart app for iCloud sync changes to take effect
+            ZStack {
+                ContentView()
+                    .modelContainer(modelContainer)
+                    .alert("Welcome to Mix Doctor! 🎵", isPresented: $showWelcomeMessage) {
+                        Button("Got It!") {
+                            showWelcomeMessage = false
+                        }
+                    } message: {
+                        Text("You have 3 free analyses to get started. Upgrade to Pro for unlimited analyses and advanced features!")
+                    }
+                    .task {
+                        // Check subscription status on launch
+                        await subscriptionService.updateCustomerInfo()
+                        
+                        // Show welcome message only for first-time free users
+                        if !subscriptionService.isProUser {
+                            let hasSeenWelcome = UserDefaults.standard.bool(forKey: "hasSeenWelcomeMessage")
+                            if !hasSeenWelcome {
+                                // Small delay to ensure UI is ready
+                                try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+                                showWelcomeMessage = true
+                                UserDefaults.standard.set(true, forKey: "hasSeenWelcomeMessage")
+                            }
+                        }
+                    }
+                    .onReceive(NotificationCenter.default.publisher(for: .iCloudSyncToggled)) { _ in
+                        // User needs to restart app for iCloud sync changes to take effect
+                    }
+                    .opacity(showLaunchScreen ? 0 : 1)
+                
+                // Launch Screen
+                if showLaunchScreen {
+                    LaunchScreenView()
+                        .transition(.opacity)
+                        .zIndex(1)
                 }
+            }
+            .onAppear {
+                // Hide launch screen after animation
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                    withAnimation(.easeOut(duration: 0.5)) {
+                        showLaunchScreen = false
+                    }
+                }
+            }
         }
     }
 }
