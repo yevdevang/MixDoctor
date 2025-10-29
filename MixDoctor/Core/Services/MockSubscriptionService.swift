@@ -18,8 +18,10 @@ final class MockSubscriptionService {
     var isInTrialPeriod: Bool = false
     var remainingFreeAnalyses: Int = 3
     var hasReachedFreeLimit: Bool = false
+    var trialStartDate: Date?
     
     private let freeAnalysisLimit = 3
+    private let trialDurationDays = 7
     
     // Mock packages for UI
     struct MockPackage {
@@ -38,6 +40,21 @@ final class MockSubscriptionService {
     
     private init() {
         loadState()
+        checkTrialExpiration()
+    }
+    
+    private func checkTrialExpiration() {
+        // Check if trial has expired and auto-convert to paid
+        guard isInTrialPeriod, let startDate = trialStartDate else { return }
+        
+        let daysSinceStart = Calendar.current.dateComponents([.day], from: startDate, to: Date()).day ?? 0
+        
+        if daysSinceStart >= trialDurationDays {
+            print("⏰ Trial period expired after \(daysSinceStart) days - converting to paid")
+            mockConvertTrialToPaid()
+        } else {
+            print("📅 Trial day \(daysSinceStart + 1) of \(trialDurationDays)")
+        }
     }
     
     // MARK: - Public Methods
@@ -73,17 +90,47 @@ final class MockSubscriptionService {
         // Simulate network delay
         try? await Task.sleep(nanoseconds: 1_500_000_000) // 1.5 seconds
         
-        // 90% success rate to simulate real-world
-        let success = Int.random(in: 1...10) <= 9
+        // 100% success rate for testing (change to 90 if you want to test failures)
+        let success = true // Int.random(in: 1...10) <= 9
         
         if success {
-            // Simulate starting a trial (not a paid subscription yet)
+            // Simulate starting a trial
             isInTrialPeriod = true
-            isProUser = false // Trial users don't get unlimited
+            isProUser = false // Trial users treated as free tier
             hasReachedFreeLimit = false
-            // Don't reset remaining analyses - trial users use the same 3-analysis limit
+            remainingFreeAnalyses = freeAnalysisLimit // Reset to 3 analyses for trial
+            trialStartDate = Date() // Track when trial started
             saveState()
-            print("✅ Mock trial started - 3 analyses available")
+            print("✅ Mock trial started successfully")
+            print("   Package: \(packageId)")
+            print("   Trial status: \(isInTrialPeriod)")
+            print("   Pro status: \(isProUser)")
+            print("   Analyses available: \(remainingFreeAnalyses)")
+            print("   Trial will expire in \(trialDurationDays) days")
+        }
+        
+        return success
+    }
+    
+    func mockPurchaseSkipTrial(packageId: String) async -> Bool {
+        // Simulate network delay
+        try? await Task.sleep(nanoseconds: 1_500_000_000) // 1.5 seconds
+        
+        let success = true
+        
+        if success {
+            // Skip trial, go straight to paid subscription
+            isInTrialPeriod = false
+            isProUser = true // Paid subscriber gets unlimited
+            hasReachedFreeLimit = false
+            remainingFreeAnalyses = 0 // Not used for Pro users
+            trialStartDate = nil
+            saveState()
+            print("✅ Mock paid subscription activated (skipped trial)")
+            print("   Package: \(packageId)")
+            print("   Trial status: \(isInTrialPeriod)")
+            print("   Pro status: \(isProUser)")
+            print("   Analyses: UNLIMITED")
         }
         
         return success
@@ -163,11 +210,15 @@ final class MockSubscriptionService {
         UserDefaults.standard.set(isInTrialPeriod, forKey: "mock_isInTrial")
         UserDefaults.standard.set(remainingFreeAnalyses, forKey: "mock_remainingAnalyses")
         UserDefaults.standard.set(hasReachedFreeLimit, forKey: "mock_hasReachedLimit")
+        if let trialStartDate = trialStartDate {
+            UserDefaults.standard.set(trialStartDate, forKey: "mock_trialStartDate")
+        }
     }
     
     private func loadState() {
         isProUser = UserDefaults.standard.bool(forKey: "mock_isProUser")
         isInTrialPeriod = UserDefaults.standard.bool(forKey: "mock_isInTrial")
+        trialStartDate = UserDefaults.standard.object(forKey: "mock_trialStartDate") as? Date
         
         // Check if this is first launch (never saved before)
         let hasBeenInitialized = UserDefaults.standard.bool(forKey: "mock_hasBeenInitialized")

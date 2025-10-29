@@ -24,21 +24,16 @@ struct ResultsView: View {
     private let analysisService = AudioAnalysisService()
 
     var body: some View {
-        ZStack {
-            if isAnalyzing {
-                analysingView
-            } else {
-                ScrollView {
-                    if let result = analysisResult {
-                        resultContentView(result: result)
-                    } else {
-                        analysingView
-                    }
-                }
+        ScrollView {
+            if let result = analysisResult {
+                resultContentView(result: result)
             }
         }
         .navigationTitle("Analysis Results")
         .navigationBarTitleDisplayMode(.inline)
+        .fullScreenCover(isPresented: $isAnalyzing) {
+            analysingView
+        }
         .sheet(isPresented: $showPaywall, onDismiss: {
             // If paywall was dismissed without purchase, return to dashboard
             if !mockService.isProUser {
