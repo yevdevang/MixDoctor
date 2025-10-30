@@ -12,11 +12,13 @@ import SwiftData
 struct MixDoctorApp: App {
     @State private var modelContainer: ModelContainer
     @State private var subscriptionService = SubscriptionService.shared
+    @State private var iCloudMonitor = iCloudSyncMonitor.shared
     @State private var showWelcomeMessage = false
     @State private var showLaunchScreen = true
     
     init() {
-        let iCloudEnabled = UserDefaults.standard.bool(forKey: "iCloudSyncEnabled")
+        // Check if user has enabled iCloud sync (default to true for better UX)
+        let iCloudEnabled = UserDefaults.standard.object(forKey: "iCloudSyncEnabled") as? Bool ?? true
         
         do {
             let schema = Schema([AudioFile.self])
@@ -26,7 +28,7 @@ struct MixDoctorApp: App {
             let storeURL = appSupportURL.appendingPathComponent("MixDoctor.store")
             
             // Schema version tracking for migration
-            let currentSchemaVersion = 2  // Incremented due to AudioFile fileURL change
+            let currentSchemaVersion = 3  // Incremented for CloudKit integration
             let lastSchemaVersion = UserDefaults.standard.integer(forKey: "lastSchemaVersion")
             
             // If there's a corrupted store or schema changed, delete it
@@ -40,6 +42,7 @@ struct MixDoctorApp: App {
                 }
             }
             
+            // Configure CloudKit integration
             let modelConfiguration = ModelConfiguration(
                 schema: schema,
                 url: storeURL,
@@ -53,8 +56,10 @@ struct MixDoctorApp: App {
             
             // Save schema version on successful initialization
             UserDefaults.standard.set(currentSchemaVersion, forKey: "lastSchemaVersion")
+            
+            print("✅ SwiftData initialized with CloudKit: \(iCloudEnabled ? "ENABLED" : "DISABLED")")
         } catch {
-            print("Initial ModelContainer creation failed: \(error)")
+            print("❌ Initial ModelContainer creation failed: \(error)")
             // Mark that we had a failure and try to delete and recreate
             UserDefaults.standard.set(true, forKey: "hadMigrationFailure")
             
@@ -67,12 +72,14 @@ struct MixDoctorApp: App {
                 let schema = Schema([AudioFile.self])
                 let modelConfiguration = ModelConfiguration(
                     schema: schema,
-                    url: storeURL
+                    url: storeURL,
+                    cloudKitDatabase: .none  // Fallback to local only on error
                 )
                 modelContainer = try ModelContainer(for: schema, configurations: [modelConfiguration])
                 
                 // Clear the failure flag since it worked
                 UserDefaults.standard.removeObject(forKey: "hadMigrationFailure")
+                print("⚠️ ModelContainer created in fallback mode (local only)")
             } catch {
                 fatalError("Could not create ModelContainer even after deleting store: \(error)")
             }
@@ -94,6 +101,9 @@ struct MixDoctorApp: App {
                     .task {
                         // Check subscription status on launch
                         await subscriptionService.updateCustomerInfo()
+                        
+                        // Start iCloud file monitoring
+                        iCloudMonitor.startMonitoring()
                         
                         // Show welcome message only for first-time free users
                         if !subscriptionService.isProUser {

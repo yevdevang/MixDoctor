@@ -484,6 +484,19 @@ struct ResultsView: View {
     
     private func deleteFile() {
         print("🗑️ Deleting audio file: \(audioFile.fileName)")
+        
+        // Delete the actual audio file from storage (iCloud or local)
+        let fileURL = audioFile.fileURL
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+            do {
+                try FileManager.default.removeItem(at: fileURL)
+                print("✅ Deleted audio file from storage: \(fileURL.lastPathComponent)")
+            } catch {
+                print("❌ Failed to delete audio file: \(error)")
+            }
+        }
+        
+        // Delete the SwiftData record
         modelContext.delete(audioFile)
         try? modelContext.save()
         dismiss()

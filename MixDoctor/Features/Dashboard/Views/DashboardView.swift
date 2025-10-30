@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import AVFoundation
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -14,6 +15,8 @@ import UIKit
 struct DashboardView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \AudioFile.dateImported, order: .reverse) private var audioFiles: [AudioFile]
+    
+    @StateObject private var iCloudMonitor = iCloudSyncMonitor.shared
 
     @State private var searchText = ""
     @State private var filterOption: FilterOption = .all
@@ -77,6 +80,20 @@ struct DashboardView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
+                // iCloud sync status banner
+                if iCloudMonitor.isSyncing {
+                    HStack {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                        Text("Syncing files from iCloud...")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.vertical, 8)
+                    .padding(.horizontal)
+                    .background(Color.blue.opacity(0.1))
+                }
+                
                 if audioFiles.isEmpty {
                     emptyStateView
                 } else {
@@ -94,6 +111,18 @@ struct DashboardView: View {
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $searchText, prompt: "Search audio files")
             .toolbar {
+                // iCloud sync button
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button {
+                        Task {
+                            await iCloudMonitor.syncNow()
+                        }
+                    } label: {
+                        Label("Sync iCloud", systemImage: iCloudMonitor.isSyncing ? "arrow.triangle.2.circlepath" : "icloud.and.arrow.down")
+                    }
+                    .disabled(iCloudMonitor.isSyncing)
+                }
+                
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
                         Button(action: { sortOption = .date }) {
@@ -133,6 +162,13 @@ struct DashboardView: View {
             UINavigationBar.appearance().scrollEdgeAppearance = appearance
             UINavigationBar.appearance().compactAppearance = appearance
             #endif
+            
+            // Check for missing files and trigger downloads
+            Task {
+                await checkAndDownloadMissingFiles()
+                // Also scan for new files in iCloud that aren't in database yet
+                await scanAndImportFromiCloud()
+            }
         }
     }
 
@@ -222,6 +258,10 @@ struct DashboardView: View {
             }
             .onDelete(perform: deleteFiles)
         }
+        .refreshable {
+            await iCloudMonitor.syncNow()
+            await scanAndImportFromiCloud()
+        }
         .navigationDestination(for: AudioFile.self) { file in
             ResultsView(audioFile: file)
         }
@@ -230,19 +270,182 @@ struct DashboardView: View {
     // MARK: - Empty State
 
     private var emptyStateView: some View {
-        ContentUnavailableView(
-            "No Audio Files",
-            systemImage: "music.note",
-            description: Text("Import audio files to get started")
-        )
+        ScrollView {
+            VStack {
+                Spacer()
+                ContentUnavailableView(
+                    "No Audio Files",
+                    systemImage: "music.note",
+                    description: Text("Import audio files to get started.\n\nPull down to sync from iCloud.")
+                )
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .refreshable {
+            await iCloudMonitor.syncNow()
+            await scanAndImportFromiCloud()
+        }
     }
 
     // MARK: - Actions
+    
+    private func checkAndDownloadMissingFiles() async {
+        print("🔍 Checking for missing files in Dashboard...")
+        
+        var missingFiles: [(AudioFile, URL)] = []
+        
+        for file in audioFiles {
+            let fileURL = file.fileURL
+            let fileExists = FileManager.default.fileExists(atPath: fileURL.path)
+            
+            print("📄 File: \(file.fileName)")
+            print("   Path: \(fileURL.path)")
+            print("   Exists locally: \(fileExists)")
+            
+            if !fileExists {
+                missingFiles.append((file, fileURL))
+                
+                // Check if file exists in iCloud but not downloaded
+                do {
+                    let values = try fileURL.resourceValues(forKeys: [
+                        .isUbiquitousItemKey,
+                        .ubiquitousItemDownloadingStatusKey
+                    ])
+                    
+                    if let isICloud = values.isUbiquitousItem, isICloud {
+                        print("   ☁️ File exists in iCloud, downloading status: \(values.ubiquitousItemDownloadingStatus?.rawValue ?? "unknown")")
+                    }
+                } catch {
+                    print("   ⚠️ Could not check iCloud status: \(error)")
+                }
+            }
+        }
+        
+        if !missingFiles.isEmpty {
+            print("⬇️ Found \(missingFiles.count) missing file(s), triggering download...")
+            
+            // Trigger iCloud sync to download missing files
+            await iCloudMonitor.syncNow()
+            
+            // Additional attempt to explicitly download each missing file
+            for (file, fileURL) in missingFiles {
+                do {
+                    print("📥 Attempting to download: \(file.fileName)")
+                    try FileManager.default.startDownloadingUbiquitousItem(at: fileURL)
+                } catch {
+                    print("❌ Failed to start download for \(file.fileName): \(error)")
+                }
+            }
+        } else {
+            print("✅ All files exist locally")
+        }
+    }
+    
+    private func scanAndImportFromiCloud() async {
+        print("🔍 Auto-scanning iCloud Drive for new audio files...")
+        
+        let service = iCloudStorageService.shared
+        let audioDir = service.getAudioFilesDirectory()
+        
+        do {
+            let files = try FileManager.default.contentsOfDirectory(
+                at: audioDir,
+                includingPropertiesForKeys: [.fileSizeKey],
+                options: [.skipsHiddenFiles]
+            )
+            
+            // Filter audio files
+            let audioExtensions = ["mp3", "wav", "m4a", "aac", "flac", "aif", "aiff"]
+            let audioFiles = files.filter { audioExtensions.contains($0.pathExtension.lowercased()) }
+            
+            var imported = 0
+            
+            for fileURL in audioFiles {
+                // Check if already imported
+                let fileName = fileURL.lastPathComponent
+                let descriptor = FetchDescriptor<AudioFile>(
+                    predicate: #Predicate<AudioFile> { $0.fileName == fileName }
+                )
+                
+                if let existing = try? modelContext.fetch(descriptor), !existing.isEmpty {
+                    continue // Already imported
+                }
+                
+                // Download if needed
+                do {
+                    let values = try fileURL.resourceValues(forKeys: [URLResourceKey.ubiquitousItemDownloadingStatusKey])
+                    if values.ubiquitousItemDownloadingStatus == .notDownloaded {
+                        try FileManager.default.startDownloadingUbiquitousItem(at: fileURL)
+                        try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    }
+                } catch {
+                    print("⚠️ Download check error: \(error)")
+                }
+                
+                // Import the file
+                do {
+                    let asset = AVURLAsset(url: fileURL)
+                    let duration = try await asset.load(.duration).seconds
+                    let tracks = try await asset.loadTracks(withMediaType: .audio)
+                    
+                    guard let track = tracks.first else { continue }
+                    
+                    let formatDescriptions = try await track.load(.formatDescriptions)
+                    guard let formatDescription = formatDescriptions.first else { continue }
+                    
+                    let basicDescription = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription)
+                    let sampleRate = basicDescription?.pointee.mSampleRate ?? 44100.0
+                    let channels = Int(basicDescription?.pointee.mChannelsPerFrame ?? 2)
+                    
+                    let fileAttributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
+                    let fileSize = fileAttributes[.size] as? Int64 ?? 0
+                    
+                    let audioFile = AudioFile(
+                        fileName: fileName,
+                        fileURL: fileURL,
+                        duration: duration,
+                        sampleRate: sampleRate,
+                        bitDepth: 16,
+                        numberOfChannels: channels,
+                        fileSize: fileSize
+                    )
+                    
+                    modelContext.insert(audioFile)
+                    try modelContext.save()
+                    
+                    print("✅ Auto-imported: \(fileName)")
+                    imported += 1
+                } catch {
+                    print("❌ Failed to auto-import \(fileName): \(error)")
+                }
+            }
+            
+            if imported > 0 {
+                print("📊 Auto-import complete: \(imported) new file(s)")
+            }
+        } catch {
+            print("❌ Error scanning directory: \(error)")
+        }
+    }
 
     private func deleteFiles(at offsets: IndexSet) {
         for index in offsets {
             let file = filteredFiles[index]
             print("🗑️ Deleting file from Dashboard: \(file.fileName)")
+            
+            // Delete the actual audio file from storage (iCloud or local)
+            let fileURL = file.fileURL
+            if FileManager.default.fileExists(atPath: fileURL.path) {
+                do {
+                    try FileManager.default.removeItem(at: fileURL)
+                    print("✅ Deleted audio file: \(fileURL.lastPathComponent)")
+                } catch {
+                    print("❌ Failed to delete audio file: \(error)")
+                }
+            }
+            
+            // Delete the SwiftData record
             modelContext.delete(file)
         }
         try? modelContext.save()

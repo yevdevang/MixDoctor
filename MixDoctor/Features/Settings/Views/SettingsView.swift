@@ -146,9 +146,6 @@ struct SettingsView: View {
                 }
                 
                 // MARK: - iCloud Section
-                // Commented out - Audio files are stored locally on each device
-                // Only SwiftData metadata syncs via CloudKit
-                /*
                 Section {
                     Toggle(isOn: $viewModel.iCloudSyncEnabled) {
                         HStack(spacing: 12) {
@@ -160,19 +157,29 @@ struct SettingsView: View {
                                 Text("iCloud Sync")
                                     .font(.body)
                                 
-                                Text("Sync your audio files across devices")
+                                Text("Sync metadata across devices")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
                         }
                     }
                     .tint(Color.accentColor)
+                    
+                    // Debug view
+                    NavigationLink {
+                        iCloudDebugView()
+                    } label: {
+                        HStack {
+                            Image(systemName: "wrench.and.screwdriver")
+                                .foregroundStyle(.secondary)
+                            Text("iCloud Debug Info")
+                        }
+                    }
                 } header: {
                     Text("Cloud Storage")
                 } footer: {
-                    Text("When enabled, your imported audio files and analysis results will be synced across all your devices using iCloud. You'll need to restart the app for changes to take effect.")
+                    Text("When enabled, your audio file metadata and analysis results will be synced across all your devices using CloudKit. Audio files remain stored locally on each device. You'll need to restart the app for changes to take effect.")
                 }
-                */
                 
                 // MARK: - About Section
                 Section {

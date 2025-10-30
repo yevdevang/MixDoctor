@@ -23,7 +23,8 @@ final class SettingsViewModel {
     
     var iCloudSyncEnabled: Bool {
         get {
-            UserDefaults.standard.bool(forKey: "iCloudSyncEnabled")
+            // Default to true if not set (for better UX - CloudKit enabled by default)
+            UserDefaults.standard.object(forKey: "iCloudSyncEnabled") as? Bool ?? true
         }
         set {
             UserDefaults.standard.set(newValue, forKey: "iCloudSyncEnabled")

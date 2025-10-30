@@ -33,8 +33,8 @@ final class AudioFile {
     @Transient
     var fileURL: URL {
         get {
-            let audioDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("AudioFiles", isDirectory: true)
+            // Use iCloud storage service to get the correct directory
+            let audioDir = iCloudStorageService.shared.getAudioFilesDirectory()
             return audioDir.appendingPathComponent(storedFileName)
         }
         set {
