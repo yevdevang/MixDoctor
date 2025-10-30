@@ -2,14 +2,14 @@ import SwiftUI
 
 struct SettingsView: View {
     @State private var viewModel = SettingsViewModel()
-    // MARK: - Mock Testing - Switch to SubscriptionService.shared for production
     @State private var mockService = MockSubscriptionService.shared
     @State private var storageInfo: StorageInfo?
     @State private var isLoadingStorage = false
     @State private var showClearCacheAlert = false
     @State private var showPaywall = false
-    @State private var showCancelSubscriptionAlert = false
-    @State private var isCancelling = false
+    @State private var isRefreshingSubscription = false
+    @State private var isCancellingSubscription = false
+    @State private var showCancelConfirmation = false
     
     var body: some View {
         NavigationStack {
@@ -35,6 +35,29 @@ struct SettingsView: View {
                     }
                     .padding(.vertical, 4)
                     
+                    // Refresh subscription button
+                    Button {
+                        isRefreshingSubscription = true
+                        mockService.refreshSubscriptionStatus()
+                        // Small delay for visual feedback
+                        Task {
+                            try? await Task.sleep(nanoseconds: 500_000_000)
+                            isRefreshingSubscription = false
+                        }
+                    } label: {
+                        HStack {
+                            if isRefreshingSubscription {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text("Refreshing...")
+                            } else {
+                                Image(systemName: "arrow.clockwise")
+                                Text("Refresh Status")
+                            }
+                        }
+                    }
+                    .disabled(isRefreshingSubscription)
+                    
                     if !mockService.isProUser {
                         Button {
                             showPaywall = true
@@ -55,12 +78,12 @@ struct SettingsView: View {
                             }
                         }
                         
-                        // Mock testing: Cancel subscription button
+                        // Cancel subscription button (for testing with MockSubscriptionService)
                         Button(role: .destructive) {
-                            showCancelSubscriptionAlert = true
+                            showCancelConfirmation = true
                         } label: {
                             HStack {
-                                if isCancelling {
+                                if isCancellingSubscription {
                                     ProgressView()
                                         .controlSize(.small)
                                     Text("Cancelling...")
@@ -70,10 +93,26 @@ struct SettingsView: View {
                                 }
                             }
                         }
-                        .disabled(isCancelling)
+                        .disabled(isCancellingSubscription)
+                        .confirmationDialog(
+                            "Cancel Subscription",
+                            isPresented: $showCancelConfirmation,
+                            titleVisibility: .visible
+                        ) {
+                            Button("Cancel Subscription", role: .destructive) {
+                                Task {
+                                    await cancelSubscription()
+                                }
+                            }
+                            Button("Keep Subscription", role: .cancel) {}
+                        } message: {
+                            Text("Are you sure you want to cancel your subscription? You'll lose access to unlimited analyses and return to the free tier (3 analyses per month).")
+                        }
                     }
                 } header: {
                     Text("Subscription")
+                } footer: {
+                    Text("Subscription status syncs automatically across all your devices")
                 }
                 
                 // MARK: - Preferences Section
@@ -87,6 +126,8 @@ struct SettingsView: View {
                     Toggle("Auto-Analyze New Files", isOn: $viewModel.autoAnalyze)
                 } header: {
                     Text("Preferences")
+                } footer: {
+                    Text("Theme preference syncs automatically across all your devices")
                 }
                 
                 // MARK: - Storage Section
@@ -227,18 +268,12 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showPaywall) {
                 MockPaywallView(onPurchaseComplete: {
-                    // Mock service updates automatically
+                    // Subscription service updates automatically via RevenueCat listener
                 })
             }
-            .alert("Cancel Subscription?", isPresented: $showCancelSubscriptionAlert) {
-                Button("Cancel Subscription", role: .destructive) {
-                    Task {
-                        await cancelSubscription()
-                    }
-                }
-                Button("Keep Subscription", role: .cancel) {}
-            } message: {
-                Text("Your Pro features will end immediately and you'll return to the Free tier with 3 analyses per month. You can resubscribe anytime.")
+            .task {
+                // Refresh subscription status when view appears
+                mockService.refreshSubscriptionStatus()
             }
         }
     }
@@ -255,19 +290,6 @@ struct SettingsView: View {
         isLoadingStorage = false
     }
     
-    private func cancelSubscription() async {
-        isCancelling = true
-        
-        let success = await mockService.mockCancelSubscription()
-        
-        isCancelling = false
-        
-        if success {
-            print("✓ Subscription cancelled successfully")
-            // UI will update automatically via @Observable
-        }
-    }
-    
     private func clearCache() {
         Task {
             do {
@@ -276,6 +298,25 @@ struct SettingsView: View {
             } catch {
                 print("Failed to clear cache: \(error)")
             }
+        }
+    }
+    
+    private func cancelSubscription() async {
+        isCancellingSubscription = true
+        
+        // Call the mock service to cancel subscription
+        let success = await mockService.mockCancelSubscription()
+        
+        // Small delay for visual feedback
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        
+        isCancellingSubscription = false
+        
+        if success {
+            print("✅ Subscription cancelled successfully")
+            // Status will update automatically via iCloud sync
+        } else {
+            print("❌ Failed to cancel subscription")
         }
     }
     
