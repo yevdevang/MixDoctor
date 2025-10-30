@@ -82,16 +82,42 @@ struct DashboardView: View {
             VStack(spacing: 0) {
                 // iCloud sync status banner
                 if iCloudMonitor.isSyncing {
-                    HStack {
+                    HStack(spacing: 12) {
+                        // Animated sync icon
                         ProgressView()
-                            .scaleEffect(0.8)
-                        Text("Syncing files from iCloud...")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                            .tint(Color(red: 0.435, green: 0.173, blue: 0.871))
+                        
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Syncing with iCloud")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                                .foregroundStyle(.primary)
+                            
+                            Text("Checking for new files and updates...")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        
+                        Spacer()
                     }
-                    .padding(.vertical, 8)
-                    .padding(.horizontal)
-                    .background(Color.blue.opacity(0.1))
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.435, green: 0.173, blue: 0.871).opacity(0.08),
+                                Color(red: 0.435, green: 0.173, blue: 0.871).opacity(0.04)
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .overlay(
+                        Rectangle()
+                            .frame(height: 1)
+                            .foregroundStyle(Color(red: 0.435, green: 0.173, blue: 0.871).opacity(0.2)),
+                        alignment: .bottom
+                    )
                 }
                 
                 if audioFiles.isEmpty {
@@ -118,9 +144,15 @@ struct DashboardView: View {
                             await iCloudMonitor.syncNow()
                         }
                     } label: {
-                        Label("Sync iCloud", systemImage: iCloudMonitor.isSyncing ? "arrow.triangle.2.circlepath" : "icloud.and.arrow.down")
+                        if iCloudMonitor.isSyncing {
+                            ProgressView()
+                                .tint(Color(red: 0.435, green: 0.173, blue: 0.871))
+                        } else {
+                            Label("Sync iCloud", systemImage: "icloud.and.arrow.down")
+                        }
                     }
                     .disabled(iCloudMonitor.isSyncing)
+                    .foregroundStyle(Color(red: 0.435, green: 0.173, blue: 0.871))
                 }
                 
                 ToolbarItem(placement: .primaryAction) {
@@ -168,6 +200,18 @@ struct DashboardView: View {
                 await checkAndDownloadMissingFiles()
                 // Also scan for new files in iCloud that aren't in database yet
                 await scanAndImportFromiCloud()
+                // Load analysis results for existing files that don't have them
+                await loadMissingAnalysisResults()
+            }
+        }
+        .onChange(of: iCloudMonitor.isSyncing) { oldValue, newValue in
+            // When sync finishes (goes from true to false), automatically scan and load
+            if oldValue == true && newValue == false {
+                print("☁️ iCloud sync completed, automatically scanning for new files and analysis...")
+                Task {
+                    await scanAndImportFromiCloud()
+                    await loadMissingAnalysisResults()
+                }
             }
         }
     }
@@ -261,6 +305,7 @@ struct DashboardView: View {
         .refreshable {
             await iCloudMonitor.syncNow()
             await scanAndImportFromiCloud()
+            await loadMissingAnalysisResults()
         }
         .navigationDestination(for: AudioFile.self) { file in
             ResultsView(audioFile: file)
@@ -285,6 +330,7 @@ struct DashboardView: View {
         .refreshable {
             await iCloudMonitor.syncNow()
             await scanAndImportFromiCloud()
+            await loadMissingAnalysisResults()
         }
     }
 
@@ -412,6 +458,18 @@ struct DashboardView: View {
                     )
                     
                     modelContext.insert(audioFile)
+                    
+                    // Try to load analysis result from iCloud Drive
+                    print("🔍 Checking for analysis result for: \(fileName)")
+                    if let analysisResult = AnalysisResultPersistence.shared.loadAnalysisResult(forAudioFile: fileName) {
+                        print("✅ Found and loaded analysis result for: \(fileName) - Score: \(analysisResult.overallScore)")
+                        analysisResult.audioFile = audioFile
+                        audioFile.analysisResult = analysisResult
+                        audioFile.dateAnalyzed = analysisResult.dateAnalyzed
+                    } else {
+                        print("⚠️ No analysis result found for: \(fileName)")
+                    }
+                    
                     try modelContext.save()
                     
                     print("✅ Auto-imported: \(fileName)")
@@ -428,6 +486,35 @@ struct DashboardView: View {
             print("❌ Error scanning directory: \(error)")
         }
     }
+    
+    private func loadMissingAnalysisResults() async {
+        print("🔍 Checking for missing analysis results in existing files...")
+        
+        var loadedCount = 0
+        
+        // Check all files that don't have analysis results in SwiftData
+        for audioFile in audioFiles where audioFile.analysisResult == nil {
+            // Try to load from iCloud Drive JSON
+            if let analysisResult = AnalysisResultPersistence.shared.loadAnalysisResult(forAudioFile: audioFile.fileName) {
+                print("✅ Loaded analysis for existing file: \(audioFile.fileName) - Score: \(analysisResult.overallScore)")
+                analysisResult.audioFile = audioFile
+                audioFile.analysisResult = analysisResult
+                audioFile.dateAnalyzed = analysisResult.dateAnalyzed
+                loadedCount += 1
+            }
+        }
+        
+        if loadedCount > 0 {
+            do {
+                try modelContext.save()
+                print("📊 Loaded \(loadedCount) analysis result(s) from iCloud Drive")
+            } catch {
+                print("❌ Failed to save loaded analysis results: \(error)")
+            }
+        } else {
+            print("ℹ️ No missing analysis results to load")
+        }
+    }
 
     private func deleteFiles(at offsets: IndexSet) {
         for index in offsets {
@@ -441,12 +528,15 @@ struct DashboardView: View {
                     try FileManager.default.removeItem(at: fileURL)
                     print("✅ Deleted audio file: \(fileURL.lastPathComponent)")
                 } catch {
-                    print("❌ Failed to delete audio file: \(error)")
-                }
+                print("❌ Failed to delete audio file: \(error)")
             }
-            
-            // Delete the SwiftData record
-            modelContext.delete(file)
+        }
+        
+        // Delete the analysis result JSON from iCloud Drive
+        AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: file.fileName)
+        
+        // Delete the SwiftData record
+        modelContext.delete(file)
         }
         try? modelContext.save()
         

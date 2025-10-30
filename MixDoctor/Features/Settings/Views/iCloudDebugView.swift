@@ -260,6 +260,15 @@ struct iCloudDebugView: View {
                     )
                     
                     modelContext.insert(audioFile)
+                    
+                    // Try to load analysis result from iCloud Drive
+                    if let analysisResult = AnalysisResultPersistence.shared.loadAnalysisResult(forAudioFile: fileName) {
+                        print("☁️ Found analysis result for: \(fileName)")
+                        analysisResult.audioFile = audioFile
+                        audioFile.analysisResult = analysisResult
+                        audioFile.dateAnalyzed = analysisResult.dateAnalyzed
+                    }
+                    
                     try modelContext.save()
                     
                     print("✅ Imported: \(fileName)")

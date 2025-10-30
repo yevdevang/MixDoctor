@@ -70,8 +70,18 @@ struct ResultsView: View {
                 print("   📋 Existing analysis version: \(existingResult.analysisVersion)")
                 print("   🔄 Needs re-analysis: \(needsAnalysis ? "YES (old version)" : "NO")")
             } else {
-                needsAnalysis = true
-                print("   ➡️ No result found, starting analysis...")
+                // Try to load from iCloud Drive JSON file
+                if let savedResult = AnalysisResultPersistence.shared.loadAnalysisResult(forAudioFile: audioFile.fileName) {
+                    print("   ☁️ Loaded analysis from iCloud Drive")
+                    audioFile.analysisResult = savedResult
+                    savedResult.audioFile = audioFile
+                    try? modelContext.save()
+                    analysisResult = savedResult
+                    needsAnalysis = false
+                } else {
+                    needsAnalysis = true
+                    print("   ➡️ No result found, starting analysis...")
+                }
             }
             
             if needsAnalysis {
@@ -474,6 +484,14 @@ struct ResultsView: View {
             // Save to SwiftData
             try modelContext.save()
             
+            // Save to iCloud Drive as JSON for cross-device sync
+            do {
+                try AnalysisResultPersistence.shared.saveAnalysisResult(result, forAudioFile: audioFile.fileName)
+                print("☁️ Saved analysis to iCloud Drive")
+            } catch {
+                print("⚠️ Failed to save analysis to iCloud: \(error)")
+            }
+            
             print("✅ Analysis completed and saved for: \(audioFile.fileName)")
         } catch {
             print("❌ Analysis error for \(audioFile.fileName): \(error)")
@@ -495,6 +513,9 @@ struct ResultsView: View {
                 print("❌ Failed to delete audio file: \(error)")
             }
         }
+        
+        // Delete the analysis result JSON from iCloud Drive
+        AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: audioFile.fileName)
         
         // Delete the SwiftData record
         modelContext.delete(audioFile)
