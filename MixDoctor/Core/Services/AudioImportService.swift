@@ -175,9 +175,11 @@ final class AudioImportService {
     // MARK: - File Management
 
     private func copyToDocuments(from sourceURL: URL) throws -> URL {
-        let fileManager = FileManager.default
-        let directoryURL = FileManager.audioFilesDirectory()
+        // Use iCloud storage service for better sync
+        let iCloudService = iCloudStorageService.shared
+        let directoryURL = iCloudService.getAudioFilesDirectory()
 
+        let fileManager = FileManager.default
         if !fileManager.fileExists(atPath: directoryURL.path) {
             try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
         }
@@ -191,6 +193,7 @@ final class AudioImportService {
         print("   Original: \(originalFileName)")
         print("   Base name: \(baseName)")
         print("   Extension: \(fileExtension)")
+        print("   iCloud enabled: \(iCloudService.isICloudAvailable && (UserDefaults.standard.object(forKey: "iCloudSyncEnabled") as? Bool ?? true))")
         
         var destinationURL = directoryURL.appendingPathComponent(originalFileName)
         var counter = 1
@@ -204,6 +207,12 @@ final class AudioImportService {
 
         do {
             try fileManager.copyItem(at: sourceURL, to: destinationURL)
+            
+            // If using iCloud, trigger upload
+            if destinationURL.path.contains("Mobile Documents") {
+                try? fileManager.startDownloadingUbiquitousItem(at: destinationURL)
+                print("   ☁️ Uploading to iCloud...")
+            }
             
             // Standardize the URL to ensure it can be read back
             let standardizedURL = URL(fileURLWithPath: destinationURL.path)

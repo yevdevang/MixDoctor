@@ -145,6 +145,9 @@ struct StatCard: View {
 
 struct AudioFileRow: View {
     let audioFile: AudioFile
+    
+    @State private var fileExists: Bool = true
+    @State private var isDownloading: Bool = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -163,8 +166,25 @@ struct AudioFileRow: View {
                     }
                 }
                 
+                // Download indicator for missing files
+                if !fileExists || isDownloading {
+                    VStack {
+                        if isDownloading {
+                            ProgressView()
+                                .scaleEffect(0.7)
+                                .tint(statusColor)
+                        } else {
+                            Image(systemName: "icloud.and.arrow.down")
+                                .font(.caption)
+                                .foregroundStyle(statusColor)
+                        }
+                    }
+                    .frame(width: 50, height: 50)
+                    .background(Color.white.opacity(0.8))
+                }
+                
                 // Checkmark overlay for analyzed files
-                if audioFile.analysisResult != nil {
+                else if audioFile.analysisResult != nil {
                     VStack {
                         HStack {
                             Spacer()
@@ -194,6 +214,12 @@ struct AudioFileRow: View {
                 HStack(spacing: 8) {
                     Label(formatDuration(audioFile.duration), systemImage: "clock")
                     Label("\(Int(audioFile.sampleRate / 1000))kHz", systemImage: "waveform")
+                    
+                    // Show download status
+                    if !fileExists {
+                        Text("• Downloading...")
+                            .foregroundStyle(.orange)
+                    }
                 }
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -216,6 +242,9 @@ struct AudioFileRow: View {
             }
         }
         .padding(.vertical, 4)
+        .onAppear {
+            checkFileStatus()
+        }
     }
 
     private var statusColor: Color {
@@ -223,6 +252,43 @@ struct AudioFileRow: View {
             return Color.scoreColor(for: result.overallScore)
         }
         return .gray
+    }
+    
+    private func checkFileStatus() {
+        let fileURL = audioFile.fileURL
+        fileExists = FileManager.default.fileExists(atPath: fileURL.path)
+        
+        if !fileExists {
+            // Check if file is in iCloud and needs downloading
+            do {
+                let values = try fileURL.resourceValues(forKeys: [
+                    URLResourceKey.isUbiquitousItemKey,
+                    URLResourceKey.ubiquitousItemDownloadingStatusKey
+                ])
+                
+                if let isICloud = values.isUbiquitousItem, isICloud {
+                    let downloadStatus = values.ubiquitousItemDownloadingStatus
+                    isDownloading = (downloadStatus == .current || downloadStatus == .downloaded)
+                    
+                    // If not downloaded, trigger download
+                    if downloadStatus == .notDownloaded {
+                        print("📥 Triggering download for: \(audioFile.fileName)")
+                        try? FileManager.default.startDownloadingUbiquitousItem(at: fileURL)
+                        isDownloading = true
+                        
+                        // Re-check status after a delay
+                        Task {
+                            try? await Task.sleep(nanoseconds: 2_000_000_000)
+                            await MainActor.run {
+                                checkFileStatus()
+                            }
+                        }
+                    }
+                }
+            } catch {
+                print("⚠️ Could not check iCloud status for \(audioFile.fileName): \(error)")
+            }
+        }
     }
     
     private func waveformHeight(for index: Int) -> CGFloat {

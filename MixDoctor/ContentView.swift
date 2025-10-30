@@ -13,7 +13,7 @@ struct ContentView: View {
     @State private var selectedTab = 0
     @State private var isPlaying = false
     @State private var shouldAutoPlay = false
-    @AppStorage("theme") private var theme: String = "system"
+    @State private var theme: String = NSUbiquitousKeyValueStore.default.string(forKey: "theme") ?? "system"
     @Query(sort: \AudioFile.dateImported, order: .reverse) private var allAudioFiles: [AudioFile]
     
     var colorScheme: ColorScheme? {
@@ -69,6 +69,30 @@ struct ContentView: View {
         }
         .tint(Color(red: 0.435, green: 0.173, blue: 0.871))
         .preferredColorScheme(colorScheme)
+        .onAppear {
+            // Load theme from iCloud
+            theme = NSUbiquitousKeyValueStore.default.string(forKey: "theme") ?? "system"
+            
+            // Listen for iCloud theme changes from other devices
+            NotificationCenter.default.addObserver(
+                forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
+                object: NSUbiquitousKeyValueStore.default,
+                queue: .main
+            ) { _ in
+                theme = NSUbiquitousKeyValueStore.default.string(forKey: "theme") ?? "system"
+                print("☁️ Theme updated from iCloud (external): \(theme)")
+            }
+            
+            // Listen for local theme changes within this app
+            NotificationCenter.default.addObserver(
+                forName: NSNotification.Name("ThemeDidChange"),
+                object: nil,
+                queue: .main
+            ) { _ in
+                theme = NSUbiquitousKeyValueStore.default.string(forKey: "theme") ?? "system"
+                print("🎨 Theme updated locally: \(theme)")
+            }
+        }
     }
 }
 

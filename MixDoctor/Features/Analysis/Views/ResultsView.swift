@@ -24,21 +24,16 @@ struct ResultsView: View {
     private let analysisService = AudioAnalysisService()
 
     var body: some View {
-        ZStack {
-            if isAnalyzing {
-                analysingView
-            } else {
-                ScrollView {
-                    if let result = analysisResult {
-                        resultContentView(result: result)
-                    } else {
-                        analysingView
-                    }
-                }
+        ScrollView {
+            if let result = analysisResult {
+                resultContentView(result: result)
             }
         }
         .navigationTitle("Analysis Results")
         .navigationBarTitleDisplayMode(.inline)
+        .fullScreenCover(isPresented: $isAnalyzing) {
+            analysingView
+        }
         .sheet(isPresented: $showPaywall, onDismiss: {
             // If paywall was dismissed without purchase, return to dashboard
             if !mockService.isProUser {
@@ -75,8 +70,18 @@ struct ResultsView: View {
                 print("   📋 Existing analysis version: \(existingResult.analysisVersion)")
                 print("   🔄 Needs re-analysis: \(needsAnalysis ? "YES (old version)" : "NO")")
             } else {
-                needsAnalysis = true
-                print("   ➡️ No result found, starting analysis...")
+                // Try to load from iCloud Drive JSON file
+                if let savedResult = AnalysisResultPersistence.shared.loadAnalysisResult(forAudioFile: audioFile.fileName) {
+                    print("   ☁️ Loaded analysis from iCloud Drive")
+                    audioFile.analysisResult = savedResult
+                    savedResult.audioFile = audioFile
+                    try? modelContext.save()
+                    analysisResult = savedResult
+                    needsAnalysis = false
+                } else {
+                    needsAnalysis = true
+                    print("   ➡️ No result found, starting analysis...")
+                }
             }
             
             if needsAnalysis {
@@ -479,6 +484,14 @@ struct ResultsView: View {
             // Save to SwiftData
             try modelContext.save()
             
+            // Save to iCloud Drive as JSON for cross-device sync
+            do {
+                try AnalysisResultPersistence.shared.saveAnalysisResult(result, forAudioFile: audioFile.fileName)
+                print("☁️ Saved analysis to iCloud Drive")
+            } catch {
+                print("⚠️ Failed to save analysis to iCloud: \(error)")
+            }
+            
             print("✅ Analysis completed and saved for: \(audioFile.fileName)")
         } catch {
             print("❌ Analysis error for \(audioFile.fileName): \(error)")
@@ -489,6 +502,22 @@ struct ResultsView: View {
     
     private func deleteFile() {
         print("🗑️ Deleting audio file: \(audioFile.fileName)")
+        
+        // Delete the actual audio file from storage (iCloud or local)
+        let fileURL = audioFile.fileURL
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+            do {
+                try FileManager.default.removeItem(at: fileURL)
+                print("✅ Deleted audio file from storage: \(fileURL.lastPathComponent)")
+            } catch {
+                print("❌ Failed to delete audio file: \(error)")
+            }
+        }
+        
+        // Delete the analysis result JSON from iCloud Drive
+        AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: audioFile.fileName)
+        
+        // Delete the SwiftData record
         modelContext.delete(audioFile)
         try? modelContext.save()
         dismiss()

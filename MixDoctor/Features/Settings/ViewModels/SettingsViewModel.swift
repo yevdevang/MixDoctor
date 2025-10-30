@@ -4,11 +4,21 @@ import Observation
 @MainActor
 @Observable
 final class SettingsViewModel {
-    // User Preferences
-    var selectedTheme: String {
-        get { UserDefaults.standard.string(forKey: "theme") ?? "system" }
-        set {
-            UserDefaults.standard.set(newValue, forKey: "theme")
+    // Use iCloud Key-Value Store for cross-device sync
+    private let cloudStore = NSUbiquitousKeyValueStore.default
+    private var isInitializing = true
+    
+    // User Preferences with iCloud backing - stored property for Picker binding
+    var selectedTheme: String = "system" {
+        didSet {
+            guard !isInitializing else { return }
+            cloudStore.set(selectedTheme, forKey: "theme")
+            cloudStore.synchronize()
+            print("☁️ Theme saved to iCloud: \(selectedTheme)")
+            
+            // Notify ContentView to update immediately
+            NotificationCenter.default.post(name: NSNotification.Name("ThemeDidChange"), object: nil)
+            
             updatePreferences()
         }
     }
@@ -23,7 +33,8 @@ final class SettingsViewModel {
     
     var iCloudSyncEnabled: Bool {
         get {
-            UserDefaults.standard.bool(forKey: "iCloudSyncEnabled")
+            // Default to true if not set (for better UX - CloudKit enabled by default)
+            UserDefaults.standard.object(forKey: "iCloudSyncEnabled") as? Bool ?? true
         }
         set {
             UserDefaults.standard.set(newValue, forKey: "iCloudSyncEnabled")
@@ -36,10 +47,47 @@ final class SettingsViewModel {
     var showAbout = false
     
     init() {
+        // Load theme from iCloud
+        selectedTheme = cloudStore.string(forKey: "theme") ?? "system"
+        
         // Set default values if not set
         if UserDefaults.standard.object(forKey: "autoAnalyze") == nil {
             UserDefaults.standard.set(true, forKey: "autoAnalyze")
         }
+        
+        // Migrate theme from UserDefaults to iCloud if needed
+        if cloudStore.string(forKey: "theme") == nil {
+            if let localTheme = UserDefaults.standard.string(forKey: "theme") {
+                cloudStore.set(localTheme, forKey: "theme")
+                selectedTheme = localTheme
+                print("📦 Migrated theme to iCloud: \(localTheme)")
+            } else {
+                cloudStore.set("system", forKey: "theme")
+                print("📦 Set default theme in iCloud: system")
+            }
+        }
+        
+        // Listen for iCloud changes
+        NotificationCenter.default.addObserver(
+            forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
+            object: cloudStore,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self = self else { return }
+            Task { @MainActor in
+                let newTheme = self.cloudStore.string(forKey: "theme") ?? "system"
+                if self.selectedTheme != newTheme {
+                    self.selectedTheme = newTheme
+                    print("☁️ Theme updated from iCloud: \(newTheme)")
+                }
+            }
+        }
+        
+        // Sync with iCloud on launch
+        cloudStore.synchronize()
+        
+        // Enable didSet observer after initialization
+        isInitializing = false
     }
     
     func resetAllData() {

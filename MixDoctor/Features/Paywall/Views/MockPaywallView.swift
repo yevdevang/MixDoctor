@@ -39,6 +39,9 @@ struct MockPaywallView: View {
                         // Purchase button
                         purchaseButton
                         
+                        // Skip trial button (testing only)
+                        skipTrialButton
+                        
                         // Restore button
                         restoreButton
                         
@@ -180,6 +183,43 @@ struct MockPaywallView: View {
         .disabled(isPurchasing)
     }
     
+    // MARK: - Skip Trial Button
+    
+    private var skipTrialButton: some View {
+        Button {
+            Task {
+                isPurchasing = true
+                let success = await mockService.mockPurchaseSkipTrial(packageId: selectedPackageId)
+                isPurchasing = false
+                
+                if success {
+                    print("✅ Skip trial purchase successful, calling completion")
+                    onPurchaseComplete()
+                    dismiss()
+                } else {
+                    errorMessage = "Failed to skip trial and subscribe"
+                    showError = true
+                }
+            }
+        } label: {
+            HStack {
+                if isPurchasing {
+                    ProgressView()
+                } else {
+                    Image(systemName: "bolt.fill")
+                    Text("Skip Trial - Subscribe Now")
+                }
+            }
+            .font(.headline)
+            .frame(maxWidth: .infinity)
+            .padding()
+            .background(Color.purple)
+            .foregroundColor(.white)
+            .cornerRadius(12)
+        }
+        .disabled(isPurchasing)
+    }
+    
     // MARK: - Restore Button
     
     private var restoreButton: some View {
@@ -232,6 +272,18 @@ struct MockPaywallView: View {
                 .foregroundColor(.blue)
                 .cornerRadius(6)
             }
+            
+            if mockService.isInTrialPeriod {
+                Button("Convert Trial → Paid") {
+                    mockService.mockConvertTrialToPaid()
+                }
+                .font(.caption2)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(Color.green.opacity(0.2))
+                .foregroundColor(.green)
+                .cornerRadius(6)
+            }
         }
         .padding(.vertical, 8)
         .padding(.horizontal)
@@ -266,14 +318,20 @@ struct MockPaywallView: View {
     private func purchase() async {
         isPurchasing = true
         
+        print("🛒 Mock purchase starting for package: \(selectedPackageId)")
         let success = await mockService.mockPurchase(packageId: selectedPackageId)
         
         isPurchasing = false
         
         if success {
+            print("✅ Mock purchase successful")
+            print("   Is in trial: \(mockService.isInTrialPeriod)")
+            print("   Is pro user: \(mockService.isProUser)")
+            print("   Remaining analyses: \(mockService.remainingFreeAnalyses)")
             onPurchaseComplete()
             dismiss()
         } else {
+            print("❌ Mock purchase failed")
             errorMessage = "Purchase failed. Please try again."
             showError = true
         }

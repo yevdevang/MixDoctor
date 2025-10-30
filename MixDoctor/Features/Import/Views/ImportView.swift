@@ -39,6 +39,11 @@ struct ImportView: View {
         } message: {
             Text(viewModel?.errorMessage ?? "Unknown error occurred")
         }
+        .alert("Import Info", isPresented: infoBinding) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(viewModel?.infoMessage ?? "")
+        }
         .background(Color.backgroundPrimary.ignoresSafeArea())
     }
 
@@ -231,6 +236,13 @@ struct ImportView: View {
         Binding(
             get: { viewModel?.showError ?? false },
             set: { newValue in viewModel?.showError = newValue }
+        )
+    }
+    
+    private var infoBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel?.showInfo ?? false },
+            set: { newValue in viewModel?.showInfo = newValue }
         )
     }
 }
