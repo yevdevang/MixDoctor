@@ -86,6 +86,8 @@ final class AnalysisResult {
     var dynamicRange: Double
     var loudnessLUFS: Double
     var peakLevel: Double
+    var rmsLevel: Double                // RMS level in dBFS
+    var truePeakLevel: Double           // True peak level in dBTP
 
     var hasPhaseIssues: Bool
     var hasStereoIssues: Bool
@@ -93,6 +95,59 @@ final class AnalysisResult {
     var hasDynamicRangeIssues: Bool
 
     var recommendations: [String]
+    
+    // Frequency Balance Analysis
+    var frequencyBalanceScore: Double  // 0-100, overall balance quality
+    var frequencyBalanceStatus: String  // "balanced", "bass-heavy", "mid-heavy", "treble-heavy"
+    var lowFrequencyPercent: Double     // % of total energy in low range (20-250 Hz)
+    var midFrequencyPercent: Double     // % of total energy in mid range (250-4000 Hz)
+    var highFrequencyPercent: Double    // % of total energy in high range (4000-16000 Hz)
+    
+    // Store frequency spectrum image ID (audio file UUID)
+    var hasFrequencySpectrumImage: Bool
+    
+    // MARK: - Stem-Based Mix Analysis (optional, advanced feature)
+    
+    // Stem level balance
+    var hasStemAnalysis: Bool            // Whether stem separation was performed
+    var vocalsLevel: Double              // 0-1, relative level
+    var drumsLevel: Double               // 0-1, relative level
+    var bassLevel: Double                // 0-1, relative level
+    var otherInstrumentsLevel: Double    // 0-1, relative level
+    
+    // Mix depth and spatial characteristics
+    var mixDepthScore: Double            // 0-100, how much depth/dimension
+    var foregroundClarityScore: Double   // 0-100, clarity of lead elements
+    var elementSeparationScore: Double   // 0-100, how distinct elements are
+    var backgroundAmbienceScore: Double  // 0-100, reverb/space amount
+    
+    // Stem-specific stereo width
+    var vocalsStereoWidth: Double        // 0-100, % stereo width
+    var drumsStereoWidth: Double         // 0-100, % stereo width
+    var bassStereoWidth: Double          // 0-100, % stereo width
+    
+    // Spatial placement descriptions
+    var vocalsPlacement: String          // e.g., "center", "wide", "center-left"
+    var drumsPlacement: String
+    var bassPlacement: String
+    
+    // Frequency masking and mix density
+    var frequencyMaskingScore: Double    // 0-100, overlap between stems (lower is better)
+    var mixDensityScore: Double          // 0-100, how "full" the mix is
+    
+    // MARK: - AI-Generated Analysis Text
+    var stereoAnalysis: String?          // Detailed stereo width assessment
+    var frequencyAnalysis: String?       // Detailed frequency balance assessment
+    var dynamicsAnalysis: String?        // Detailed dynamics assessment
+    var detailedSummary: String?         // Overall mix assessment
+    
+    // MARK: - Mix Cohesion Analysis
+    var mixCohesionScore: Double         // 0-100, overall cohesion quality
+    var spectralCoherence: Double        // 0-100, how well frequencies complement
+    var phaseIntegrity: Double           // 0-100, phase relationship quality
+    var dynamicConsistency: Double       // 0-100, processing uniformity
+    var spatialBalance: Double           // 0-100, stereo field balance
+    var mixDepth: Double                 // 0-100, front-to-back dimension
 
     init(audioFile: AudioFile?, analysisVersion: String = "1.0") {
         self.id = UUID()
@@ -112,25 +167,52 @@ final class AnalysisResult {
         self.dynamicRange = 0
         self.loudnessLUFS = 0
         self.peakLevel = 0
+        self.rmsLevel = 0
+        self.truePeakLevel = 0
         self.hasPhaseIssues = false
         self.hasStereoIssues = false
         self.hasFrequencyImbalance = false
         self.hasDynamicRangeIssues = false
         self.recommendations = []
+        self.frequencyBalanceScore = 0
+        self.frequencyBalanceStatus = "unknown"
+        self.lowFrequencyPercent = 0
+        self.midFrequencyPercent = 0
+        self.highFrequencyPercent = 0
+        self.hasFrequencySpectrumImage = false
+        self.hasStemAnalysis = false
+        self.vocalsLevel = 0
+        self.drumsLevel = 0
+        self.bassLevel = 0
+        self.otherInstrumentsLevel = 0
+        self.mixDepthScore = 0
+        self.foregroundClarityScore = 0
+        self.elementSeparationScore = 0
+        self.backgroundAmbienceScore = 0
+        self.vocalsStereoWidth = 0
+        self.drumsStereoWidth = 0
+        self.bassStereoWidth = 0
+        self.vocalsPlacement = ""
+        self.drumsPlacement = ""
+        self.bassPlacement = ""
+        self.frequencyMaskingScore = 0
+        self.mixDensityScore = 0
+        self.stereoAnalysis = nil
+        self.frequencyAnalysis = nil
+        self.dynamicsAnalysis = nil
+        self.detailedSummary = nil
+        self.mixCohesionScore = 0
+        self.spectralCoherence = 0
+        self.phaseIntegrity = 0
+        self.dynamicConsistency = 0
+        self.spatialBalance = 0
+        self.mixDepth = 0
     }
 }
 
 extension AnalysisResult {
     var frequencyBalanceSummary: [Double] {
         [lowEndBalance, lowMidBalance, midBalance, highMidBalance, highBalance]
-    }
-    
-    /// Overall frequency balance score (0-100)
-    /// Calculated as average of all frequency bands
-    var frequencyBalanceScore: Double {
-        let bands = [lowEndBalance, midBalance, highBalance]
-        let average = bands.reduce(0, +) / Double(bands.count)
-        return average
     }
     
     var hasAnyIssues: Bool {

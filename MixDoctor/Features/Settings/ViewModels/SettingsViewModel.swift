@@ -43,6 +43,77 @@ final class SettingsViewModel {
         }
     }
     
+    // MARK: - Audio Analysis Settings
+    
+    /// Maximum duration for audio analysis in seconds
+    /// Fixed at 60 seconds (1 minute)
+    var maxAnalysisDuration: TimeInterval {
+        return 60.0 // Fixed at 1 minute
+    }
+    
+    /// Maximum number of analyses allowed per month
+    /// Fixed at 50 analyses per month (not user-configurable)
+    var maxAnalysesPerMonth: Int {
+        return 50 // Fixed limit
+    }
+    
+    /// Current month's analysis count
+    var currentMonthAnalysisCount: Int {
+        get {
+            // Check if we're still in the same month
+            let lastResetDate = cloudStore.object(forKey: "lastAnalysisResetDate") as? Date ?? Date.distantPast
+            let calendar = Calendar.current
+            
+            if !calendar.isDate(lastResetDate, equalTo: Date(), toGranularity: .month) {
+                // New month - reset counter
+                resetMonthlyAnalysisCount()
+                return 0
+            }
+            
+            return Int(cloudStore.longLong(forKey: "currentMonthAnalysisCount"))
+        }
+        set {
+            cloudStore.set(Int64(newValue), forKey: "currentMonthAnalysisCount")
+            cloudStore.set(Date(), forKey: "lastAnalysisResetDate")
+            cloudStore.synchronize()
+        }
+    }
+    
+    /// Remaining analyses for this month
+    var remainingAnalyses: Int {
+        max(0, maxAnalysesPerMonth - currentMonthAnalysisCount)
+    }
+    
+    /// Check if user can perform another analysis
+    var canPerformAnalysis: Bool {
+        remainingAnalyses > 0
+    }
+    
+    /// Progress percentage (0.0 - 1.0)
+    var analysisProgress: Double {
+        guard maxAnalysesPerMonth > 0 else { return 0.0 }
+        return Double(currentMonthAnalysisCount) / Double(maxAnalysesPerMonth)
+    }
+    
+    /// Preset limits for quick selection
+    static let presetLimits: [(label: String, count: Int)] = [
+        ("10 / month", 10),
+        ("25 / month", 25),
+        ("50 / month", 50),
+        ("100 / month", 100),
+        ("250 / month", 250),
+        ("Unlimited", 1000)
+    ]
+    
+    /// Days until reset
+    var daysUntilReset: Int {
+        let calendar = Calendar.current
+        let now = Date()
+        let startOfNextMonth = calendar.date(byAdding: .month, value: 1, to: calendar.startOfMonth(for: now))!
+        let components = calendar.dateComponents([.day], from: now, to: startOfNextMonth)
+        return components.day ?? 0
+    }
+    
     var showResetConfirmation = false
     var showAbout = false
     
@@ -86,8 +157,36 @@ final class SettingsViewModel {
         // Sync with iCloud on launch
         cloudStore.synchronize()
         
+        // Check if month has changed and reset counter if needed
+        _ = currentMonthAnalysisCount
+        
         // Enable didSet observer after initialization
         isInitializing = false
+    }
+    
+    // MARK: - Analysis Tracking Methods
+    
+    /// Increment the analysis counter (call this when user performs an analysis)
+    func incrementAnalysisCount() {
+        guard canPerformAnalysis else {
+            print("⚠️ Monthly analysis limit reached")
+            return
+        }
+        currentMonthAnalysisCount += 1
+        print("📊 Analysis count: \(currentMonthAnalysisCount)/\(maxAnalysesPerMonth)")
+    }
+    
+    /// Reset monthly analysis counter
+    private func resetMonthlyAnalysisCount() {
+        cloudStore.set(Int64(0), forKey: "currentMonthAnalysisCount")
+        cloudStore.set(Date(), forKey: "lastAnalysisResetDate")
+        cloudStore.synchronize()
+        print("🔄 Monthly analysis counter reset")
+    }
+    
+    /// Manually reset counter (for testing or admin purposes)
+    func manuallyResetAnalysisCount() {
+        resetMonthlyAnalysisCount()
     }
     
     func resetAllData() {
@@ -127,5 +226,13 @@ final class SettingsViewModel {
 
 extension Notification.Name {
     static let iCloudSyncToggled = Notification.Name("iCloudSyncToggled")
+}
+
+// MARK: - Calendar Extension
+extension Calendar {
+    func startOfMonth(for date: Date) -> Date {
+        let components = dateComponents([.year, .month], from: date)
+        return self.date(from: components)!
+    }
 }
 

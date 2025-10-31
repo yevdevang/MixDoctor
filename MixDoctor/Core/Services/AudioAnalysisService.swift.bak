@@ -124,22 +124,6 @@ final class AudioAnalysisService {
         ].filter { $0 }.count
         print("      ⚠️ MISSING EFFECTS: \(missingEffectsCount)/4 \(missingEffectsCount >= 3 ? "→ UNMIXED!" : "")")
         
-        // Extract mix cohesion analysis (how well channels sit together)
-        analysisProgress = 0.78
-        let mixCohesion = try featureExtractor.analyzeMixCohesion(
-            left: processedAudio.leftChannel,
-            right: processedAudio.rightChannel,
-            sampleRate: processedAudio.sampleRate
-        )
-        
-        print("   🎼 MIX COHESION ANALYSIS:")
-        print("      Overall Cohesion: \(Int(mixCohesion.cohesionScore * 100))% \(mixCohesion.cohesionScore >= 0.7 ? "✓ GOOD" : mixCohesion.cohesionScore >= 0.4 ? "⚠️ FAIR" : "❌ POOR")")
-        print("      Spectral Coherence: \(Int(mixCohesion.spectralCoherence * 100))% (frequencies complement) [flatness: \(String(format: "%.3f", frequencyFeatures.spectralFlatness))]")
-        print("      Phase Integrity: \(Int(mixCohesion.phaseIntegrity * 100))% (channels work together) [correlation: \(String(format: "%.2f", stereoFeatures.correlation))]")
-        print("      Dynamic Consistency: \(Int(mixCohesion.dynamicConsistency * 100))% (uniform processing) [crest: \(String(format: "%.1f", loudnessFeatures.crestFactor)), range: \(String(format: "%.1f", loudnessFeatures.dynamicRange)) dB]")
-        print("      Spatial Balance: \(Int(mixCohesion.spatialBalance * 100))% (stereo field balanced) [width: \(Int(stereoFeatures.stereoWidth * 100))%]")
-        print("      Overall Depth: \(Int(mixCohesion.overallDepth * 100))% (3D dimension)")
-        
         // OPTIONAL: Perform stem-based analysis (Pro feature or user-enabled)
         var stemAnalysis: AudioFeatureExtractor.StemBasedMixAnalysis?
         var mixBalance: MixBalanceMetrics?
@@ -230,6 +214,21 @@ final class AudioAnalysisService {
         print("      High Energy: \(highEnergy)")
         print("      Spectral Centroid: \(frequencyFeatures.spectralCentroid) Hz")
         
+        // Extract mixing effects detection (for unmixed track detection)
+        let mixingEffects = try featureExtractor.extractMixingEffects(left: leftChannel, right: rightChannel, sampleRate: sampleRate)
+        print("   � MIXING EFFECTS ANALYSIS:")
+        print("      Compression: \(mixingEffects.hasCompression ? "YES ✓" : "NO ❌") (amount: \(String(format: "%.1f", mixingEffects.compressionAmount * 100))%, crest: \(String(format: "%.1f", loudnessFeatures.crestFactor)))")
+        print("      Reverb: \(mixingEffects.hasReverb ? "YES ✓" : "NO ❌") (amount: \(String(format: "%.1f", mixingEffects.reverbAmount * 100))%)")
+        print("      Stereo Processing: \(mixingEffects.hasStereoProcessing ? "YES ✓" : "NO ❌") (enhancement: \(String(format: "%.1f", mixingEffects.stereoEnhancement * 100))%)")
+        print("      EQ/Frequency Shaping: \(mixingEffects.hasEQ ? "YES ✓" : "NO ❌") (balance: \(String(format: "%.1f", mixingEffects.frequencyBalance * 100))%)")
+        
+        // Show count of missing effects (for unmixed detection)
+        let missingEffectsCount = [
+            !mixingEffects.hasCompression,
+            !mixingEffects.hasReverb,
+            !mixingEffects.hasStereoProcessing,
+            !mixingEffects.hasEQ
+        ].filter { $0 }.count
         print("      ⚠️ MISSING EFFECTS: \(missingEffectsCount)/4 \(missingEffectsCount >= 3 ? "→ UNMIXED!" : "")")
         
         // UNMIXED DETECTION CHECKS (log for debugging)
@@ -347,8 +346,8 @@ final class AudioAnalysisService {
             detailedSummary: chatGPTResponse.detailedSummary
         )
         
-        print("   📥 ChatGPT Response (RAW - before capping):")
-        print("      Raw AI Score: \(aiResponse.overallQuality)")
+        print("   📥 ChatGPT Response:")
+        print("      Score: \(aiResponse.overallQuality)")
         print("      Stereo: \(aiResponse.stereoAnalysis)")
         print("      Frequency: \(aiResponse.frequencyAnalysis)")
         print("      Dynamics: \(aiResponse.dynamicsAnalysis)")
@@ -445,62 +444,21 @@ final class AudioAnalysisService {
         
         print("   🔬 Technical Score (objective): \(Int(technicalScore))")
         print("   🤖 AI Score: \(Int(aiResponse.overallQuality))")
-        print("   📊 Effects Status: Compression=\(mixingEffects.hasCompression), Reverb=\(mixingEffects.hasReverb), Stereo=\(mixingEffects.hasStereoProcessing), EQ=\(mixingEffects.hasEQ)")
-        print("   ⚠️  Missing Effects Count: \(missingEffectsCount)/4")
 
-        // Check if AI summary mentions "unmixed" (hard override)
-        let summaryContainsUnmixed = aiResponse.detailedSummary.lowercased().contains("unmixed") || 
-                                     aiResponse.detailedSummary.lowercased().contains("unprocessed") ||
-                                     aiResponse.detailedSummary.lowercased().contains("raw recording")
-        
-        // Determine if this is an unmixed track based on missing effects (already calculated above)
-        let isCompletelyUnmixed = missingEffectsCount >= 3 // 3+ missing = completely unmixed
-        let isPoorlyMixed = missingEffectsCount == 2 // 2 missing = poorly mixed/partially unmixed
-        let isUnmixedByAI = aiResponse.overallQuality < 51 || summaryContainsUnmixed
-        
-        // Special case: If only 1 effect missing BUT technical score is very high (95+),
-        // don't treat as unmixed - likely a detection issue or genre-specific mix
-        let likelyProfessionalMix = missingEffectsCount <= 1 && technicalScore >= 95
+        // Determine if this is an unmixed track
+        let isUnmixed = aiResponse.overallQuality < 51
         
         // SCORING STRATEGY:
-        // - For professional mixes (all 4 effects + AI 75+), trust the AI completely
-        // - For unmixed tracks (2+ effects missing), cap the score strictly
-        // - For mixed but imperfect tracks, use average or trust AI based on quality
+        // - For professional mixes (AI score 70+), trust the AI's assessment
+        // - For poor mixes (AI score < 60), use technical score as a sanity check
+        // - For unmixed tracks (AI score < 51), ensure score stays in unmixed range
         
         let finalScore: Double
         
-        // Check if all mixing effects are present (indicates professional mix)
-        let allEffectsPresent = mixingEffects.hasCompression && 
-                                mixingEffects.hasReverb && 
-                                mixingEffects.hasStereoProcessing && 
-                                mixingEffects.hasEQ
-        
-        if isCompletelyUnmixed {
-            // 3+ effects missing: completely unmixed - cap at 50
+        if isUnmixed {
+            // Unmixed track: cap at 50, use minimum of both scores
             finalScore = min(min(technicalScore, 50.0), aiResponse.overallQuality)
-            print("   ⭐ Final Score (COMPLETELY UNMIXED - 3+ effects missing, capped at 50): \(Int(finalScore))")
-        } else if isPoorlyMixed {
-            // 2 effects missing: poorly mixed/partially unmixed - cap at 60
-            finalScore = min(min(technicalScore, 60.0), aiResponse.overallQuality)
-            print("   ⭐ Final Score (POORLY MIXED - 2 effects missing, capped at 60): \(Int(finalScore))")
-        } else if likelyProfessionalMix && aiResponse.overallQuality < 70 {
-            // Technical score is very high (95+), only 1 effect missing, but AI scored low
-            // This is likely a detection issue or AI error - trust the technical score
-            finalScore = max(technicalScore * 0.9, 85.0) // At least 85 for professional mixes
-            print("   ⭐ Final Score (LIKELY PROFESSIONAL - high technical score, overriding low AI): \(Int(finalScore))")
-        } else if summaryContainsUnmixed {
-            // AI explicitly says "unmixed" in summary - TRUST IT and cap score
-            finalScore = min(min(technicalScore, 55.0), max(aiResponse.overallQuality, 45.0))
-            print("   ⭐ Final Score (AI SAYS UNMIXED in summary - capped at 55): \(Int(finalScore))")
-        } else if isUnmixedByAI {
-            // AI score < 51 but no explicit "unmixed" mention - cap at 55
-            finalScore = min(min(technicalScore, 55.0), aiResponse.overallQuality)
-            print("   ⭐ Final Score (UNMIXED by AI score - capped at 55): \(Int(finalScore))")
-        } else if allEffectsPresent && aiResponse.overallQuality >= 75 {
-            // ALL effects present + AI says it's good (75+) = TRUST AI COMPLETELY
-            // This is clearly a mixed track, likely professional
-            finalScore = aiResponse.overallQuality
-            print("   ⭐ Final Score (AI - all effects present, professional): \(Int(finalScore))")
+            print("   ⭐ Final Score (UNMIXED - capped): \(Int(finalScore))")
         } else if aiResponse.overallQuality >= 70 {
             // Professional/good mix: Trust AI's assessment, only cap if technical score is significantly lower
             // Allow AI score unless technical issues are severe (technical < 60)
@@ -515,25 +473,6 @@ final class AudioAnalysisService {
             // Fair/poor mix (60-69): Use average to be conservative
             finalScore = (aiResponse.overallQuality + technicalScore) / 2
             print("   ⭐ Final Score (averaged): \(Int(finalScore))")
-        }
-        
-        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        print("🏁 FINAL SCORING DECISION:")
-        print("   ChatGPT Score: \(Int(aiResponse.overallQuality))")
-        print("   Technical Score: \(Int(technicalScore))")
-        print("   ✅ FINAL SCORE: \(Int(finalScore))")
-        print("   Original Summary: \(aiResponse.detailedSummary.prefix(80))...")
-        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        
-        // CRITICAL: Validate summary matches the FINAL score (after all overrides)
-        let correctedSummary = validateSummaryMatchesFinalScore(
-            finalScore: finalScore,
-            originalSummary: aiResponse.detailedSummary
-        )
-        
-        if correctedSummary != aiResponse.detailedSummary {
-            print("⚠️⚠️⚠️ SUMMARY CORRECTED TO MATCH FINAL SCORE!")
-            print("   New Summary: \(correctedSummary.prefix(80))...")
         }
         
         // Create analysis result
@@ -646,29 +585,15 @@ final class AudioAnalysisService {
             print("   ℹ️ Stem analysis not performed")
         }
         
-        // Populate mix cohesion scores (available for all users)
-        result.mixCohesionScore = Double(mixCohesion.cohesionScore * 100)
-        result.spectralCoherence = Double(mixCohesion.spectralCoherence * 100)
-        result.phaseIntegrity = Double(mixCohesion.phaseIntegrity * 100)
-        result.dynamicConsistency = Double(mixCohesion.dynamicConsistency * 100)
-        result.spatialBalance = Double(mixCohesion.spatialBalance * 100)
-        result.mixDepth = Double(mixCohesion.overallDepth * 100)
-        
         // Apply OpenAI analysis (use our calculated final score instead of raw AI score)
         result.overallScore = finalScore
         print("   🎯 DEBUG: finalScore = \(finalScore), result.overallScore = \(result.overallScore)")
         
-        // Recommendations based on score
-        if finalScore >= 88 {
-            // Professional commercial mix - no recommendations at all!
-            result.recommendations = []
-        } else if finalScore >= 85 {
-            result.recommendations = ["Your mix sounds excellent! Very close to professional commercial quality."]
-        } else if finalScore >= 80 {
-            // Good professional mix - only keep critical recommendations (max 2)
-            result.recommendations = Array(aiResponse.recommendations.prefix(2))
+        // If mix is excellent (85+), no need for recommendations
+        if finalScore >= 85 {
+            result.recommendations = ["Your mix sounds excellent! No significant improvements needed."]
         } else if finalScore >= 75 {
-            // Semi-pro mix - max 3 recommendations
+            // Good mix - only keep critical recommendations (max 3)
             result.recommendations = Array(aiResponse.recommendations.prefix(3))
         } else {
             // Fair/poor mix - show all recommendations
@@ -690,75 +615,22 @@ final class AudioAnalysisService {
         result.hasDynamicRangeIssues = (loudnessFeatures.dynamicRange < 4.0 || 
                                        loudnessFeatures.dynamicRange > 18.0)
         
-        // Store AI-generated analysis text (use corrected summary!)
+        // Store AI-generated analysis text
         result.stereoAnalysis = aiResponse.stereoAnalysis
         result.frequencyAnalysis = aiResponse.frequencyAnalysis
         result.dynamicsAnalysis = aiResponse.dynamicsAnalysis
-        result.detailedSummary = correctedSummary  // Use the validated summary!
+        result.detailedSummary = aiResponse.detailedSummary
         
         print("   ✅ OpenAI Analysis Complete:")
         print("      Overall Quality: \(aiResponse.overallQuality)/100")
         print("      Stereo: \(aiResponse.stereoAnalysis)")
         print("      Frequency: \(aiResponse.frequencyAnalysis)")
         print("      Dynamics: \(aiResponse.dynamicsAnalysis)")
-        print("      Summary: \(correctedSummary)")
+        print("      Summary: \(aiResponse.detailedSummary)")
         print("      Recommendations: \(aiResponse.recommendations.count)")
         
         analysisProgress = 1.0
         
         return result
-    }
-    
-    // MARK: - Summary Validation
-    
-    /// Validates that the summary matches the final score after all overrides
-    private func validateSummaryMatchesFinalScore(finalScore: Double, originalSummary: String) -> String {
-        let score = Int(finalScore)
-        let summary = originalSummary.lowercased()
-        
-        // Check for negative words that shouldn't be in high scores
-        let hasNegativeWords = summary.contains("unmixed") ||
-                               summary.contains("poorly mixed") ||
-                               summary.contains("poor") ||
-                               summary.contains("weak") ||
-                               summary.contains("lacking") ||
-                               summary.contains("minimal") ||
-                               summary.contains("needs work") ||
-                               summary.contains("significant issues") ||
-                               summary.contains("missing") ||
-                               summary.contains("unprocessed") ||
-                               summary.contains("raw")
-        
-        // Check for positive words that shouldn't be in low scores
-        let hasPositiveWords = summary.contains("professional") ||
-                               summary.contains("excellent") ||
-                               summary.contains("polished") ||
-                               summary.contains("well-balanced") ||
-                               summary.contains("commercial")
-        
-        // High score (85+) with negative words = FIX IT
-        if score >= 85 && hasNegativeWords {
-            if score >= 92 {
-                return "This is a world-class professionally mixed track with excellent stereo imaging, balanced frequency distribution, and proper dynamics control. The mix is polished, competitive, and suitable for commercial release at the highest level."
-            } else if score >= 88 {
-                return "This is a professionally mixed track with good balance, proper compression, and solid stereo imaging. The mix quality is suitable for commercial release with a polished and cohesive sound."
-            } else {
-                return "This is a well-mixed professional track with good balance and processing. The mix shows proper use of compression, EQ, and spatial effects, resulting in a cohesive and polished sound."
-            }
-        }
-        
-        // Low score (≤60) with positive words = FIX IT
-        if score <= 60 && hasPositiveWords {
-            if score <= 45 {
-                return "This track appears to be completely unmixed with no compression, EQ, or stereo processing applied. It requires fundamental mixing work including dynamics control, frequency balancing, and spatial enhancement to reach professional standards."
-            } else if score <= 55 {
-                return "This track shows minimal mixing with poor dynamics control and frequency balance. It needs compression, EQ work, and stereo enhancement to improve the overall quality and achieve a more polished sound."
-            } else {
-                return "This track has significant mixing issues including imbalanced frequencies and weak dynamics. Professional mixing techniques including compression, EQ, and spatial processing are needed to improve the quality."
-            }
-        }
-        
-        // Summary matches score - no correction needed
-        return originalSummary
     }
 }

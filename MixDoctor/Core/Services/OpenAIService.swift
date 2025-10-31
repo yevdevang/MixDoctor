@@ -34,6 +34,15 @@ final class OpenAIService {
         spectralCentroid: Float,
         zeroCrossingRate: Float,
         phaseCoherence: Float,
+        hasCompression: Bool,
+        hasReverb: Bool,
+        hasStereoProcessing: Bool,
+        hasEQ: Bool,
+        spectralFlatness: Float,
+        stereoCorrelation: Float,
+        loudnessRange: Float = 0,
+        truePeak: Float = 0,
+        crestFactorDB: Float = 0,
         isProUser: Bool = false
     ) async throws -> OpenAIAnalysisResponse {
         
@@ -44,43 +53,166 @@ final class OpenAIService {
         // Adjust recommendations count based on user tier
         let maxRecommendations = isProUser ? 5 : 3
         
+        // ✨ ENHANCED UNMIXED DETECTION ALGORITHM ✨
+        // Based on professional audio analysis:
+        // Unmixed audio tends to have:
+        // 1. LOW spectral flatness (< 0.15) - dominated by specific frequencies/harmonics
+        // 2. HIGH stereo correlation (> 0.85) - channels too similar or mono
+        // 3. Low stereo width (< 30%) - not properly spread
+        // 4. Missing professional processing effects
+        
+        print("🔍 Unmixed Detection Metrics:")
+        print("   Spectral Flatness: \(spectralFlatness) (unmixed if < 0.15)")
+        print("   Stereo Correlation: \(stereoCorrelation) (unmixed if > 0.85)")
+        print("   Stereo Width: \(stereoWidth * 100)% (unmixed if < 30%)")
+        print("   Phase Coherence: \(phaseCoherence) (unmixed if < 0.6)")
+        
+        // Calculate unmixed confidence score (0 = definitely mixed, 1 = definitely unmixed)
+        let spectralFlatnessScore: Float
+        if spectralFlatness < 0.15 {
+            spectralFlatnessScore = 1.0
+        } else {
+            let delta = 0.25 - spectralFlatness
+            spectralFlatnessScore = max(0.0, delta / 0.10)
+        }
+        
+        let stereoCorrelationScore: Float
+        if stereoCorrelation > 0.85 {
+            stereoCorrelationScore = 1.0
+        } else {
+            let delta = stereoCorrelation - 0.75
+            stereoCorrelationScore = max(0.0, delta / 0.10)
+        }
+        
+        let stereoWidthScore: Float
+        if stereoWidth < 0.30 {
+            stereoWidthScore = 1.0
+        } else {
+            let delta = 0.40 - stereoWidth
+            stereoWidthScore = max(0.0, delta / 0.10)
+        }
+        
+        let phaseCoherenceScore: Float = phaseCoherence < 0.6 ? 1.0 : 0.0
+        
+        // Weighted average (spectral flatness and correlation are most reliable)
+        let weight1 = spectralFlatnessScore * 0.35
+        let weight2 = stereoCorrelationScore * 0.35
+        let weight3 = stereoWidthScore * 0.20
+        let weight4 = phaseCoherenceScore * 0.10
+        let unmixedConfidence = weight1 + weight2 + weight3 + weight4
+        
+        print("   Unmixed Confidence Score: \(unmixedConfidence) (0 = mixed, 1 = unmixed)")
+        
+        // PRE-CALCULATE if unmixed using MULTIPLE INDICATORS (not just one)
+        // An unmixed track should have SEVERAL of these issues, not just one
+        
+        // Count critical unmixed indicators
+        var unmixedScore: Float = 0.0
+        
+        // Spectral analysis (most reliable) - weight: 30 points
+        if spectralFlatness < 0.15 { unmixedScore += 30 }
+        
+        // Stereo correlation too high - weight: 25 points
+        if stereoCorrelation > 0.85 { unmixedScore += 25 }
+        
+        // Stereo width too narrow - weight: 20 points
+        if stereoWidth < 0.30 { unmixedScore += 20 }
+        
+        // Loudness Range (LRA) - unmixed tracks have very high LRA (>15 LU) - weight: 15 points
+        if loudnessRange > 15 { unmixedScore += 15 }
+        
+        // Crest Factor - unmixed tracks have high crest factor (>12 dB) - weight: 10 points
+        if crestFactorDB > 12 { unmixedScore += 10 }
+        
+        // Missing professional processing (each worth 5 points)
+        if !hasCompression { unmixedScore += 5 }
+        if !hasReverb { unmixedScore += 5 }
+        if !hasStereoProcessing { unmixedScore += 5 }
+        if !hasEQ { unmixedScore += 5 }
+        
+        // Additional technical indicators (lower weight)
+        if dynamicRange > 20 { unmixedScore += 5 }  // Excessive dynamic range
+        if rmsLevel < -30 { unmixedScore += 5 }     // Very quiet
+        if phaseCoherence < 0.5 { unmixedScore += 5 }  // Poor phase
+        
+        print("   🎯 Unmixed Score: \(unmixedScore)/130")
+        print("      Spectral Flatness < 0.15: \(spectralFlatness < 0.15 ? "+30" : "0") (current: \(String(format: "%.3f", spectralFlatness)))")
+        print("      Stereo Correlation > 0.85: \(stereoCorrelation > 0.85 ? "+25" : "0") (current: \(String(format: "%.3f", stereoCorrelation)))")
+        print("      Stereo Width < 30%: \(stereoWidth < 0.30 ? "+20" : "0") (current: \(Int(stereoWidth * 100))%)")
+        print("      Loudness Range > 15 LU: \(loudnessRange > 15 ? "+15" : "0") (current: \(String(format: "%.1f", loudnessRange)) LU)")
+        print("      Crest Factor > 12 dB: \(crestFactorDB > 12 ? "+10" : "0") (current: \(String(format: "%.1f", crestFactorDB)) dB)")
+        print("      Missing Compression: \(!hasCompression ? "+5" : "0")")
+        print("      Missing Reverb: \(!hasReverb ? "+5" : "0")")
+        print("      Missing Stereo Processing: \(!hasStereoProcessing ? "+5" : "0")")
+        print("      Missing EQ: \(!hasEQ ? "+5" : "0")")
+        
+        // Unmixed if score >= 70 (requires multiple critical indicators)
+        // Professional mixed tracks should score < 40
+        let isUnmixed = unmixedScore >= 70
+        
+        // MANDATORY SCORE (AI cannot override this)
+        let mandatoryScoreRange = isUnmixed ? "35-50" : "51-100"
+        let unmixedStatus = isUnmixed ? "⚠️ UNMIXED DETECTED (score: \(Int(unmixedScore))/100) - MUST SCORE 35-50" : "✓ Mixed (score: \(Int(unmixedScore))/100) - can score 51-100"
+        
         let prompt = """
-        You are an expert audio engineer analyzing a professionally mixed track. Based on the following technical measurements, provide a detailed analysis.
+        ⚠️⚠️⚠️ MANDATORY: \(unmixedStatus) ⚠️⚠️⚠️
         
-        Audio Measurements:
-        - Peak Level: \(peakLevel) dBFS
-        - RMS Level: \(rmsLevel) dBFS
+        🎯 ADVANCED UNMIXED DETECTION RESULTS (Spectral Analysis):
+        Unmixed Confidence Score: \(String(format: "%.2f", unmixedConfidence)) (0=mixed, 1=unmixed) \(unmixedConfidence > 0.5 ? "⚠️ UNMIXED" : "✓")
+        
+        KEY INDICATORS:
+        • Spectral Flatness: \(String(format: "%.3f", spectralFlatness)) \(spectralFlatness < 0.15 ? "⚠️ Too low (unmixed)" : "✓")
+        • Stereo Correlation: \(String(format: "%.3f", stereoCorrelation)) \(stereoCorrelation > 0.85 ? "⚠️ Too high (unmixed)" : "✓")
+        • Stereo Width: \(String(format: "%.1f", stereoWidth * 100))% \(stereoWidth * 100 < 30 ? "⚠️ Too narrow" : "✓")
+        • Phase Coherence: \(String(format: "%.2f", phaseCoherence)) \(phaseCoherence < 0.6 ? "⚠️ Poor" : "✓")
+        
+        ADDITIONAL CHECKS:
+        • Dynamic Range: \(String(format: "%.1f", dynamicRange)) dB \(dynamicRange > 15 ? "⚠️ Too wide" : "✓")
+        • RMS Level: \(String(format: "%.1f", rmsLevel)) dBFS \(rmsLevel < -25 ? "⚠️ Too quiet" : "✓")
+        • Spectral Centroid: \(String(format: "%.0f", spectralCentroid)) Hz \(spectralCentroid < 800 ? "⚠️ Too low" : "✓")
+        • Max Frequency Energy: \(String(format: "%.1f", max(lowFrequencyEnergy, midFrequencyEnergy, highFrequencyEnergy) * 100))% \(max(lowFrequencyEnergy, midFrequencyEnergy, highFrequencyEnergy) > 0.5 ? "⚠️ Imbalanced" : "✓")
+        
+        PROCESSING EFFECTS:
+        • Compression: \(hasCompression ? "YES ✓" : "NO ⚠️")
+        • Reverb/Delay: \(hasReverb ? "YES ✓" : "NO ⚠️")
+        • Stereo Processing: \(hasStereoProcessing ? "YES ✓" : "NO ⚠️")
+        • EQ: \(hasEQ ? "YES ✓" : "NO ⚠️")
+        
+        RESULT: \(isUnmixed ? "UNMIXED TRACK - YOU MUST SCORE BETWEEN 35-50 ONLY" : "MIXED TRACK - You can score 51-100 based on quality")
+        
+        🎚️ MEASURED AUDIO DATA:
+        - Peak: \(peakLevel) dBFS
+        - RMS: \(rmsLevel) dBFS  
         - Dynamic Range: \(dynamicRange) dB
-        - Stereo Width: \(String(format: "%.1f", stereoWidth * 100))% (0% = mono, 100% = extreme wide stereo)
-        - Phase Coherence: \(phaseCoherence) (-1.0 = phase issues, 1.0 = perfect)
-        - Low Frequency Energy (20-250Hz): \(lowFrequencyEnergy)
-        - Mid Frequency Energy (250-4000Hz): \(midFrequencyEnergy)
-        - High Frequency Energy (4000-20000Hz): \(highFrequencyEnergy)
-        - Spectral Centroid: \(spectralCentroid) Hz
-        - Zero Crossing Rate: \(zeroCrossingRate)
+        - Stereo Width: \(String(format: "%.1f", stereoWidth * 100))%
+        - Phase: \(String(format: "%.2f", phaseCoherence))
+        - Low Freq: \(String(format: "%.1f", lowFrequencyEnergy * 100))%
+        - Mid Freq: \(String(format: "%.1f", midFrequencyEnergy * 100))%
+        - High Freq: \(String(format: "%.1f", highFrequencyEnergy * 100))%
+        - Spectral Centroid: \(String(format: "%.0f", spectralCentroid)) Hz
         
-        SCORING GUIDELINES (be realistic - this is likely a professionally mixed track):
-        - Score 90-100: Exceptional professional mix (Grammy-level, major label quality)
-        - Score 75-89: Very good professional mix (commercial release quality, minor improvements possible)
-        - Score 60-74: Good mix with some issues (needs work but fundamentally sound)
-        - Score 40-59: Fair mix with multiple issues (requires significant improvement)
-        - Score 0-39: Poor mix with major problems (fundamental issues need addressing)
+        MANDATORY SCORING RULES - YOU MUST FOLLOW THESE:
+        \(isUnmixed ? "⚠️ THIS IS UNMIXED → SCORE MUST BE 35-50 ONLY ⚠️" : "✓ This is mixed → score based on quality 51-100")
         
-        PROFESSIONAL MIXING STANDARDS:
-        - Peak Level: -6 to -0.3 dBFS is normal (modern mixes often peak near 0 dBFS)
-        - RMS Level: -20 to -6 dBFS is typical for modern commercial mixes
-        - Stereo Width: 40-55% = balanced/good, 55-70% = wide/excellent, 70%+ = very wide, <35% = narrow
-        - Phase Coherence: 0.7-1.0 = excellent, 0.5-0.7 = acceptable, <0.5 = phase issues
-        - Dynamic Range: 6-10 dB = modern pop/rock (normal), 10-14 dB = dynamic mix, <6 dB = over-compressed
-        - Frequency Balance: No single band should dominate excessively (>50% of total energy)
+        If unmixed (score 35-50):
+        - 35-40 = severely unmixed
+        - 41-45 = moderately unmixed  
+        - 46-50 = slightly unmixed
         
-        BE FAIR: If measurements are within professional ranges, score accordingly (75-90). Only score below 60 if there are clear, objective technical problems.
+        If mixed (score 51-100):
+        - 51-65 = poor mix quality
+        - 66-75 = decent home studio
+        - 76-85 = semi-professional
+        - 86-92 = professional Spotify quality
+        - 93-100 = Grammy masterpiece (rare)
+        
+        YOUR SCORE MUST BE IN RANGE: \(mandatoryScoreRange)
         
         IMPORTANT: Provide EXACTLY \(maxRecommendations) recommendations - no more, no less. Make them actionable and specific.
         
         Respond ONLY with valid JSON in this exact format, no markdown formatting:
         {
-            "overallQuality": 85,
+            "overallQuality": <MUST BE \(mandatoryScoreRange)>,
             "stereoAnalysis": "brief stereo width assessment",
             "frequencyAnalysis": "brief frequency balance assessment",
             "dynamicsAnalysis": "brief dynamics assessment",
@@ -115,7 +247,7 @@ final class OpenAIService {
             print("📝 OpenAI Analysis Response: \(content)")
             print("✅✅✅ OPENAI ANALYSIS RECEIVED SUCCESSFULLY ✅✅✅")
             
-            return try parseAnalysisResponse(content)
+            return try parseAnalysisResponse(content, isUnmixed: isUnmixed)
         } catch {
             print("❌ OpenAI API Error: \(error.localizedDescription)")
             throw OpenAIError.apiError(statusCode: 0, message: error.localizedDescription)
@@ -124,12 +256,52 @@ final class OpenAIService {
     
     // MARK: - Response Parsing
     
-    private func parseAnalysisResponse(_ jsonString: String) throws -> OpenAIAnalysisResponse {
+    private func parseAnalysisResponse(_ jsonString: String, isUnmixed: Bool) throws -> OpenAIAnalysisResponse {
         guard let jsonData = jsonString.data(using: .utf8) else {
             throw OpenAIError.invalidJSON
         }
         
-        let response = try JSONDecoder().decode(OpenAIAnalysisResponse.self, from: jsonData)
+        var response = try JSONDecoder().decode(OpenAIAnalysisResponse.self, from: jsonData)
+        
+        // POST-PROCESSING: FORCE correct score range if AI ignored instructions
+        let originalScore = response.overallQuality
+        
+        if isUnmixed {
+            // UNMIXED tracks MUST score 35-50
+            if response.overallQuality > 50 {
+                print("⚠️ AI gave score \(originalScore) for UNMIXED track - FORCING to 40")
+                response = OpenAIAnalysisResponse(
+                    overallQuality: 40, // Force to middle of unmixed range
+                    stereoAnalysis: response.stereoAnalysis,
+                    frequencyAnalysis: response.frequencyAnalysis,
+                    dynamicsAnalysis: response.dynamicsAnalysis,
+                    effectsAnalysis: response.effectsAnalysis,
+                    recommendations: response.recommendations,
+                    detailedSummary: "⚠️ UNMIXED TRACK DETECTED. " + response.detailedSummary
+                )
+            } else if response.overallQuality < 35 {
+                print("⚠️ AI gave score \(originalScore) for UNMIXED track - FORCING to 35")
+                response = OpenAIAnalysisResponse(
+                    overallQuality: 35,
+                    stereoAnalysis: response.stereoAnalysis,
+                    frequencyAnalysis: response.frequencyAnalysis,
+                    dynamicsAnalysis: response.dynamicsAnalysis,
+                    effectsAnalysis: response.effectsAnalysis,
+                    recommendations: response.recommendations,
+                    detailedSummary: "⚠️ UNMIXED TRACK DETECTED. " + response.detailedSummary
+                )
+            } else {
+                print("✓ AI correctly scored UNMIXED track: \(originalScore)")
+            }
+        } else {
+            // Mixed tracks must score 51-100
+            if response.overallQuality < 51 {
+                print("⚠️ AI gave score \(originalScore) for MIXED track - should be 51+")
+            } else {
+                print("✓ AI scored mixed track: \(originalScore)")
+            }
+        }
+        
         return response
     }
 }

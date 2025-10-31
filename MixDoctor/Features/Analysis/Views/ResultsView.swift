@@ -62,35 +62,24 @@ struct ResultsView: View {
             print("      Remaining: \(mockService.remainingFreeAnalyses)")
             print("      Can perform: \(mockService.canPerformAnalysis())")
             
-            // Check if we need to re-analyze (no result OR old version without OpenAI)
-            let needsAnalysis: Bool
+            // Check if analysis already exists (either in memory or on iCloud)
             if let existingResult = audioFile.analysisResult {
-                let isOldVersion = existingResult.analysisVersion != "OpenAI-1.0"
-                needsAnalysis = isOldVersion
-                print("   📋 Existing analysis version: \(existingResult.analysisVersion)")
-                print("   🔄 Needs re-analysis: \(needsAnalysis ? "YES (old version)" : "NO")")
+                // Use cached result from SwiftData
+                print("   ✅ Using cached result from SwiftData (score: \(existingResult.overallScore))")
+                analysisResult = existingResult
             } else {
                 // Try to load from iCloud Drive JSON file
                 if let savedResult = AnalysisResultPersistence.shared.loadAnalysisResult(forAudioFile: audioFile.fileName) {
-                    print("   ☁️ Loaded analysis from iCloud Drive")
+                    print("   ☁️ Loaded analysis from iCloud Drive (score: \(savedResult.overallScore))")
                     audioFile.analysisResult = savedResult
                     savedResult.audioFile = audioFile
                     try? modelContext.save()
                     analysisResult = savedResult
-                    needsAnalysis = false
                 } else {
-                    needsAnalysis = true
-                    print("   ➡️ No result found, starting analysis...")
+                    // No cached result found - need to analyze
+                    print("   ➡️ No cached result found, starting analysis...")
+                    await performAnalysis()
                 }
-            }
-            
-            if needsAnalysis {
-                print("   🚀 Starting OpenAI analysis...")
-                await performAnalysis()
-            } else {
-                // Load existing OpenAI result
-                print("   ✅ Loading cached OpenAI result (score: \(audioFile.analysisResult?.overallScore ?? 0))")
-                analysisResult = audioFile.analysisResult
             }
         }
     }
@@ -107,14 +96,27 @@ struct ResultsView: View {
         VStack(spacing: 20) {
             // Overall Score Card
             overallScoreCard(result: result)
+            
+            // AI Analysis Overview (if available)
+            if result.detailedSummary != nil || result.stereoAnalysis != nil {
+                aiAnalysisOverviewCard(result: result)
+            }
 
             // Individual Metrics
             VStack(spacing: 16) {
+                // Mix Cohesion Card (for all users)
+                mixCohesionCard(result: result)
+                
                 stereoWidthCard(result: result)
                 phaseCoherenceCard(result: result)
                 frequencyBalanceCard(result: result)
                 dynamicRangeCard(result: result)
                 loudnessCard(result: result)
+                
+                // Pro features
+                if mockService.isProUser && result.hasStemAnalysis {
+                    proFeaturesCard(result: result)
+                }
             }
 
             // Recommendations
@@ -198,6 +200,82 @@ struct ResultsView: View {
         case 50..<70: return "Fair Mix Quality"
         default: return "Needs Improvement"
         }
+    }
+
+    // MARK: - AI Analysis Overview
+
+    private func aiAnalysisOverviewCard(result: AnalysisResult) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "waveform.badge.magnifyingglass")
+                    .foregroundStyle(.purple)
+                
+                Text("Analysis Overview")
+                    .font(.headline)
+            }
+            
+            if let summary = result.detailedSummary {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Summary")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.primary)
+                    
+                    Text(summary)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+            }
+            
+            if let stereo = result.stereoAnalysis {
+                Divider()
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Stereo", systemImage: "waveform.path.ecg")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.primary)
+                    
+                    Text(stereo)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+            }
+            
+            if let frequency = result.frequencyAnalysis {
+                Divider()
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Frequency", systemImage: "waveform")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.primary)
+                    
+                    Text(frequency)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+            }
+            
+            if let dynamics = result.dynamicsAnalysis {
+                Divider()
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Dynamics", systemImage: "chart.line.uptrend.xyaxis")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.primary)
+                    
+                    Text(dynamics)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+            }
+        }
+        .padding()
+        .background(Color.backgroundSecondary)
+        .cornerRadius(AppConstants.cornerRadius)
     }
 
     // MARK: - Metric Cards
@@ -296,6 +374,7 @@ struct ResultsView: View {
                 Spacer()
             }
 
+            // First row: LUFS and Peak
             HStack(spacing: 20) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Integrated")
@@ -320,6 +399,35 @@ struct ResultsView: View {
                         .foregroundColor(result.peakLevel > -0.1 ? .red : .primary)
                 }
             }
+            
+            // Second row: RMS and True Peak
+            Divider()
+                .padding(.vertical, 4)
+            
+            HStack(spacing: 20) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("RMS")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Text(String(format: "%.1f dBFS", result.rmsLevel))
+                        .font(.title3)
+                        .fontWeight(.semibold)
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("True Peak")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Text(String(format: "%.1f dBTP", result.truePeakLevel))
+                        .font(.title3)
+                        .fontWeight(.semibold)
+                        .foregroundColor(result.truePeakLevel > -1.0 ? .orange : .primary)
+                }
+            }
 
             if result.peakLevel > -0.1 {
                 Label("Potential clipping detected", systemImage: "exclamationmark.triangle.fill")
@@ -330,6 +438,206 @@ struct ResultsView: View {
         .padding()
         .background(Color.backgroundSecondary)
         .cornerRadius(AppConstants.cornerRadius)
+    }
+    
+    // MARK: - Pro Features
+    
+    private func proFeaturesCard(result: AnalysisResult) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "sparkles")
+                    .foregroundStyle(.yellow)
+
+                Text("Pro Analysis")
+                    .font(.headline)
+                
+                Spacer()
+                
+                Image(systemName: "crown.fill")
+                    .foregroundStyle(.yellow)
+                    .font(.caption)
+            }
+
+            VStack(spacing: 16) {
+                // Foreground Clarity
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label("Foreground Clarity", systemImage: "waveform.badge.magnifyingglass")
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                        
+                        Text(foregroundClarityDescription(result.foregroundClarityScore))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    
+                    Spacer()
+                    
+                    Text("\(Int(result.foregroundClarityScore))%")
+                        .font(.title2)
+                        .fontWeight(.bold)
+                }
+                
+                Divider()
+                
+                // Background Ambience
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label("Background Ambience", systemImage: "water.waves")
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                        
+                        Text(backgroundAmbienceDescription(result.backgroundAmbienceScore))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    
+                    Spacer()
+                    
+                    Text("\(Int(result.backgroundAmbienceScore))%")
+                        .font(.title2)
+                        .fontWeight(.bold)
+                }
+            }
+        }
+        .padding()
+        .background(
+            LinearGradient(
+                colors: [Color.yellow.opacity(0.1), Color.orange.opacity(0.1)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        .cornerRadius(AppConstants.cornerRadius)
+        .overlay(
+            RoundedRectangle(cornerRadius: AppConstants.cornerRadius)
+                .stroke(Color.yellow.opacity(0.3), lineWidth: 1)
+        )
+    }
+    
+    // MARK: - Mix Cohesion Card
+    
+    private func mixCohesionCard(result: AnalysisResult) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "waveform.circle.fill")
+                    .font(.title2)
+                    .foregroundColor(.purple)
+                
+                Text("Mix Cohesion")
+                    .font(.headline)
+                
+                Spacer()
+                
+                Text("\(Int(result.mixCohesionScore))%")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                    .foregroundColor(cohesionColor(score: result.mixCohesionScore))
+            }
+            
+            Text(cohesionDescription(score: result.mixCohesionScore))
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+            
+            Divider()
+            
+            // Individual cohesion factors
+            VStack(spacing: 10) {
+                cohesionFactorRow(
+                    icon: "tuningfork",
+                    title: "Spectral Coherence",
+                    value: result.spectralCoherence,
+                    description: "Frequencies complement"
+                )
+                
+                cohesionFactorRow(
+                    icon: "waveform.path.ecg",
+                    title: "Phase Integrity",
+                    value: result.phaseIntegrity,
+                    description: "Channels work together"
+                )
+                
+                cohesionFactorRow(
+                    icon: "slider.horizontal.3",
+                    title: "Dynamic Consistency",
+                    value: result.dynamicConsistency,
+                    description: "Uniform processing"
+                )
+                
+                cohesionFactorRow(
+                    icon: "aspectratio",
+                    title: "Spatial Balance",
+                    value: result.spatialBalance,
+                    description: "Stereo field balanced"
+                )
+                
+                cohesionFactorRow(
+                    icon: "cube.fill",
+                    title: "Mix Depth",
+                    value: result.mixDepth,
+                    description: "3D dimension"
+                )
+            }
+        }
+        .padding()
+        .background(
+            LinearGradient(
+                colors: [Color.purple.opacity(0.1), Color.blue.opacity(0.1)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        .cornerRadius(AppConstants.cornerRadius)
+        .overlay(
+            RoundedRectangle(cornerRadius: AppConstants.cornerRadius)
+                .stroke(Color.purple.opacity(0.3), lineWidth: 1)
+        )
+    }
+    
+    private func cohesionFactorRow(icon: String, title: String, value: Double, description: String) -> some View {
+        HStack {
+            Image(systemName: icon)
+                .foregroundColor(.purple.opacity(0.7))
+                .frame(width: 24)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                Text(description)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            
+            Spacer()
+            
+            Text("\(Int(value))%")
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .foregroundColor(cohesionColor(score: value))
+        }
+    }
+    
+    private func cohesionColor(score: Double) -> Color {
+        if score >= 70 {
+            return .green
+        } else if score >= 40 {
+            return .orange
+        } else {
+            return .red
+        }
+    }
+    
+    private func cohesionDescription(score: Double) -> String {
+        if score >= 70 {
+            return "Excellent cohesion - all elements sit well together in the mix"
+        } else if score >= 50 {
+            return "Good cohesion - most elements work together well"
+        } else if score >= 30 {
+            return "Fair cohesion - some elements may not sit well together"
+        } else {
+            return "Poor cohesion - channels appear to be fighting each other"
+        }
     }
 
     // MARK: - Recommendations
@@ -366,32 +674,6 @@ struct ResultsView: View {
 
     private func actionButtons(result: AnalysisResult) -> some View {
         VStack(spacing: 12) {
-            Button(action: { 
-                print("🔄 Re-analyze button tapped")
-                print("   Current remaining: \(mockService.remainingFreeAnalyses)")
-                print("   Can perform: \(mockService.canPerformAnalysis())")
-                
-                // Check immediately before starting task
-                if !mockService.canPerformAnalysis() {
-                    print("   ⚠️ Cannot perform analysis, showing paywall")
-                    showPaywall = true
-                    return
-                }
-                
-                Task { await performAnalysis() } 
-            }) {
-                HStack {
-                    if isAnalyzing {
-                        ProgressView()
-                            .scaleEffect(0.8)
-                    }
-                    Label("Re-analyze", systemImage: "arrow.clockwise")
-                }
-                .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(isAnalyzing)
-            
             Button(role: .destructive, action: { 
                 deleteFile()
             }) {
@@ -439,8 +721,34 @@ struct ResultsView: View {
         default: return "Very dynamic - may need compression"
         }
     }
+    
+    private func foregroundClarityDescription(_ score: Double) -> String {
+        switch score {
+        case 0..<40: return "Lead elements lack clarity and definition"
+        case 40..<60: return "Moderate clarity - could be improved"
+        case 60..<80: return "Good clarity - vocals/leads are clear"
+        default: return "Excellent clarity - perfect separation"
+        }
+    }
+    
+    private func backgroundAmbienceDescription(_ score: Double) -> String {
+        switch score {
+        case 0..<15: return "Very dry - minimal or no reverb/space"
+        case 15..<30: return "Light ambience - subtle space"
+        case 30..<50: return "Moderate ambience - good depth"
+        case 50..<70: return "Rich ambience - spacious mix"
+        default: return "Heavy ambience - very wet/spacious"
+        }
+    }
 
     private func performAnalysis() async {
+        // Double-check that we don't already have a result
+        if let existingResult = audioFile.analysisResult {
+            print("   ✅ Analysis already exists (score: \(existingResult.overallScore)), skipping")
+            analysisResult = existingResult
+            return
+        }
+        
         // Check if user can perform analysis
         print("🔍 Checking analysis permission:")
         print("   Is Pro User: \(mockService.isProUser)")
@@ -460,16 +768,14 @@ struct ResultsView: View {
             print("🔍 Starting analysis for: \(audioFile.fileName)")
             print("   File URL: \(audioFile.fileURL)")
             
-            // Store existing result in history before overwriting (if re-analyzing)
-            if let existingResult = audioFile.analysisResult {
-                print("   Found existing result, adding to history")
-                audioFile.analysisHistory.append(existingResult)
-            }
-            
             // Perform the analysis on the specific file
             let result = try await analysisService.analyzeAudio(audioFile)
             
-            print("   Analysis complete. Score: \(result.overallScore)")
+            print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+            print("✅ Analysis complete!")
+            print("   Final Overall Score: \(Int(result.overallScore))")
+            print("   Score Description: \(scoreDescription(result.overallScore))")
+            print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
             
             // Increment usage count for free users
             mockService.incrementAnalysisCount()

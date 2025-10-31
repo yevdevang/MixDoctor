@@ -1,0 +1,459 @@
+//
+//  ChatGPTAudioAnalysisService.swift
+//  MixDoctor
+//
+//  Service for analyzing audio directly with ChatGPT using native audio input
+//
+
+import Foundation
+import AVFoundation
+
+actor ChatGPTAudioAnalysisService {
+    
+    // MARK: - Configuration
+    
+    private let apiKey: String
+    private let endpoint = "https://api.openai.com/v1/chat/completions"
+    
+    // MARK: - Models
+    
+    enum ChatGPTModel: String {
+        case gpt4o = "gpt-4o-audio-preview"
+        case gpt4oMini = "gpt-4o-mini"
+    }
+    
+    // MARK: - Initialization
+    
+    init() {
+        // Load API key from secure configuration
+        if let key = Bundle.main.infoDictionary?["OPENAI_API_KEY"] as? String,
+           !key.isEmpty,
+           key != "YOUR_OPENAI_API_KEY_HERE",
+           key != "$(OPENAI_API_KEY)" {
+            self.apiKey = key
+        } else {
+            fatalError("⚠️ OpenAI API Key not configured!")
+        }
+    }
+    
+    // MARK: - Analysis
+    
+    /// Analyze audio file directly with ChatGPT using native audio input
+    func analyzeAudio(
+        fileURL: URL,
+        maxDuration: TimeInterval? = nil,
+        isProUser: Bool = false
+    ) async throws -> ChatGPTAudioAnalysisResponse {
+        
+        print("🎯 ChatGPT Audio Analysis Starting...")
+        
+        // Get audio duration
+        print("⏱️ Detecting audio duration...")
+        let duration = try await getAudioDuration(from: fileURL)
+        print("   Duration: \(String(format: "%.2f", duration))s")
+        
+        // Check if we need to trim
+        let processedURL: URL
+        if let maxDuration = maxDuration, duration > maxDuration {
+            print("✂️ Audio duration (\(String(format: "%.2f", duration))s) exceeds limit (\(maxDuration)s). Trimming...")
+            processedURL = try await trimAudio(fileURL: fileURL, maxDuration: maxDuration)
+            print("   ✅ Trimmed successfully")
+        } else {
+            // OpenAI only supports WAV and MP3, so convert other formats
+            let ext = fileURL.pathExtension.lowercased()
+            if ext == "m4a" || ext == "aac" || ext == "flac" {
+                print("🔄 Converting \(ext.uppercased()) to MP3 for OpenAI compatibility...")
+                processedURL = try await convertToMP3(fileURL: fileURL)
+                print("   ✅ Converted successfully")
+            } else if ext != "wav" && ext != "mp3" {
+                // Unknown format, try to convert
+                print("� Converting unknown format (\(ext)) to MP3...")
+                processedURL = try await convertToMP3(fileURL: fileURL)
+                print("   ✅ Converted successfully")
+            } else {
+                // WAV or MP3 - use as is
+                processedURL = fileURL
+            }
+        }
+        
+        // Prepare audio data and detect format
+        print("📦 Preparing audio data for API...")
+        let audioData = try await prepareAudioData(from: processedURL)
+        let base64Audio = audioData.base64EncodedString()
+        let audioFormat = getAudioFormat(from: processedURL)
+        print("   ✅ Audio encoded to base64 (\(audioData.count) bytes)")
+        print("   Format: \(audioFormat)")
+        
+        // Estimate tokens
+        let actualDuration = min(duration, maxDuration ?? duration)
+        let estimatedTokens = Int(actualDuration * 150)
+        let estimatedCost = (Double(estimatedTokens) / 1_000_000) * (isProUser ? 2.50 : 0.15)
+        
+        print("📊 Analysis Parameters:")
+        print("   Duration: \(String(format: "%.2f", actualDuration))s")
+        print("   Estimated tokens: \(estimatedTokens)")
+        print("   Estimated cost: $\(String(format: "%.4f", estimatedCost))")
+        print("   Model: \(isProUser ? "GPT-4o (Pro)" : "GPT-4o-mini (Free)")")
+        
+        // Create the prompt
+        let maxRecommendations = isProUser ? 5 : 3
+        let prompt = """
+        You are an expert mixing and mastering engineer with years of experience in professional audio production. Analyze this audio mix thoroughly and provide detailed technical feedback.
+        
+        ANALYSIS REQUIREMENTS:
+        
+        1. **Stereo Width Analysis** - Evaluate:
+           - Mono compatibility (phase relationship between L/R)
+           - Stereo field utilization (narrow/balanced/wide)
+           - Spatial positioning of elements
+           - Score: 0-100 (0=mono/poor, 50=balanced, 100=excellent wide stereo)
+        
+        2. **Phase Coherence Analysis** - Evaluate:
+           - Phase relationships between left and right channels
+           - Potential mono compatibility issues
+           - Phase cancellation problems
+           - Score: -1.0 to 1.0 (-1=severe issues, 0=neutral, 1.0=perfect coherence)
+        
+        3. **Frequency Balance Analysis** - Evaluate and provide percentages for:
+           - Sub Bass (20-60 Hz): X%
+           - Bass (60-250 Hz): X%
+           - Low Mids (250-500 Hz): X%
+           - Mids (500-2k Hz): X%
+           - High Mids (2k-6k Hz): X%
+           - Highs (6k-20k Hz): X%
+           - Overall tonal balance (muddy/clear/harsh/bright)
+           - Problematic frequency buildups
+        
+        4. **Dynamic Range Analysis** - Evaluate:
+           - Overall dynamic range in dB
+           - Compression/limiting characteristics
+           - Transient preservation
+           - Loudness (perceived and technical)
+           - Peak levels and headroom
+        
+        5. **Loudness Analysis** - Evaluate:
+           - Integrated LUFS (target: -14 to -8 LUFS for streaming)
+           - Peak level (target: -1.0 to -0.1 dBFS)
+           - Loudness consistency throughout the track
+        
+        SCORING GUIDELINES:
+        - 90-100: Exceptional professional mix (Grammy-level)
+        - 75-89: Very good professional mix (commercial release quality)
+        - 60-74: Good mix with minor issues (solid but needs polish)
+        - 40-59: Fair mix with multiple issues (needs work)
+        - 0-39: Poor mix with major problems (fundamental issues)
+        
+        RECOMMENDATIONS:
+        - Provide EXACTLY \(maxRecommendations) specific, actionable recommendations
+        - Focus on the most impactful improvements
+        - Include specific frequency ranges, dB values, or processing suggestions
+        - Prioritize issues that affect the overall mix quality most
+        
+        FREQUENCY SPECTRUM IMAGE:
+        - If you can generate a visual frequency spectrum analysis, do so
+        - Show the frequency distribution across the audio spectrum
+        - Highlight problematic areas or imbalances
+        
+        IMPORTANT: Respond with ONLY valid JSON in this exact format (no additional text before or after):
+        {
+            "overallScore": 85,
+            "stereoWidth": {
+                "score": 65,
+                "analysis": "detailed stereo width assessment (2-3 sentences)"
+            },
+            "phaseCoherence": {
+                "score": 0.85,
+                "analysis": "detailed phase coherence assessment (2-3 sentences)"
+            },
+            "frequencyBalance": {
+                "subBass": 15,
+                "bass": 22,
+                "lowMids": 18,
+                "mids": 20,
+                "highMids": 15,
+                "highs": 10,
+                "analysis": "detailed frequency balance assessment (2-3 sentences)"
+            },
+            "dynamicRange": {
+                "rangeDB": 8.5,
+                "analysis": "detailed dynamic range assessment (2-3 sentences)"
+            },
+            "loudness": {
+                "lufs": -10.5,
+                "peakDB": -0.3,
+                "analysis": "detailed loudness assessment (2-3 sentences)"
+            },
+            "recommendations": [
+                "specific recommendation 1",
+                "specific recommendation 2",
+                "specific recommendation 3"\(isProUser ? ",\n                \"specific recommendation 4\",\n                \"specific recommendation 5\"" : "")
+            ],
+            "detailedSummary": "2-3 sentence overall professional assessment",
+            "frequencySpectrumImageURL": "data:image/png;base64,..." or null
+        }
+        """
+        
+        // Create request payload with audio input
+        // GPT-4o-audio-preview supports native audio input
+        // Note: audio models don't support response_format json_object, 
+        // so we rely on prompt instructions to get JSON
+        let requestBody: [String: Any] = [
+            "model": "gpt-4o-audio-preview",  // Use audio-capable model
+            "modalities": ["text"],   // Only text output (audio input is in content)
+            "messages": [
+                [
+                    "role": "user",
+                    "content": [
+                        [
+                            "type": "text",
+                            "text": prompt
+                        ],
+                        [
+                            "type": "input_audio",
+                            "input_audio": [
+                                "data": base64Audio,
+                                "format": audioFormat  // Use detected format
+                            ]
+                        ]
+                    ]
+                ]
+            ],
+            "max_tokens": 2000
+        ]
+        
+        // Create URL request
+        var urlRequest = URLRequest(url: URL(string: endpoint)!)
+        urlRequest.httpMethod = "POST"
+        urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
+        
+        // Set timeout to 60 seconds to prevent indefinite hangs
+        urlRequest.timeoutInterval = 60.0
+        
+        print("📤 Sending audio to ChatGPT...")
+        
+        // Send request with timeout protection
+        let (data, response) = try await URLSession.shared.data(for: urlRequest)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw ChatGPTError.invalidResponse
+        }
+        
+        print("📥 Received response: HTTP \(httpResponse.statusCode)")
+        
+        guard httpResponse.statusCode == 200 else {
+            let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
+            print("❌ API Error: \(errorMessage)")
+            throw ChatGPTError.apiError(statusCode: httpResponse.statusCode, message: errorMessage)
+        }
+        
+        // Parse response
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let choices = json["choices"] as? [[String: Any]],
+              let firstChoice = choices.first,
+              let message = firstChoice["message"] as? [String: Any],
+              let content = message["content"] as? String else {
+            throw ChatGPTError.invalidResponse
+        }
+        
+        print("✅ Analysis received from ChatGPT")
+        print("📝 Response: \(content)")
+        
+        // Parse the JSON response
+        let analysisResponse = try parseAnalysisResponse(content)
+        
+        // Clean up temporary file if we created one
+        if processedURL != fileURL {
+            try? FileManager.default.removeItem(at: processedURL)
+        }
+        
+        return analysisResponse
+    }
+    
+    // MARK: - Helper Methods
+    
+    private func getAudioDuration(from url: URL) async throws -> TimeInterval {
+        let asset = AVURLAsset(url: url)
+        let duration = try await asset.load(.duration)
+        return CMTimeGetSeconds(duration)
+    }
+    
+    private func trimAudio(fileURL: URL, maxDuration: TimeInterval) async throws -> URL {
+        let asset = AVURLAsset(url: fileURL)
+        
+        // Create temporary output URL - use M4A since we can't directly export to MP3
+        let tempDir = FileManager.default.temporaryDirectory
+        let outputURL = tempDir.appendingPathComponent(UUID().uuidString).appendingPathExtension("m4a")
+        
+        // Delete existing file if it exists
+        try? FileManager.default.removeItem(at: outputURL)
+        
+        // Create export session
+        guard let exportSession = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
+            throw ChatGPTError.audioProcessingFailed
+        }
+        
+        exportSession.outputURL = outputURL
+        exportSession.outputFileType = .m4a
+        
+        // Set time range (trim to maxDuration)
+        let startTime = CMTime.zero
+        let endTime = CMTime(seconds: maxDuration, preferredTimescale: 600)
+        exportSession.timeRange = CMTimeRange(start: startTime, end: endTime)
+        
+        // Export using older API for better compatibility
+        await exportSession.export()
+        
+        guard exportSession.status == .completed else {
+            if let error = exportSession.error {
+                print("❌ Trim failed: \(error.localizedDescription)")
+            }
+            throw ChatGPTError.audioProcessingFailed
+        }
+        
+        print("   ✅ Trimmed to M4A: \(outputURL.lastPathComponent)")
+        return outputURL
+    }
+    
+    private func convertToM4A(fileURL: URL) async throws -> URL {
+        // Just use M4A conversion
+        return try await convertToMP3(fileURL: fileURL)
+    }
+    
+    private func convertToMP3(fileURL: URL) async throws -> URL {
+        let asset = AVURLAsset(url: fileURL)
+        
+        // Create temporary output URL - use M4A format
+        let tempDir = FileManager.default.temporaryDirectory
+        let outputURL = tempDir.appendingPathComponent(UUID().uuidString).appendingPathExtension("m4a")
+        
+        // Delete existing file if it exists
+        try? FileManager.default.removeItem(at: outputURL)
+        
+        // Create export session
+        guard let exportSession = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
+            throw ChatGPTError.audioProcessingFailed
+        }
+        
+        exportSession.outputURL = outputURL
+        exportSession.outputFileType = .m4a
+        
+        // Export using older API
+        await exportSession.export()
+        
+        guard exportSession.status == .completed else {
+            if let error = exportSession.error {
+                print("❌ Conversion failed: \(error.localizedDescription)")
+            }
+            throw ChatGPTError.audioProcessingFailed
+        }
+        
+        let newSize = try FileManager.default.attributesOfItem(atPath: outputURL.path)[.size] as? Int ?? 0
+        print("   📦 Converted to M4A: \(String(format: "%.1f", Double(newSize) / (1024 * 1024)))MB")
+        
+        return outputURL
+    }
+    
+    private func prepareAudioData(from url: URL) async throws -> Data {
+        // OpenAI audio API supports: wav, mp3, m4a, flac, ogg, webm
+        // Just read the file data directly
+        return try Data(contentsOf: url)
+    }
+    
+    private func getAudioFormat(from url: URL) -> String {
+        // Determine audio format from file extension
+        // OpenAI supports: wav, mp3, m4a, flac, ogg, webm
+        let ext = url.pathExtension.lowercased()
+        switch ext {
+        case "wav": return "wav"
+        case "mp3": return "mp3"
+        case "m4a": return "m4a"
+        case "flac": return "flac"
+        case "ogg": return "ogg"
+        case "webm": return "webm"
+        default: return "mp3" // default to mp3 for compatibility
+        }
+    }
+    
+    private func parseAnalysisResponse(_ jsonString: String) throws -> ChatGPTAudioAnalysisResponse {
+        guard let jsonData = jsonString.data(using: .utf8) else {
+            throw ChatGPTError.invalidJSON
+        }
+        
+        let decoder = JSONDecoder()
+        let response = try decoder.decode(ChatGPTAudioAnalysisResponse.self, from: jsonData)
+        
+        return response
+    }
+}
+
+// MARK: - Response Models
+
+struct ChatGPTAudioAnalysisResponse: Codable {
+    let overallScore: Double
+    let stereoWidth: StereoWidthAnalysis
+    let phaseCoherence: PhaseCoherenceAnalysis
+    let frequencyBalance: FrequencyBalanceAnalysis
+    let dynamicRange: DynamicRangeAnalysis
+    let loudness: LoudnessAnalysis
+    let recommendations: [String]
+    let detailedSummary: String
+    let frequencySpectrumImageURL: String?
+    
+    struct StereoWidthAnalysis: Codable {
+        let score: Double
+        let analysis: String
+    }
+    
+    struct PhaseCoherenceAnalysis: Codable {
+        let score: Double
+        let analysis: String
+    }
+    
+    struct FrequencyBalanceAnalysis: Codable {
+        let subBass: Double
+        let bass: Double
+        let lowMids: Double
+        let mids: Double
+        let highMids: Double
+        let highs: Double
+        let analysis: String
+    }
+    
+    struct DynamicRangeAnalysis: Codable {
+        let rangeDB: Double
+        let analysis: String
+    }
+    
+    struct LoudnessAnalysis: Codable {
+        let lufs: Double
+        let peakDB: Double
+        let analysis: String
+    }
+}
+
+// MARK: - Errors
+
+enum ChatGPTError: LocalizedError {
+    case invalidResponse
+    case apiError(statusCode: Int, message: String)
+    case noContent
+    case invalidJSON
+    case audioProcessingFailed
+    
+    var errorDescription: String? {
+        switch self {
+        case .invalidResponse:
+            return "Invalid response from ChatGPT API"
+        case .apiError(let statusCode, let message):
+            return "ChatGPT API Error (\(statusCode)): \(message)"
+        case .noContent:
+            return "No content in ChatGPT response"
+        case .invalidJSON:
+            return "Invalid JSON in ChatGPT response"
+        case .audioProcessingFailed:
+            return "Failed to process audio file"
+        }
+    }
+}
