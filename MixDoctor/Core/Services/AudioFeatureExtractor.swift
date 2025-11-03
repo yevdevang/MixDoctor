@@ -7,8 +7,9 @@
 
 import Accelerate
 import Foundation
+import AVFoundation
 
-final class AudioFeatureExtractor {
+public final class AudioFeatureExtractor {
     
     private let processor = AudioProcessor()
     

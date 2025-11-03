@@ -8,12 +8,12 @@
 import Foundation
 import OpenAI
 
-final class OpenAIService {
+public final class OpenAIService {
     
     // MARK: - Configuration
     private let openAI: OpenAI
     
-    static let shared = OpenAIService()
+    public static let shared = OpenAIService()
     
     private init() {
         // Load API key from secure configuration

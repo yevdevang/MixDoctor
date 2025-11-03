@@ -11,8 +11,8 @@ import SwiftUI
 
 @MainActor
 @Observable
-final class SubscriptionService {
-    static let shared = SubscriptionService()
+public final class SubscriptionService {
+    public static let shared = SubscriptionService()
     
     // MARK: - Properties
     var isProUser: Bool = false
