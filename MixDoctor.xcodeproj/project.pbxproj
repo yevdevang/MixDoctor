@@ -10,6 +10,7 @@
 		CB349E782EAD23B200290982 /* ReceiptParser in Frameworks */ = {isa = PBXBuildFile; productRef = CB349E772EAD23B200290982 /* ReceiptParser */; };
 		CB349E7A2EAD23B200290982 /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = CB349E792EAD23B200290982 /* RevenueCat */; };
 		CB349E7C2EAD23B200290982 /* RevenueCatUI in Frameworks */ = {isa = PBXBuildFile; productRef = CB349E7B2EAD23B200290982 /* RevenueCatUI */; };
+		CB3CC5492EB77F92004992E5 /* AudioKit in Frameworks */ = {isa = PBXBuildFile; productRef = CB3CC5482EB77F92004992E5 /* AudioKit */; };
 		CB9E75802EAA939A001E440E /* OpenAI in Frameworks */ = {isa = PBXBuildFile; productRef = CB9E757F2EAA939A001E440E /* OpenAI */; };
 /* End PBXBuildFile section */
 
@@ -62,6 +63,7 @@
 			files = (
 				CB349E7C2EAD23B200290982 /* RevenueCatUI in Frameworks */,
 				CB349E782EAD23B200290982 /* ReceiptParser in Frameworks */,
+				CB3CC5492EB77F92004992E5 /* AudioKit in Frameworks */,
 				CB9E75802EAA939A001E440E /* OpenAI in Frameworks */,
 				CB349E7A2EAD23B200290982 /* RevenueCat in Frameworks */,
 			);
@@ -129,6 +131,7 @@
 				CB349E772EAD23B200290982 /* ReceiptParser */,
 				CB349E792EAD23B200290982 /* RevenueCat */,
 				CB349E7B2EAD23B200290982 /* RevenueCatUI */,
+				CB3CC5482EB77F92004992E5 /* AudioKit */,
 			);
 			productName = MixDoctor;
 			productReference = CB7EADB52EA2A91500AE28CF /* MixDoctor.app */;
@@ -215,6 +218,7 @@
 			packageReferences = (
 				CB9E757E2EAA939A001E440E /* XCRemoteSwiftPackageReference "OpenAI" */,
 				CB349E762EAD23B200290982 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */,
+				CB3CC5472EB77F92004992E5 /* XCRemoteSwiftPackageReference "AudioKit" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = CB7EADB62EA2A91500AE28CF /* Products */;
@@ -664,6 +668,14 @@
 				minimumVersion = 5.44.1;
 			};
 		};
+		CB3CC5472EB77F92004992E5 /* XCRemoteSwiftPackageReference "AudioKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/AudioKit/AudioKit";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 5.6.5;
+			};
+		};
 		CB9E757E2EAA939A001E440E /* XCRemoteSwiftPackageReference "OpenAI" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/MacPaw/OpenAI.git";
@@ -689,6 +701,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = CB349E762EAD23B200290982 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */;
 			productName = RevenueCatUI;
+		};
+		CB3CC5482EB77F92004992E5 /* AudioKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CB3CC5472EB77F92004992E5 /* XCRemoteSwiftPackageReference "AudioKit" */;
+			productName = AudioKit;
 		};
 		CB9E757F2EAA939A001E440E /* OpenAI */ = {
 			isa = XCSwiftPackageProductDependency;

@@ -1,5 +1,8 @@
 // Configuration file template for MixDoctor
-// Copy this file to Config.xcconfig and add your actual API key
+// Copy this file to Config.xcconfig and add your actual API keys
 
 // Get your OpenAI API key from: https://platform.openai.com/api-keys
 OPENAI_API_KEY = YOUR_OPENAI_API_KEY_HERE
+
+// Get your Claude API key from: https://console.anthropic.com/
+CLAUDE_API_KEY = YOUR_CLAUDE_API_KEY_HERE

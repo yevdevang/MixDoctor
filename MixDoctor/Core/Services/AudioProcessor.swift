@@ -8,7 +8,7 @@
 import AVFoundation
 import Accelerate
 
-final class AudioProcessor {
+public final class AudioProcessor {
     
     struct ProcessedAudio {
         let leftChannel: [Float]

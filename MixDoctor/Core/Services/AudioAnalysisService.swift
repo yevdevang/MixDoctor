@@ -3,23 +3,37 @@
 //  MixDoctor
 //
 //  Main service for audio analysis orchestration
+//  
+//  🔄 MIGRATION NOTE: Consider replacing with AudioKitService
+//  This service uses basic AVFoundation analysis. AudioKit provides:
+//  - More accurate FFT analysis
+//  - Real-time spectrum analysis  
+//  - Advanced pitch detection
+//  - Better frequency analysis
+//  - Professional audio processing capabilities
 //
 
 import Foundation
 import Observation
+import AVFoundation
 
 @Observable
 final class AudioAnalysisService {
     
+    // 🔄 REPLACE: Basic audio processing - AudioKit has better analysis
     private let processor = AudioProcessor()
     private let featureExtractor = AudioFeatureExtractor()
     
+    // ✅ KEEP: UI state management
     var isAnalyzing: Bool = false
     var analysisProgress: Double = 0
     
     // MARK: - Main Analysis
     
+    // 🔄 REPLACE: This entire analysis pipeline can be replaced with AudioKit's more sophisticated analysis
+    // AudioKit provides: FFTTap, AmplitudeTracker, PitchTap, and real-time frequency analysis
     func analyzeAudio(_ audioFile: AudioFile) async throws -> AnalysisResult {
+        // ✅ KEEP: Progress tracking and UI state
         isAnalyzing = true
         analysisProgress = 0
         
@@ -27,11 +41,10 @@ final class AudioAnalysisService {
             isAnalyzing = false
             analysisProgress = 0
         }
-        
+
+        // 🔄 REPLACE: File handling - AudioKit handles file loading better
         // Verify file exists before attempting analysis
-        let fileURL = audioFile.fileURL
-        
-        // Try both the original path and potential URL-decoded version
+        let fileURL = audioFile.fileURL        // Try both the original path and potential URL-decoded version
         var fileExists = FileManager.default.fileExists(atPath: fileURL.path)
         var actualURL = fileURL
         
@@ -74,10 +87,12 @@ final class AudioAnalysisService {
             ])
         }
         
+        // 🔄 REPLACE: Basic audio loading - AudioKit's AudioPlayer is more robust
         // Load and process audio using the actual URL that exists
         analysisProgress = 0.1
         let processedAudio = try processor.loadAudio(from: actualURL)
         
+        // 🔄 REPLACE: Manual feature extraction - AudioKit provides built-in analysis
         // Extract features
         analysisProgress = 0.3
         let stereoFeatures = featureExtractor.extractStereoFeatures(
@@ -134,6 +149,7 @@ final class AudioAnalysisService {
         print("        High: \(highEnergy)")
         print("      Spectral Centroid: \(frequencyFeatures.spectralCentroid) Hz")
         
+        // ✅ KEEP: OpenAI integration for intelligent analysis
         // Analyze with OpenAI
         analysisProgress = 0.8
         
@@ -172,6 +188,7 @@ final class AudioAnalysisService {
         print("      Frequency: \(aiResponse.frequencyAnalysis)")
         print("      Dynamics: \(aiResponse.dynamicsAnalysis)")
         
+        // 🔄 REPLACE: Manual scoring calculations - AudioKit + AI can provide better metrics
         // Calculate a technical score based on objective metrics as a sanity check
         var technicalScore: Double = 100.0
         
@@ -269,6 +286,7 @@ final class AudioAnalysisService {
         let finalScore = max(technicalScore, aiResponse.overallQuality)
         print("   ⭐ Final Score (max of both): \(Int(finalScore))")
         
+        // ✅ KEEP: Result creation and data mapping - this structure is good
         // Create analysis result
         analysisProgress = 0.9
         let result = AnalysisResult(audioFile: audioFile, analysisVersion: "OpenAI-1.0")

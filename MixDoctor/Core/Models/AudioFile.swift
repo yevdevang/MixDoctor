@@ -9,8 +9,8 @@ import SwiftData
 /// The fileURL is computed dynamically to ensure it always points to the correct location,
 /// even if the app container changes (common in iOS Simulator).
 @Model
-final class AudioFile {
-    var id: UUID
+public final class AudioFile {
+    public var id: UUID
     var fileName: String
     private var storedFileName: String  // Store only the filename, not full path
     var duration: TimeInterval
@@ -64,11 +64,57 @@ final class AudioFile {
         self.notes = ""
         self.analysisHistory = []
     }
+    
+    // MARK: - Simplified Mix Quality Computed Properties
+    
+    /// Boolean indicator for overall mix quality
+    /// Returns true if the mix has good balance and minimal technical issues
+    var isWellMixed: Bool {
+        guard let result = analysisResult else { return false }
+        
+        // More realistic criteria for "well mixed":
+        // 1. No critical technical issues (severe phase problems, extreme compression)
+        let hasNoMajorIssues = !result.hasPhaseIssues && !result.hasDynamicRangeIssues
+        
+        // 2. No severe frequency imbalance (only flag extreme cases)
+        let hasReasonableFrequencyBalance = !result.hasFrequencyImbalance
+        
+        // 3. No clipping
+        let hasCleanAudio = !result.hasClipping
+        
+        // A mix can be "well mixed" even with genre-specific characteristics
+        // We only flag technical problems, not aesthetic choices
+        return hasNoMajorIssues && hasReasonableFrequencyBalance && hasCleanAudio
+    }
+    
+    /// Boolean indicator if the mix needs improvement
+    /// Returns true if there are technical issues to address
+    var needsMixImprovement: Bool {
+        guard let result = analysisResult else { return true }
+        
+        // Flag mixes that have technical problems requiring attention
+        return result.hasPhaseIssues || result.hasFrequencyImbalance || 
+               result.hasDynamicRangeIssues || result.hasClipping
+    }
+    
+    /// Boolean indicator if the mix is ready for mastering
+    /// Returns true if the mix quality is technically sound for mastering
+    var isReadyForMastering: Bool {
+        guard let result = analysisResult else { return false }
+        
+        // Ready for mastering if there are no critical technical issues
+        // Genre-specific frequency balance is acceptable
+        let hasSoundTechnicals = !result.hasPhaseIssues && !result.hasClipping && !result.hasDynamicRangeIssues
+        
+        // Allow for some frequency imbalance as it might be intentional genre characteristics
+        // Only block mastering for severe technical frequency problems
+        return hasSoundTechnicals
+    }
 }
 
 @Model
-final class AnalysisResult {
-    var id: UUID
+public final class AnalysisResult {
+    public var id: UUID
     var audioFile: AudioFile?
     var dateAnalyzed: Date
     var analysisVersion: String  // Track which analysis method was used
@@ -76,6 +122,7 @@ final class AnalysisResult {
 
     var stereoWidthScore: Double
     var phaseCoherence: Double
+    var monoCompatibility: Double
     var spectralCentroid: Double
     var hasClipping: Bool
     var lowEndBalance: Double
@@ -85,12 +132,22 @@ final class AnalysisResult {
     var highBalance: Double
     var dynamicRange: Double
     var loudnessLUFS: Double
+    var rmsLevel: Double
     var peakLevel: Double
 
     var hasPhaseIssues: Bool
     var hasStereoIssues: Bool
     var hasFrequencyImbalance: Bool
     var hasDynamicRangeIssues: Bool
+    
+    // Instrument Balance Properties
+    var instrumentBalanceScore: Double  // Overall balance score 0-100
+    var hasInstrumentBalanceIssues: Bool
+    var kickEnergy: Double
+    var bassEnergy: Double
+    var vocalEnergy: Double
+    var guitarEnergy: Double
+    var cymbalEnergy: Double
 
     var recommendations: [String]
 
@@ -102,20 +159,32 @@ final class AnalysisResult {
         self.overallScore = 0
         self.stereoWidthScore = 0
         self.phaseCoherence = 0
+        self.monoCompatibility = 1.0
         self.spectralCentroid = 0
         self.hasClipping = false
-    self.lowEndBalance = 0
-    self.lowMidBalance = 0
-    self.midBalance = 0
-    self.highMidBalance = 0
-    self.highBalance = 0
+        self.lowEndBalance = 0
+        self.lowMidBalance = 0
+        self.midBalance = 0
+         self.highMidBalance = 0
+        self.highBalance = 0
         self.dynamicRange = 0
         self.loudnessLUFS = 0
+        self.rmsLevel = 0
         self.peakLevel = 0
         self.hasPhaseIssues = false
         self.hasStereoIssues = false
         self.hasFrequencyImbalance = false
         self.hasDynamicRangeIssues = false
+        
+        // Initialize instrument balance properties
+        self.instrumentBalanceScore = 0
+        self.hasInstrumentBalanceIssues = false
+        self.kickEnergy = 0
+        self.bassEnergy = 0
+        self.vocalEnergy = 0
+        self.guitarEnergy = 0
+        self.cymbalEnergy = 0
+        
         self.recommendations = []
     }
 }
