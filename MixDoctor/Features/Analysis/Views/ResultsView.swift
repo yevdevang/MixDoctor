@@ -21,7 +21,7 @@ struct ResultsView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
-    private let analysisService = AudioAnalysisService()
+    private let analysisService = AudioKitService.shared
 
     var body: some View {
         ScrollView {
@@ -31,7 +31,7 @@ struct ResultsView: View {
         }
         .navigationTitle("Analysis Results")
         .navigationBarTitleDisplayMode(.inline)
-        .fullScreenCover(isPresented: $isAnalyzing) {
+        .fullScreenCover(isPresented: .constant(analysisService.isAnalyzing)) {
             analysingView
         }
         .sheet(isPresented: $showPaywall, onDismiss: {
@@ -105,6 +105,24 @@ struct ResultsView: View {
 
     private func resultContentView(result: AnalysisResult) -> some View {
         VStack(spacing: 20) {
+            // Song title (displayed above overall score)
+            VStack(alignment: .center, spacing: 4) {
+                Text(audioFile.fileName)
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .accessibilityLabel("Song name")
+
+                // Optional subtitle: display analysis date if available
+                if let analyzedDate = result.dateAnalyzed as Date? {
+                    Text(analyzedDate, style: .date)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+
             // Overall Score Card
             overallScoreCard(result: result)
 
@@ -117,10 +135,17 @@ struct ResultsView: View {
                 loudnessCard(result: result)
             }
 
+            /* 🔍 COMMENTED OUT - Recommendations and AI sections hidden
             // Recommendations
             if !result.recommendations.isEmpty {
                 recommendationsCard(result: result)
             }
+            
+            // Claude AI Insights
+            if let aiSummary = result.aiSummary {
+                claudeAIInsightsCard(result: result)
+            }
+            */
 
             // Action Buttons
             actionButtons(result: result)
@@ -345,7 +370,7 @@ struct ResultsView: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                ForEach(Array(result.recommendations.enumerated()), id: \.offset) { index, recommendation in
+                ForEach(Array(result.recommendations.enumerated()), id: \.0) { index, recommendation in
                     HStack(alignment: .top, spacing: 8) {
                         Text("\(index + 1).")
                             .font(.subheadline)
@@ -355,6 +380,79 @@ struct ResultsView: View {
                             .font(.subheadline)
                     }
                 }
+            }
+        }
+        .padding()
+        .background(Color.backgroundSecondary)
+        .cornerRadius(AppConstants.cornerRadius)
+    }
+
+    // MARK: - Claude AI Insights
+
+    private func claudeAIInsightsCard(result: AnalysisResult) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "brain.head.profile")
+                    .foregroundStyle(.purple)
+
+                Text("AI Analysis")
+                    .font(.headline)
+                
+                Spacer()
+                
+                if result.isReadyForMastering {
+                    Image(systemName: "checkmark.seal.fill")
+                        .foregroundStyle(.green)
+                }
+            }
+
+            // AI Summary
+            if let aiSummary = result.aiSummary, !aiSummary.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Summary")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.secondary)
+                    
+                    Text(aiSummary)
+                        .font(.body)
+                        .multilineTextAlignment(.leading)
+                }
+            }
+            
+            // AI Recommendations
+            if !result.aiRecommendations.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("AI Recommendations")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.secondary)
+                    
+                    ForEach(Array(result.aiRecommendations.enumerated()), id: \.offset) { index, recommendation in
+                        HStack(alignment: .top, spacing: 8) {
+                            Text("•")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+
+                            Text(recommendation)
+                                .font(.subheadline)
+                        }
+                    }
+                }
+            }
+            
+            // Mastering Status
+            if result.isReadyForMastering {
+                HStack {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    
+                    Text("Ready for Mastering")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.green)
+                }
+                .padding(.top, 4)
             }
         }
         .padding()
@@ -452,7 +550,7 @@ struct ResultsView: View {
             showPaywall = true
             return
         }
-        
+
         isAnalyzing = true
         defer { isAnalyzing = false }
 
@@ -467,7 +565,7 @@ struct ResultsView: View {
             }
             
             // Perform the analysis on the specific file
-            let result = try await analysisService.analyzeAudio(audioFile)
+            let result = try await analysisService.getDetailedAnalysis(for: audioFile.fileURL)
             
             print("   Analysis complete. Score: \(result.overallScore)")
             
@@ -546,7 +644,7 @@ struct ResultsView: View {
 
 // MARK: - Animated Gradient Loader
 
-private struct AnimatedGradientLoader: View {
+struct AnimatedGradientLoader: View {
     let fileName: String
     
     @State private var animationOffset: CGFloat = 0

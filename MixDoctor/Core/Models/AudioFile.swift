@@ -150,6 +150,19 @@ public final class AnalysisResult {
     var cymbalEnergy: Double
 
     var recommendations: [String]
+    
+    // AI Analysis Fields
+    var stereoAnalysis: String
+    var frequencyAnalysis: String
+    var dynamicsAnalysis: String
+    var effectsAnalysis: String
+    var detailedSummary: String
+    
+    // Claude AI Analysis Fields
+    var aiSummary: String?
+    var aiRecommendations: [String]
+    var claudeScore: Int?
+    var isReadyForMastering: Bool
 
     init(audioFile: AudioFile?, analysisVersion: String = "1.0") {
         self.id = UUID()
@@ -186,6 +199,19 @@ public final class AnalysisResult {
         self.cymbalEnergy = 0
         
         self.recommendations = []
+        
+        // Initialize AI analysis fields
+        self.stereoAnalysis = ""
+        self.frequencyAnalysis = ""
+        self.dynamicsAnalysis = ""
+        self.effectsAnalysis = ""
+        self.detailedSummary = ""
+        
+        // Initialize Claude AI analysis fields
+        self.aiSummary = nil
+        self.aiRecommendations = []
+        self.claudeScore = nil
+        self.isReadyForMastering = false
     }
 }
 

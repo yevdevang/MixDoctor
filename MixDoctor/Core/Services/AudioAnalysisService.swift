@@ -282,9 +282,10 @@ final class AudioAnalysisService {
         print("   🔬 Technical Score (objective): \(Int(technicalScore))")
         print("   🤖 AI Score: \(Int(aiResponse.overallQuality))")
         
-        // Use the HIGHER of technical score or AI score to avoid unfair penalization
-        let finalScore = max(technicalScore, aiResponse.overallQuality)
-        print("   ⭐ Final Score (max of both): \(Int(finalScore))")
+        // DISABLED: Use Claude's intelligent score instead of max()
+        // let finalScore = max(technicalScore, aiResponse.overallQuality)
+        let finalScore = aiResponse.overallQuality  // Use Claude's score directly
+        print("   ⭐ Final Score (using Claude): \(Int(finalScore))")
         
         // ✅ KEEP: Result creation and data mapping - this structure is good
         // Create analysis result

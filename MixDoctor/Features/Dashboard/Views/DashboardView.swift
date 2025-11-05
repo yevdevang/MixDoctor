@@ -17,13 +17,11 @@ struct DashboardView: View {
     @Query(sort: \AudioFile.dateImported, order: .reverse) private var audioFiles: [AudioFile]
     
     @StateObject private var iCloudMonitor = iCloudSyncMonitor.shared
-    @StateObject private var audioKitService = AudioKitService.shared
 
     @State private var searchText = ""
     @State private var filterOption: FilterOption = .all
     @State private var sortOption: SortOption = .date
     @State private var selectedFile: AudioFile?
-    @State private var showingAnalysisResults = false
 
     enum FilterOption: String, CaseIterable {
         case all = "All"
@@ -52,17 +50,14 @@ struct DashboardView: View {
             break
         case .analyzed:
             files = files.filter { $0.analysisResult != nil }
-            break
         case .pending:
             files = files.filter { $0.analysisResult == nil }
-            break
         case .issues:
             files = files.filter {
                 guard let result = $0.analysisResult else { return false }
                 return result.hasPhaseIssues || result.hasStereoIssues ||
                        result.hasFrequencyImbalance || result.hasDynamicRangeIssues
             }
-            break
         }
         
         // Apply sorting
@@ -77,7 +72,6 @@ struct DashboardView: View {
                 let score2 = file2.analysisResult?.overallScore ?? 0
                 return score1 > score2
             }
-            files.sort { $0.fileName.localizedCaseInsensitiveCompare($1.fileName) == .orderedAscending }
         }
 
         return files
@@ -163,7 +157,6 @@ struct DashboardView: View {
                 
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
-                       
                         Button(action: { sortOption = .date }) {
                             Label("Sort by Date", systemImage: "calendar")
                             if sortOption == .date {
@@ -303,79 +296,9 @@ struct DashboardView: View {
     private var filesList: some View {
         List {
             ForEach(filteredFiles) { file in
-                Button(action: {
-                    // Use AudioKitService to analyze the file when tapped
-                    selectedFile = file
-                    print("🎵 AudioKit analyzing: \(file.fileName)")
-                    
-                    Task {
-                        do {
-                            let analysisResult = try await audioKitService.getDetailedAnalysis(for: file.fileURL)
-                            
-                            // Print AudioKit analysis results to console
-                            print("✅ AudioKit Analysis Results for: \(file.fileName)")
-                            print("📊 Overall Score: \(analysisResult.overallScore)")
-                            print("🎵 Stereo Width: \(analysisResult.stereoWidthScore)")
-                            print("🔄 Phase Coherence: \(analysisResult.phaseCoherence)")
-                            print("📈 Spectral Centroid: \(analysisResult.spectralCentroid)")
-                            print("⚠️ Has Clipping: \(analysisResult.hasClipping)")
-                            print("🔊 Dynamic Range: \(analysisResult.dynamicRange) dB")
-                            print("� RMS Level: \(String(format: "%.1f", analysisResult.rmsLevel)) dB")
-                            print("� LUFS Loudness: \(String(format: "%.1f", analysisResult.loudnessLUFS)) LUFS")
-                            print("��📉 Peak Level: \(analysisResult.peakLevel)")
-                            print("🎚️ Frequency Balance:")
-                            print("  - Low End: \(analysisResult.lowEndBalance)")
-                            print("  - Low Mid: \(analysisResult.lowMidBalance)")
-                            print("  - Mid: \(analysisResult.midBalance)")
-                            print("  - High Mid: \(analysisResult.highMidBalance)")
-                            print("  - High: \(analysisResult.highBalance)")
-                            print("🚨 Issues:")
-                            print("  - Phase Issues: \(analysisResult.hasPhaseIssues)")
-                            print("  - Stereo Issues: \(analysisResult.hasStereoIssues)")
-                            print("🔀 Mono Compatibility: \(String(format: "%.1f", analysisResult.monoCompatibility * 100))%")
-                            print("  - Frequency Imbalance: \(analysisResult.hasFrequencyImbalance)")
-                            print("  - Dynamic Range Issues: \(analysisResult.hasDynamicRangeIssues)")
-                            print("🎛️ Instrument Balance Score: \(analysisResult.instrumentBalanceScore)%")
-                            print("🥁 Kick Energy: \(String(format: "%.1f", analysisResult.kickEnergy))%")
-                            print("🎸 Bass Energy: \(String(format: "%.1f", analysisResult.bassEnergy))%")
-                            print("🎤 Vocal Energy: \(String(format: "%.1f", analysisResult.vocalEnergy))%")
-                            print("🎸 Guitar Energy: \(String(format: "%.1f", analysisResult.guitarEnergy))%")
-                            print("🥁 Cymbal Energy: \(String(format: "%.1f", analysisResult.cymbalEnergy))%")
-                            print("💡 Recommendations: \(analysisResult.recommendations)")
-                            print("🎚️ MIX QUALITY ANALYSIS:")
-                            print("   • Technical Quality: \(file.isWellMixed ? "✅ Technically Sound" : "⚠️ Has Technical Issues")")
-                            print("   • Ready for Mastering: \(file.isReadyForMastering ? "✅ Yes" : "❌ Fix Issues First")")
-                            if file.needsMixImprovement {
-                                print("   • Issues Found:")
-                                if analysisResult.hasPhaseIssues {
-                                    print("     - 🔄 Phase correlation issues detected")
-                                }
-                                if analysisResult.hasFrequencyImbalance {
-                                    print("     - 🎵 Extreme frequency imbalance detected")  
-                                }
-                                if analysisResult.hasDynamicRangeIssues {
-                                    print("     - 📉 Severely over-compressed")
-                                }
-                                if analysisResult.hasClipping {
-                                    print("     - ⚠️ Digital clipping detected")
-                                }
-                            } else {
-                                print("   • Status: 🎯 No major technical issues detected")
-                            }
-                            print("=====================================")
-                            
-                            // Update the file with AudioKit analysis result
-                            file.analysisResult = analysisResult
-                            try? modelContext.save()
-                            
-                        } catch {
-                            print("❌ AudioKit analysis failed for \(file.fileName): \(error)")
-                        }
-                    }
-                }) {
+                NavigationLink(value: file) {
                     AudioFileRow(audioFile: file)
                 }
-                .buttonStyle(PlainButtonStyle())
             }
             .onDelete(perform: deleteFiles)
         }
@@ -383,6 +306,9 @@ struct DashboardView: View {
             await iCloudMonitor.syncNow()
             await scanAndImportFromiCloud()
             await loadMissingAnalysisResults()
+        }
+        .navigationDestination(for: AudioFile.self) { file in
+            ResultsView(audioFile: file)
         }
     }
 
@@ -476,7 +402,7 @@ struct DashboardView: View {
             )
             
             // Filter audio files
-            let audioExtensions = ["mp3", "wav", "m4a", "aac", "flac", "aif", "aiff"]
+            let audioExtensions = ["wav","aif","aiff"]
             let audioFiles = files.filter { audioExtensions.contains($0.pathExtension.lowercased()) }
             
             var imported = 0
@@ -620,7 +546,6 @@ struct DashboardView: View {
     }
 }
 
-/*
 #Preview {
     let config = ModelConfiguration(isStoredInMemoryOnly: true)
     let container = try! ModelContainer(for: AudioFile.self, configurations: config)
@@ -640,7 +565,6 @@ struct DashboardView: View {
         context.insert(audioFile)
     }
     
-    DashboardView()
+    return DashboardView()
         .modelContainer(container)
 }
-*/

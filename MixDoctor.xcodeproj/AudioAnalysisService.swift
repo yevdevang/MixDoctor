@@ -136,7 +136,8 @@ final class AudioAnalysisService {
         }
         
         // Calculate overall score and generate recommendations
-        await calculateOverallScore(result: result)
+        // NOTE: Overall score is now calculated by Claude AI in AudioKitService
+        // await calculateOverallScore(result: result)  // DISABLED - using Claude scoring
         await generateRecommendations(result: result)
         
         return result

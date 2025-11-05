@@ -50,7 +50,12 @@ final class AnalysisResultPersistence {
             "hasStereoIssues": result.hasStereoIssues,
             "hasFrequencyImbalance": result.hasFrequencyImbalance,
             "hasDynamicRangeIssues": result.hasDynamicRangeIssues,
-            "recommendations": result.recommendations
+            "recommendations": result.recommendations,
+            // Claude AI fields
+            "aiSummary": result.aiSummary as Any,
+            "aiRecommendations": result.aiRecommendations,
+            "claudeScore": result.claudeScore as Any,
+            "isReadyForMastering": result.isReadyForMastering
         ]
         
         // Convert to JSON
@@ -128,6 +133,12 @@ final class AnalysisResultPersistence {
             result.hasFrequencyImbalance = data["hasFrequencyImbalance"] as? Bool ?? false
             result.hasDynamicRangeIssues = data["hasDynamicRangeIssues"] as? Bool ?? false
             result.recommendations = data["recommendations"] as? [String] ?? []
+            
+            // Load Claude AI fields
+            result.aiSummary = data["aiSummary"] as? String
+            result.aiRecommendations = data["aiRecommendations"] as? [String] ?? []
+            result.claudeScore = data["claudeScore"] as? Int
+            result.isReadyForMastering = data["isReadyForMastering"] as? Bool ?? false
             
             print("✅ Loaded analysis result for: \(audioFileName)")
             return result

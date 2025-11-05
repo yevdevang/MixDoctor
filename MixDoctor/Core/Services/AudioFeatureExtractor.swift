@@ -64,8 +64,10 @@ public final class AudioFeatureExtractor {
         
         print("   📊 Stereo Features:")
         print("      Correlation: \(correlation)")
+        print("      Mid Energy: \(midEnergy)")
+        print("      Side Energy: \(sideEnergy)")
         print("      Raw Side Ratio: \(rawSideRatio) (\(Int(rawSideRatio * 100))%)")
-        print("      Stereo Width (Scaled): \(stereoWidth) (\(Int(stereoWidth * 100))%)")
+        print("      Stereo Width (Professional): \(stereoWidth) (\(Int(stereoWidth * 100))%)")
         print("      L/R Balance: \(leftRightBalance)")
         print("      Mid/Side Ratio: \(midSideRatio)")
         

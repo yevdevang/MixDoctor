@@ -123,6 +123,8 @@ final class ImportViewModel {
     }
 
     func removeImportedFile(_ file: AudioFile) {
+        print("🗑️ Deleting file from Import tab: \(file.fileName)")
+        
         // Delete the actual audio file from storage (iCloud or local)
         let fileURL = file.fileURL
         if FileManager.default.fileExists(atPath: fileURL.path) {
@@ -134,9 +136,17 @@ final class ImportViewModel {
             }
         }
         
+        // Delete the analysis result JSON from iCloud Drive
+        let _ = AnalysisResultPersistence.shared
+        AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: file.fileName)
+        
         // Delete the SwiftData record
         modelContext.delete(file)
         try? modelContext.save()
         importedFiles.removeAll { $0.id == file.id }
+        
+        // Notify other views that files were deleted
+        print("📢 Posting audioFileDeleted notification from Import tab")
+        NotificationCenter.default.post(name: .audioFileDeleted, object: nil)
     }
 }
