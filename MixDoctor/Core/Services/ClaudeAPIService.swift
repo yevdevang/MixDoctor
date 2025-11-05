@@ -295,12 +295,43 @@ class ClaudeAPIService {
         • Phase Coherence: \(String(format: "%.1f", metrics.phaseCoherence * 100))% (Excellent: >80%, Good: >60%, Poor: <50%)
         • Mono Compatibility: \(String(format: "%.1f", metrics.monoCompatibility * 100))% (Good: >70%, Acceptable: >50%)
         
-        🎵 FREQUENCY BALANCE (GENRE-AWARE STANDARDS - DETECTED: \(genre)):
-        \(getGenreFrequencyGuidelines(genre: genre, metrics: metrics))
-        • Low Mid (200-800Hz): \(String(format: "%.1f", metrics.lowMid))% (GOOD: 20-35%, POOR: >40% or <10%)
-        • Mid (800Hz-3kHz): \(String(format: "%.1f", metrics.mid))% (GOOD: 15-35%, VOCAL CLARITY CRITICAL, POOR: <10%)
-        • High Mid (3-6kHz): \(String(format: "%.1f", metrics.highMid))% (GOOD: 8-20%, PRESENCE/CLARITY, POOR: <3%)
-        • High (6-18kHz): \(String(format: "%.1f", metrics.high))% (VARIES BY GENRE: Dark/Warm 0.5-5%, Balanced 3-12%, Bright 8-20%)
+        🎵 FREQUENCY BALANCE (MASTERED TRACK - Professional Standards):
+        • Low End (20-200Hz): \(String(format: "%.1f", metrics.lowEnd))%
+          - EXCELLENT MASTER: 15-25% (controlled, punchy)
+          - GOOD MASTER: 12-30% (solid foundation)
+          - ACCEPTABLE: 10-35% (commercial ready)
+          - PROBLEMATIC: >38% (muddy master) or <8% (thin master)
+          
+        • Low Mid (200-800Hz): \(String(format: "%.1f", metrics.lowMid))%
+          - EXCELLENT MASTER: 18-28% (warmth without box)
+          - GOOD MASTER: 15-32% (body and richness)
+          - ACCEPTABLE: 12-38% (sufficient warmth)
+          - PROBLEMATIC: >42% (boxy master) or <10% (hollow master)
+          
+        • Mid (800Hz-3kHz): \(String(format: "%.1f", metrics.mid))%
+          - EXCELLENT MASTER: 20-32% (vocal clarity perfection)
+          - GOOD MASTER: 18-38% (presence and definition)
+          - ACCEPTABLE: 15-42% (commercial clarity)
+          - PROBLEMATIC: >45% (harsh master) or <12% (dull master)
+          
+        • High Mid (3-8kHz): \(String(format: "%.1f", metrics.highMid))%
+          - EXCELLENT MASTER: 10-20% (presence without fatigue)
+          - GOOD MASTER: 8-25% (articulation and bite)
+          - ACCEPTABLE: 6-28% (adequate presence)
+          - PROBLEMATIC: >32% (fatiguing master) or <4% (dull master)
+          
+        • High (8-20kHz): \(String(format: "%.1f", metrics.high))%
+          - EXCELLENT MASTER: 6-16% (air and sparkle)
+          - GOOD MASTER: 4-20% (brightness and detail)
+          - ACCEPTABLE: 3-24% (sufficient air)
+          - PROBLEMATIC: >28% (harsh/sibilant) or <2% (dark master)
+
+        📊 MASTERED FREQUENCY STANDARDS BY GENRE:
+        - Pop/Rock Master: Low 15-25%, LowMid 20-28%, Mid 22-32%, HighMid 12-20%, High 8-16%
+        - Electronic Master: Low 18-28%, LowMid 16-26%, Mid 18-28%, HighMid 14-24%, High 10-18%
+        - Hip-Hop Master: Low 20-30%, LowMid 18-28%, Mid 20-30%, HighMid 10-20%, High 6-14%
+        - Classical Master: Low 10-18%, LowMid 20-28%, Mid 28-40%, HighMid 8-16%, High 4-10%
+        - Jazz Master: Low 12-22%, LowMid 22-30%, Mid 25-35%, HighMid 10-18%, High 6-12%
 
         🚨 MASTERED TRACK ISSUES:
         • Clipping: \(metrics.hasClipping ? "❌ YES (Major penalty)" : "✅ No")
@@ -348,17 +379,23 @@ class ClaudeAPIService {
         • Genre detection should INFORM scoring, not penalize creative choices
         • For ELECTRONIC: Bass dominance is expected and should not be heavily penalized
         
-        Scoring ranges:
-        • Excellent master: 88-100 points (Abbey Road quality should be here)
-        • Very good commercial master: 80-87 points  
-        • Good commercial master: 72-79 points
-        • Acceptable master: 65-71 points
-        • Problematic master: 50-64 points
+        🚨 SIMPLE SCORING SYSTEM:
+        • Professional Masters (Green Day, major labels): 85-95
+        • Good Commercial Quality: 75-84  
+        • Amateur but Good: 65-74
+        • Needs Work: 50-64
+        • Poor Quality: Below 50
+
+        🚨 CONSISTENCY RULES:
+        • If you call it "Good Commercial Master" → Score 75+
+        • If you call it "Excellent" → Score 85+
+        • If you call it "Professional" → Score 80+
+        • NEVER contradict yourself between analysis and conclusion
 
         Format response as:
-        SCORE: [realistic 0-100 score for MASTERED TRACK - be generous for professional work]
-        ANALYSIS: [2-3 sentences about the master quality and technical assessment]
-        RECOMMENDATIONS: [Mastering-specific feedback, or "Excellent master - ready for distribution" if great]
+        SCORE: [realistic 0-100 score - be generous for professional work]
+        ANALYSIS: [2-3 sentences about quality - be CONSISTENT with score]
+        RECOMMENDATIONS: [Brief feedback that MATCHES your analysis tone]
         """
     }
     
@@ -380,12 +417,42 @@ class ClaudeAPIService {
         • Phase Coherence: \(String(format: "%.1f", metrics.phaseCoherence * 100))% (Excellent: >80%, Good: >60%, Poor: <50%)
         • Mono Compatibility: \(String(format: "%.1f", metrics.monoCompatibility * 100))% (Good: >70%, Acceptable: >50%)
         
-        🎵 FREQUENCY BALANCE:
-        • Low End: \(String(format: "%.1f", metrics.lowEnd))% (Balanced: 15-35%, Acceptable: 10-45%)
-        • Low Mid: \(String(format: "%.1f", metrics.lowMid))% (Balanced: 15-30%, Acceptable: 10-40%)
-        • Mid: \(String(format: "%.1f", metrics.mid))% (Balanced: 20-40%, Acceptable: 15-50%)
-        • High Mid: \(String(format: "%.1f", metrics.highMid))% (Balanced: 15-30%, Acceptable: 10-35%)
-        • High: \(String(format: "%.1f", metrics.high))% (Balanced: 8-25%, Acceptable: 5-30%)
+        🎵 FREQUENCY BALANCE (Professional Standards):
+        • Low End (20-200Hz): \(String(format: "%.1f", metrics.lowEnd))%
+          - EXCELLENT: 15-25% (controlled, tight)
+          - GOOD: 12-30% (balanced foundation)
+          - ACCEPTABLE: 10-35% (workable)
+          - PROBLEMATIC: >40% (muddy) or <8% (thin)
+          
+        • Low Mid (200-800Hz): \(String(format: "%.1f", metrics.lowMid))%
+          - EXCELLENT: 18-28% (warmth without mud)
+          - GOOD: 15-32% (body and fullness)
+          - ACCEPTABLE: 12-38% (reasonable warmth)
+          - PROBLEMATIC: >45% (boxy/muddy) or <10% (hollow)
+          
+        • Mid (800Hz-3kHz): \(String(format: "%.1f", metrics.mid))%
+          - EXCELLENT: 25-35% (vocal clarity zone)
+          - GOOD: 22-40% (presence and definition)
+          - ACCEPTABLE: 18-45% (sufficient clarity)
+          - PROBLEMATIC: >50% (harsh/forward) or <15% (dull/distant)
+          
+        • High Mid (3-8kHz): \(String(format: "%.1f", metrics.highMid))%
+          - EXCELLENT: 12-22% (presence without harshness)
+          - GOOD: 10-28% (articulation and bite)
+          - ACCEPTABLE: 8-32% (adequate presence)
+          - PROBLEMATIC: >35% (sibilant/harsh) or <5% (dull/muffled)
+          
+        • High (8-20kHz): \(String(format: "%.1f", metrics.high))%
+          - EXCELLENT: 8-18% (air and sparkle)
+          - GOOD: 6-22% (brightness and detail)
+          - ACCEPTABLE: 4-25% (sufficient air)
+          - PROBLEMATIC: >30% (sibilant/brittle) or <3% (dull/dark)
+
+        📊 FREQUENCY BALANCE ANALYSIS:
+        - Pop/Rock Standard: Low 15-25%, LowMid 20-30%, Mid 25-35%, HighMid 12-22%, High 8-18%
+        - Electronic Standard: Low 20-30%, LowMid 15-25%, Mid 20-30%, HighMid 15-25%, High 10-20%
+        - Acoustic Standard: Low 12-22%, LowMid 22-32%, Mid 25-40%, HighMid 10-20%, High 6-15%
+        - Classical Standard: Low 10-20%, LowMid 20-30%, Mid 30-45%, HighMid 8-18%, High 5-12%
 
         🚨 PRE-MASTER MIX ISSUES:
         • Clipping: \(metrics.hasClipping ? "❌ YES (Major penalty)" : "✅ No")

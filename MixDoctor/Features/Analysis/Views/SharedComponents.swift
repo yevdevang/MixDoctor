@@ -242,10 +242,10 @@ struct AudioFileRow: View {
             }
             
             // Chevron indicator
-//            Image(systemName: "chevron.right")
-//                .font(.caption)
-//                .foregroundStyle(.tertiary)
-//                .padding(.leading, 8)
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .padding(.leading, 8)
         }
         .padding(.vertical, 4)
         .onAppear {

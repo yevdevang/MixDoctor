@@ -17,11 +17,16 @@ struct DashboardView: View {
     @Query(sort: \AudioFile.dateImported, order: .reverse) private var audioFiles: [AudioFile]
     
     @StateObject private var iCloudMonitor = iCloudSyncMonitor.shared
+    private let analysisService = AudioKitService.shared
+    private let mockService = MockSubscriptionService.shared
 
     @State private var searchText = ""
     @State private var filterOption: FilterOption = .all
     @State private var sortOption: SortOption = .date
     @State private var selectedFile: AudioFile?
+    @State private var isAnalyzing = false
+    @State private var analyzingFile: AudioFile?
+    @State private var navigateToFile: AudioFile?
 
     enum FilterOption: String, CaseIterable {
         case all = "All"
@@ -55,8 +60,7 @@ struct DashboardView: View {
         case .issues:
             files = files.filter {
                 guard let result = $0.analysisResult else { return false }
-                return result.hasPhaseIssues || result.hasStereoIssues ||
-                       result.hasFrequencyImbalance || result.hasDynamicRangeIssues
+                return hasActualIssues(result: result)
             }
         }
         
@@ -260,16 +264,33 @@ struct DashboardView: View {
     }
 
     private var issuesCount: Int {
-        audioFiles.compactMap { $0.analysisResult }.filter {
-            $0.hasPhaseIssues || $0.hasStereoIssues ||
-            $0.hasFrequencyImbalance || $0.hasDynamicRangeIssues
-        }.count
+        audioFiles.compactMap { $0.analysisResult }.filter { hasActualIssues(result: $0) }.count
     }
 
     private var averageScore: Double {
         let scores = audioFiles.compactMap { $0.analysisResult?.overallScore }
         guard !scores.isEmpty else { return 0 }
         return scores.reduce(0, +) / Double(scores.count)
+    }
+    
+    // Helper function to detect actual issues based on score and metrics
+    private func hasActualIssues(result: AnalysisResult) -> Bool {
+        // If score is high (85+), likely no significant issues
+        if result.overallScore >= 85 {
+            return false
+        }
+        
+        // Check for actual metric-based issues
+        let hasPhaseIssues = result.phaseCoherence < 0.7
+        let hasStereoIssues = result.stereoWidthScore < 30 || result.stereoWidthScore > 90
+        let hasFreqIssues = (result.lowEndBalance > 60 || result.lowEndBalance < 15) ||
+                           (result.midBalance < 25 || result.midBalance > 55) ||
+                           (result.highBalance < 10 || result.highBalance > 45)
+        let hasDynamicIssues = result.dynamicRange < 8
+        let hasLevelIssues = result.peakLevel > -1 || result.loudnessLUFS > -10 || result.loudnessLUFS < -30
+        
+        return hasPhaseIssues || hasStereoIssues || hasFreqIssues || hasDynamicIssues || hasLevelIssues || 
+               result.hasClipping || result.hasInstrumentBalanceIssues
     }
 
     // MARK: - Filter Picker
@@ -296,9 +317,12 @@ struct DashboardView: View {
     private var filesList: some View {
         List {
             ForEach(filteredFiles) { file in
-                NavigationLink(value: file) {
+                Button {
+                    handleAudioFileSelection(file)
+                } label: {
                     AudioFileRow(audioFile: file)
                 }
+                .buttonStyle(PlainButtonStyle())
             }
             .onDelete(perform: deleteFiles)
         }
@@ -307,8 +331,13 @@ struct DashboardView: View {
             await scanAndImportFromiCloud()
             await loadMissingAnalysisResults()
         }
-        .navigationDestination(for: AudioFile.self) { file in
+        .navigationDestination(item: $navigateToFile) { file in
             ResultsView(audioFile: file)
+        }
+        .fullScreenCover(isPresented: $isAnalyzing) {
+            if let file = analyzingFile {
+                AnimatedGradientLoader(fileName: file.fileName)
+            }
         }
     }
 
@@ -335,6 +364,71 @@ struct DashboardView: View {
     }
 
     // MARK: - Actions
+    
+    private func handleAudioFileSelection(_ file: AudioFile) {
+        Task {
+            // Check if file already has analysis
+            if file.analysisResult != nil {
+                // Navigate directly to results
+                navigateToFile = file
+                return
+            }
+            
+            // Check if user can perform analysis
+            guard mockService.canPerformAnalysis() else {
+                // Show paywall or error
+                print("⚠️ Free limit reached for analysis")
+                // For now, navigate to results view which will handle the paywall
+                navigateToFile = file
+                return
+            }
+            
+            // Start analysis with loader
+            analyzingFile = file
+            isAnalyzing = true
+            
+            do {
+                print("🔍 Starting analysis for: \(file.fileName)")
+                
+                // Perform the analysis
+                let result = try await analysisService.getDetailedAnalysis(for: file.fileURL)
+                
+                print("   Analysis complete. Score: \(result.overallScore)")
+                
+                // Increment usage count for free users
+                mockService.incrementAnalysisCount()
+                
+                // Save to the AudioFile model
+                file.analysisResult = result
+                file.dateAnalyzed = Date()
+                
+                // Save to SwiftData
+                try modelContext.save()
+                
+                // Save to iCloud Drive as JSON for cross-device sync
+                do {
+                    try AnalysisResultPersistence.shared.saveAnalysisResult(result, forAudioFile: file.fileName)
+                    print("☁️ Saved analysis to iCloud Drive")
+                } catch {
+                    print("⚠️ Failed to save analysis to iCloud: \(error)")
+                }
+                
+                print("✅ Analysis completed and saved for: \(file.fileName)")
+                
+                // Hide loader and navigate
+                isAnalyzing = false
+                analyzingFile = nil
+                navigateToFile = file
+                
+            } catch {
+                print("❌ Analysis error for \(file.fileName): \(error)")
+                isAnalyzing = false
+                analyzingFile = nil
+                // Still navigate to show error in ResultsView
+                navigateToFile = file
+            }
+        }
+    }
     
     private func checkAndDownloadMissingFiles() async {
         print("🔍 Checking for missing files in Dashboard...")
