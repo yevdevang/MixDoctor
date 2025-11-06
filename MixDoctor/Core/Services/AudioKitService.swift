@@ -7,9 +7,12 @@
 
 import Foundation
 import AVFoundation
-//import AudioKit
+import AudioKit
 import Combine
 import Accelerate
+
+// Import core models and services
+import SwiftUI
 
 @MainActor
 public class AudioKitService: ObservableObject {
@@ -58,6 +61,7 @@ public class AudioKitService: ObservableObject {
         
         return result
     }
+    
     
     private func performAudioKitAnalysis(url: URL) async throws -> AnalysisResult {
         // Load audio file for AudioKit analysis
@@ -347,6 +351,7 @@ public class AudioKitService: ObservableObject {
         )
     }
     
+    
     // MARK: - AudioKit Analysis Methods
     
     private func performAudioKitFFT(_ data: UnsafePointer<Float>, frameCount: Int, sampleRate: Double) -> AudioKitFFTResult {
@@ -385,56 +390,72 @@ public class AudioKitService: ObservableObject {
         // Ensure we only use the meaningful half of the spectrum
         let usefulBins = magnitudes.count / 2
         
-        // Frequency band ranges - adjusted for realistic musical content
-        let bassRange = max(1, Int(20.0 / binWidth))..<min(usefulBins, Int(200.0 / binWidth))     // 20Hz - 200Hz (tight bass)
-        let lowMidRange = bassRange.upperBound..<min(usefulBins, Int(800.0 / binWidth))          // 200Hz - 800Hz (broader low-mid)
-        let midRange = lowMidRange.upperBound..<min(usefulBins, Int(3000.0 / binWidth))          // 800Hz - 3kHz (vocal range)
-        let highMidRange = midRange.upperBound..<min(usefulBins, Int(6000.0 / binWidth))         // 3kHz - 6kHz (presence)
-        let highRange = highMidRange.upperBound..<min(usefulBins, Int(18000.0 / binWidth))       // 6kHz - 18kHz (air/brilliance - realistic range)
+        // Professional mastering frequency bands (matching industry standards)
+        let subBassRange = max(1, Int(20.0 / binWidth))..<min(usefulBins, Int(60.0 / binWidth))    // 20Hz - 60Hz (sub-bass)
+        let bassRange = max(1, Int(60.0 / binWidth))..<min(usefulBins, Int(250.0 / binWidth))      // 60Hz - 250Hz (bass)
+        let lowMidRange = max(1, Int(250.0 / binWidth))..<min(usefulBins, Int(500.0 / binWidth))   // 250Hz - 500Hz (low-mid)
+        let midRange = max(1, Int(500.0 / binWidth))..<min(usefulBins, Int(2000.0 / binWidth))     // 500Hz - 2kHz (mid)
+        let highMidRange = max(1, Int(2000.0 / binWidth))..<min(usefulBins, Int(6000.0 / binWidth)) // 2kHz - 6kHz (high-mid)
+        let presenceRange = max(1, Int(6000.0 / binWidth))..<min(usefulBins, Int(12000.0 / binWidth)) // 6kHz - 12kHz (presence)
+        let airRange = max(1, Int(12000.0 / binWidth))..<min(usefulBins, Int(20000.0 / binWidth))   // 12kHz - 20kHz (air)
         
         // Debug: Show frequency band ranges
         print("🎯 FREQUENCY BAND RANGES:")
+        print("   Sub-Bass: bins \(subBassRange.lowerBound)-\(subBassRange.upperBound-1) (\(Double(subBassRange.lowerBound)*binWidth)Hz - \(Double(subBassRange.upperBound-1)*binWidth)Hz)")
         print("   Bass: bins \(bassRange.lowerBound)-\(bassRange.upperBound-1) (\(Double(bassRange.lowerBound)*binWidth)Hz - \(Double(bassRange.upperBound-1)*binWidth)Hz)")
         print("   Low-Mid: bins \(lowMidRange.lowerBound)-\(lowMidRange.upperBound-1) (\(Double(lowMidRange.lowerBound)*binWidth)Hz - \(Double(lowMidRange.upperBound-1)*binWidth)Hz)")
         print("   Mid: bins \(midRange.lowerBound)-\(midRange.upperBound-1) (\(Double(midRange.lowerBound)*binWidth)Hz - \(Double(midRange.upperBound-1)*binWidth)Hz)")
         print("   High-Mid: bins \(highMidRange.lowerBound)-\(highMidRange.upperBound-1) (\(Double(highMidRange.lowerBound)*binWidth)Hz - \(Double(highMidRange.upperBound-1)*binWidth)Hz)")
-        print("   High: bins \(highRange.lowerBound)-\(highRange.upperBound-1) (\(Double(highRange.lowerBound)*binWidth)Hz - \(Double(highRange.upperBound-1)*binWidth)Hz)")
+        print("   Presence: bins \(presenceRange.lowerBound)-\(presenceRange.upperBound-1) (\(Double(presenceRange.lowerBound)*binWidth)Hz - \(Double(presenceRange.upperBound-1)*binWidth)Hz)")
+        print("   Air: bins \(airRange.lowerBound)-\(airRange.upperBound-1) (\(Double(airRange.lowerBound)*binWidth)Hz - \(Double(airRange.upperBound-1)*binWidth)Hz)")
         print("   Total useful bins: \(usefulBins)")
         
-        // Calculate energy in each frequency band
-        let lowEnd = calculateBandEnergy(magnitudes, range: bassRange)
+        // Calculate energy in each frequency band with proper professional weighting
+        let subBass = calculateBandEnergy(magnitudes, range: subBassRange)
+        let bass = calculateBandEnergy(magnitudes, range: bassRange)
         let lowMid = calculateBandEnergy(magnitudes, range: lowMidRange)
         let mid = calculateBandEnergy(magnitudes, range: midRange)
         let highMid = calculateBandEnergy(magnitudes, range: highMidRange)
-        let high = calculateBandEnergy(magnitudes, range: highRange)
+        let presence = calculateBandEnergy(magnitudes, range: presenceRange)
+        let air = calculateBandEnergy(magnitudes, range: airRange)
         
         // Debug: Show frequency band energies 
         print("🎵 FREQUENCY BAND ENERGIES:")
-        print("   Bass (20-200Hz): \(String(format: "%.2f", lowEnd))%")
-        print("   Low-Mid (200-800Hz): \(String(format: "%.2f", lowMid))%")
-        print("   Mid (800Hz-3kHz): \(String(format: "%.2f", mid))%")
-        print("   High-Mid (3-6kHz): \(String(format: "%.2f", highMid))%")
-        print("   High (6-18kHz): \(String(format: "%.2f", high))%")
-        print("   Total: \(String(format: "%.2f", lowEnd + lowMid + mid + highMid + high))%")
+        print("   Sub-Bass (20-60Hz): \(String(format: "%.2f", subBass))%")
+        print("   Bass (60-250Hz): \(String(format: "%.2f", bass))%")
+        print("   Low-Mid (250-500Hz): \(String(format: "%.2f", lowMid))%")
+        print("   Mid (500Hz-2kHz): \(String(format: "%.2f", mid))%")
+        print("   High-Mid (2-6kHz): \(String(format: "%.2f", highMid))%")
+        print("   Presence (6-12kHz): \(String(format: "%.2f", presence))%")
+        print("   Air (12-20kHz): \(String(format: "%.2f", air))%")
+        print("   Total: \(String(format: "%.2f", subBass + bass + lowMid + mid + highMid + presence + air))%")
         
         // Calculate spectral centroid
         let spectralCentroid = calculateSpectralCentroid(magnitudes, binWidth: binWidth)
         
+        // Combine professional bands into the existing 5-band structure for compatibility
+        // This maintains API compatibility while using proper professional frequency ranges
+        let combinedLowEnd = subBass + bass      // Combined sub-bass (20-60Hz) + bass (60-250Hz)
+        let combinedLowMid = lowMid              // Low-mid (250-500Hz) 
+        let combinedMid = mid                    // Mid (500Hz-2kHz)
+        let combinedHighMid = highMid            // High-mid (2-6kHz)
+        let combinedHigh = presence + air        // Combined presence (6-12kHz) + air (12-20kHz)
+        
         // Detect genre for frequency balance assessment
-        let detectedGenre = detectGenreFromFrequencies(lowEnd, lowMid, mid, highMid, high)
+        let detectedGenre = detectGenreFromFrequencies(combinedLowEnd, combinedLowMid, combinedMid, combinedHighMid, combinedHigh)
         print("🎭 GENRE DETECTION:")
         print("   Detected genre: \(detectedGenre)")
         
         // Check for frequency imbalance
-        let hasImbalance = checkFrequencyImbalance(lowEnd, lowMid, mid, highMid, high, genre: detectedGenre)
+        let hasImbalance = checkFrequencyImbalance(combinedLowEnd, combinedLowMid, combinedMid, combinedHighMid, combinedHigh, genre: detectedGenre)
         print("   Has frequency imbalance: \(hasImbalance)")
         
         return AudioKitFFTResult(
-            lowEnd: lowEnd,
-            lowMid: lowMid,
-            mid: mid,
-            highMid: highMid,
-            high: high,
+            lowEnd: combinedLowEnd,
+            lowMid: combinedLowMid,
+            mid: combinedMid,
+            highMid: combinedHighMid,
+            high: combinedHigh,
             spectralCentroid: spectralCentroid,
             hasImbalance: hasImbalance
         )
@@ -483,7 +504,7 @@ public class AudioKitService: ObservableObject {
         let hasSustainedClipping = sustainedClippingCount > frameCount / 1000 // More than 0.1% of samples
         
         // Calculate crest factor (peak-to-RMS ratio) for dynamic range assessment
-        let crestFactor = rms > 0 ? Double(peakAmplitude) / rms : 0.0
+        let _ = rms > 0 ? Double(peakAmplitude) / rms : 0.0
         
         // Analyze amplitude distribution for better loudness assessment
         let amplitudeHistogram = createAmplitudeHistogram(samples)
@@ -724,27 +745,56 @@ public class AudioKitService: ObservableObject {
             print("⚠️ Invalid range: \(range) for magnitudes count: \(magnitudes.count)")
             return 0.0 
         }
-        
+
         let bandMagnitudes = Array(magnitudes[range])
-        let energy = bandMagnitudes.reduce(0.0) { sum, magnitude in
-            sum + Double(magnitude * magnitude)
+        
+        // Apply professional perceptual weighting for more accurate frequency perception
+        var weightedEnergy = 0.0
+        for (index, magnitude) in bandMagnitudes.enumerated() {
+            let binIndex = range.lowerBound + index
+            let weight = calculatePerceptualWeight(binIndex: binIndex, magnitudeCount: magnitudes.count)
+            let energy = Double(magnitude * magnitude) * weight
+            weightedEnergy += energy
         }
         
-        // Calculate total energy only from meaningful spectrum (up to Nyquist)
+        // Calculate total weighted energy only from meaningful spectrum (up to Nyquist)
         let usefulMagnitudes = Array(magnitudes.prefix(magnitudes.count / 2))
-        let totalEnergy = usefulMagnitudes.reduce(0.0) { sum, magnitude in
-            sum + Double(magnitude * magnitude)
+        var totalWeightedEnergy = 0.0
+        for (index, magnitude) in usefulMagnitudes.enumerated() {
+            let weight = calculatePerceptualWeight(binIndex: index, magnitudeCount: magnitudes.count)
+            totalWeightedEnergy += Double(magnitude * magnitude) * weight
         }
         
         // Debug for zero energy cases
-        if energy == 0.0 && !range.isEmpty {
+        if weightedEnergy == 0.0 && !range.isEmpty {
             print("⚠️ Zero energy in range \(range): band magnitudes = \(bandMagnitudes.prefix(10))")
         }
         
-        // Return energy as percentage of total energy
-        let percentage = totalEnergy > 0 ? (energy / totalEnergy) * 100.0 : 0.0
+        // Return energy as percentage of total energy with proper normalization
+        let percentage = totalWeightedEnergy > 0 ? (weightedEnergy / totalWeightedEnergy) * 100.0 : 0.0
         
         return percentage
+    }
+    
+    // Professional perceptual weighting based on equal-loudness curves (ISO 226)
+    private func calculatePerceptualWeight(binIndex: Int, magnitudeCount: Int) -> Double {
+        // Calculate frequency for this bin
+        let sampleRate: Double = 44100.0
+        let nyquist = sampleRate / 2.0
+        let binWidth = nyquist / Double(magnitudeCount / 2)
+        let frequency = Double(binIndex) * binWidth
+        
+        // Simplified A-weighting approximation for perceptual accuracy
+        // Based on the human ear's frequency response curve
+        if frequency < 20 { return 0.1 }        // Very low frequencies are less audible
+        if frequency < 60 { return 0.3 }        // Sub-bass region
+        if frequency < 250 { return 0.7 }       // Bass region  
+        if frequency < 500 { return 0.9 }       // Low-mid region
+        if frequency < 2000 { return 1.0 }      // Mid region (most sensitive)
+        if frequency < 6000 { return 1.0 }      // High-mid region (very sensitive)
+        if frequency < 12000 { return 0.8 }     // Presence region
+        if frequency < 20000 { return 0.5 }     // Air region
+        return 0.2                              // Very high frequencies
     }
     
     private func checkFrequencyImbalance(_ lowEnd: Double, _ lowMid: Double, _ mid: Double, _ highMid: Double, _ high: Double, genre: String) -> Bool {
@@ -842,7 +892,7 @@ public class AudioKitService: ObservableObject {
         
         // Calculate key ratios for genre classification
         let bassRatio = lowEnd / 100.0
-        let highRatio = high / 100.0
+        let _ = high / 100.0
         let midRatio = mid / 100.0
         let highMidRatio = highMid / 100.0
         let totalLowEnd = lowEnd + lowMid
@@ -1703,24 +1753,49 @@ enum AudioKitError: Error {
         }
         defer { vDSP_destroy_fftsetup(fftSetup) }
         
-        // Prepare input data
-        var realParts = actualSamples
+        // Apply Hann windowing for professional frequency analysis
+        // This prevents spectral leakage and improves frequency accuracy
+        var windowedSamples = actualSamples
+        applyHannWindow(&windowedSamples)
+        
+        // Prepare input data with proper pointer handling
+        var realParts = windowedSamples
         var imagParts = Array(repeating: Float(0.0), count: fftSize)
         
-        var splitComplex = DSPSplitComplex(realp: &realParts, imagp: &imagParts)
+        // Create DSPSplitComplex with proper pointer lifetime management
+        let splitComplex = realParts.withUnsafeMutableBufferPointer { realPtr in
+            imagParts.withUnsafeMutableBufferPointer { imagPtr in
+                var complex = DSPSplitComplex(realp: realPtr.baseAddress!, imagp: imagPtr.baseAddress!)
+                
+                // Perform forward FFT
+                vDSP_fft_zrip(fftSetup, &complex, 1, log2n, FFTDirection(FFT_FORWARD))
+                
+                // Calculate magnitudes
+                var magnitudes = Array(repeating: Float(0.0), count: fftSize / 2)
+                vDSP_zvmags(&complex, 1, &magnitudes, 1, vDSP_Length(fftSize / 2))
+                
+                // Convert to proper scale and take square root for magnitude
+                var count = Int32(fftSize / 2)
+                vvsqrtf(&magnitudes, magnitudes, &count)
+                
+                // Apply amplitude correction for windowing (Hann window factor ~1.63)
+                let windowCorrection: Float = 1.63
+                vDSP_vsmul(magnitudes, 1, [windowCorrection], &magnitudes, 1, vDSP_Length(magnitudes.count))
+                
+                return magnitudes
+            }
+        }
         
-        // Perform forward FFT
-        vDSP_fft_zrip(fftSetup, &splitComplex, 1, log2n, FFTDirection(FFT_FORWARD))
-        
-        // Calculate magnitudes
-        var magnitudes = Array(repeating: Float(0.0), count: fftSize / 2)
-        vDSP_zvmags(&splitComplex, 1, &magnitudes, 1, vDSP_Length(fftSize / 2))
-        
-        // Convert to proper scale and take square root for magnitude
-        var count = Int32(fftSize / 2)
-        vvsqrtf(&magnitudes, magnitudes, &count)
-        
-        return magnitudes
+        return splitComplex
+    }
+    
+    // Professional Hann windowing function for accurate frequency analysis
+    private func applyHannWindow(_ samples: inout [Float]) {
+        let N = samples.count
+        for i in 0..<N {
+            let windowValue = 0.5 * (1.0 - cos(2.0 * Float.pi * Float(i) / Float(N - 1)))
+            samples[i] *= windowValue
+        }
     }
     
     private func analyzeFrequencyBalance(from spectrum: [Float]) -> FrequencyBalance {
@@ -1753,7 +1828,7 @@ enum AudioKitError: Error {
     }
     
     private func identifyQualityIssues(from result: BufferAnalysisResult) -> [String] {
-        var issues: [String] = []
+        let issues: [String] = []
         
         
         
@@ -1838,7 +1913,7 @@ enum AudioKitError: Error {
     
     /// Analyze instrument balance across frequency spectrum
     private func analyzeInstrumentBalance(_ data: UnsafePointer<Float>, frameCount: Int) -> InstrumentBalanceResult {
-        let samples = Array(UnsafeBufferPointer(start: data, count: frameCount))
+        let _ = Array(UnsafeBufferPointer(start: data, count: frameCount))
         
         // Perform FFT analysis
         let magnitudes = performFFTAnalysis(data, frameCount: frameCount)
@@ -1907,7 +1982,7 @@ enum AudioKitError: Error {
         let bass = energies["bass"] ?? 0
         let vocals = energies["vocals"] ?? 0
         let guitars = energies["guitars"] ?? 0
-        let snare = energies["snare"] ?? 0
+        let _ = energies["snare"] ?? 0
         let cymbals = energies["cymbals"] ?? 0
         let presence = energies["presence"] ?? 0
         let air = energies["air"] ?? 0
@@ -2035,7 +2110,7 @@ enum AudioKitError: Error {
     
     /// Comprehensive spectral balance analysis for mastering
     private func analyzeSpectralBalance(_ data: UnsafePointer<Float>, frameCount: Int) -> SpectralBalanceResult {
-        let samples = Array(UnsafeBufferPointer(start: data, count: frameCount))
+        let _ = Array(UnsafeBufferPointer(start: data, count: frameCount))
         let magnitudes = performFFTAnalysis(data, frameCount: frameCount)
         
         let sampleRate: Double = 44100.0
@@ -2248,7 +2323,7 @@ enum AudioKitError: Error {
         // Peak analysis
         let peaks = monoSamples.map { abs($0) }
         let peakLevel = peaks.max() ?? 0.0
-        let avgLevel = peaks.reduce(0, +) / Float(peaks.count)
+        let _ = peaks.reduce(0, +) / Float(peaks.count)
         
         // Crest factor (Peak-to-RMS ratio)
         let avgRMS = rmsValues.reduce(0, +) / Float(rmsValues.count)
@@ -2434,7 +2509,7 @@ enum AudioKitError: Error {
     /// Generate audio visualization data for static display
     public func generateVisualizationData(for url: URL) async throws -> AudioVisualizationData {
         // Generate waveform and spectrum data for UI visualization
-        guard let audioFile = try? AVAudioFile(forReading: url) else {
+        guard (try? AVAudioFile(forReading: url)) != nil else {
             throw AudioKitError.fileLoadFailed
         }
         

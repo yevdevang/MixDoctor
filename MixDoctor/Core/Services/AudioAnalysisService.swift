@@ -16,19 +16,35 @@
 import Foundation
 import Observation
 import AVFoundation
+import SwiftUI
 
 @Observable
 final class AudioAnalysisService {
     
+    // Add shared singleton instance
+    static let shared = AudioAnalysisService()
+    
     // 🔄 REPLACE: Basic audio processing - AudioKit has better analysis
-    private let processor = AudioProcessor()
-    private let featureExtractor = AudioFeatureExtractor()
+    // Temporarily commented out due to compilation issues
+    // private let processor = AudioProcessor()
+    // private let featureExtractor = AudioFeatureExtractor()
     
     // ✅ KEEP: UI state management
     var isAnalyzing: Bool = false
     var analysisProgress: Double = 0
     
+    // Make init private for singleton pattern
+    private init() {}
+    
     // MARK: - Main Analysis
+    
+    // URL-based analysis method for compatibility - Temporarily disabled
+    /*
+    func getDetailedAnalysis(for url: URL) async throws -> AnalysisResult {
+        // Create AudioFile from URL
+        let audioFile = AudioFile(url)
+        return try await analyzeAudio(audioFile)
+    }
     
     // 🔄 REPLACE: This entire analysis pipeline can be replaced with AudioKit's more sophisticated analysis
     // AudioKit provides: FFTTap, AmplitudeTracker, PitchTap, and real-time frequency analysis
@@ -360,4 +376,5 @@ final class AudioAnalysisService {
         
         return result
     }
+    */
 }
