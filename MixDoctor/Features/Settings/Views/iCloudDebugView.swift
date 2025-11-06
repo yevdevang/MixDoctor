@@ -139,6 +139,18 @@ struct iCloudDebugView: View {
                 }
                 .disabled(isRefreshing)
                 
+                Button("Comprehensive File Status Check") {
+                    checkComprehensiveFileStatus()
+                }
+                .disabled(isRefreshing)
+                
+                Button("Download All Using New Service") {
+                    Task {
+                        await downloadAllWithNewService()
+                    }
+                }
+                .disabled(isRefreshing)
+                
                 Button(role: .destructive) {
                     showDeleteConfirmation = true
                 } label: {
@@ -190,7 +202,7 @@ struct iCloudDebugView: View {
             print("📂 Found \(files.count) files in iCloud directory")
             
             // Filter audio files
-            let audioExtensions = ["mp3", "wav", "m4a", "aac", "flac", "aif", "aiff"]
+            let audioExtensions = ["mp3", "wav", "m4a", "aac", "aif", "aiff"]
             let audioFiles = files.filter { audioExtensions.contains($0.pathExtension.lowercased()) }
             
             print("🎵 Found \(audioFiles.count) audio files")
@@ -485,5 +497,73 @@ struct iCloudDebugView: View {
         
         print("✅ Deletion complete: \(deletedFilesCount) files, \(deletedRecordsCount) records")
         print("========================")
+    }
+    
+    // MARK: - New Comprehensive File Status Functions
+    
+    private func checkComprehensiveFileStatus() {
+        print("\n🔍 COMPREHENSIVE ICLOUD FILE STATUS CHECK")
+        print("==========================================")
+        
+        // Use the new iCloudStorageService functions
+        let service = iCloudStorageService.shared
+        service.printFileStatus()
+        
+        // Also check using the new getAllAudioFilesWithStatus function
+        do {
+            let allFiles = try service.getAllAudioFilesWithStatus()
+            
+            print("📊 SUMMARY FROM NEW SERVICE:")
+            print("Total files found: \(allFiles.count)")
+            
+            let iCloudFiles = allFiles.filter { $0.isICloudFile }
+            let localFiles = allFiles.filter { !$0.isICloudFile }
+            let downloadedICloudFiles = iCloudFiles.filter { $0.isDownloaded }
+            let notDownloadedICloudFiles = iCloudFiles.filter { !$0.isDownloaded }
+            
+            print("☁️ iCloud files: \(iCloudFiles.count)")
+            print("   - Downloaded: \(downloadedICloudFiles.count)")
+            print("   - Not downloaded: \(notDownloadedICloudFiles.count)")
+            print("💾 Local only files: \(localFiles.count)")
+            
+            if !notDownloadedICloudFiles.isEmpty {
+                print("\n⚠️ Files not downloaded from iCloud:")
+                for file in notDownloadedICloudFiles {
+                    print("   - \(file.url.lastPathComponent)")
+                }
+            }
+            
+        } catch {
+            print("❌ Error getting comprehensive file status: \(error)")
+        }
+        
+        print("==========================================\n")
+    }
+    
+    private func downloadAllWithNewService() async {
+        isRefreshing = true
+        defer { isRefreshing = false }
+        
+        print("\n⬇️ DOWNLOADING ALL ICLOUD FILES")
+        print("==============================")
+        
+        let service = iCloudStorageService.shared
+        
+        do {
+            let result = try await service.downloadAllICloudFiles()
+            
+            print("✅ Download Results:")
+            print("   Downloaded: \(result.downloaded)")
+            print("   Already Local: \(result.alreadyLocal)")
+            print("   Failed: \(result.failed)")
+            
+            // Refresh the view
+            checkStatus()
+            
+        } catch {
+            print("❌ Download failed: \(error)")
+        }
+        
+        print("==============================\n")
     }
 }

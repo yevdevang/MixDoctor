@@ -16,19 +16,35 @@
 import Foundation
 import Observation
 import AVFoundation
+import SwiftUI
 
 @Observable
 final class AudioAnalysisService {
     
+    // Add shared singleton instance
+    static let shared = AudioAnalysisService()
+    
     // 🔄 REPLACE: Basic audio processing - AudioKit has better analysis
-    private let processor = AudioProcessor()
-    private let featureExtractor = AudioFeatureExtractor()
+    // Temporarily commented out due to compilation issues
+    // private let processor = AudioProcessor()
+    // private let featureExtractor = AudioFeatureExtractor()
     
     // ✅ KEEP: UI state management
     var isAnalyzing: Bool = false
     var analysisProgress: Double = 0
     
+    // Make init private for singleton pattern
+    private init() {}
+    
     // MARK: - Main Analysis
+    
+    // URL-based analysis method for compatibility - Temporarily disabled
+    /*
+    func getDetailedAnalysis(for url: URL) async throws -> AnalysisResult {
+        // Create AudioFile from URL
+        let audioFile = AudioFile(url)
+        return try await analyzeAudio(audioFile)
+    }
     
     // 🔄 REPLACE: This entire analysis pipeline can be replaced with AudioKit's more sophisticated analysis
     // AudioKit provides: FFTTap, AmplitudeTracker, PitchTap, and real-time frequency analysis
@@ -282,9 +298,10 @@ final class AudioAnalysisService {
         print("   🔬 Technical Score (objective): \(Int(technicalScore))")
         print("   🤖 AI Score: \(Int(aiResponse.overallQuality))")
         
-        // Use the HIGHER of technical score or AI score to avoid unfair penalization
-        let finalScore = max(technicalScore, aiResponse.overallQuality)
-        print("   ⭐ Final Score (max of both): \(Int(finalScore))")
+        // DISABLED: Use Claude's intelligent score instead of max()
+        // let finalScore = max(technicalScore, aiResponse.overallQuality)
+        let finalScore = aiResponse.overallQuality  // Use Claude's score directly
+        print("   ⭐ Final Score (using Claude): \(Int(finalScore))")
         
         // ✅ KEEP: Result creation and data mapping - this structure is good
         // Create analysis result
@@ -359,4 +376,5 @@ final class AudioAnalysisService {
         
         return result
     }
+    */
 }

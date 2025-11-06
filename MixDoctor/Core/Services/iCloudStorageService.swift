@@ -257,4 +257,164 @@ final class iCloudStorageService {
             }
         }
     }
+    
+    // MARK: - File Listing and Status
+    
+    /// Get comprehensive list of all audio files with their status
+    func getAllAudioFilesWithStatus() throws -> [(url: URL, isDownloaded: Bool, isICloudFile: Bool, size: Int64?)] {
+        var allFiles: [(url: URL, isDownloaded: Bool, isICloudFile: Bool, size: Int64?)] = []
+        
+        // Check iCloud files
+        if let iCloudURL = iCloudContainerURL {
+            let iCloudAudioDir = iCloudURL.appendingPathComponent("AudioFiles", isDirectory: true)
+            
+            if fileManager.fileExists(atPath: iCloudAudioDir.path) {
+                let iCloudFiles = try fileManager.contentsOfDirectory(
+                    at: iCloudAudioDir,
+                    includingPropertiesForKeys: [.fileSizeKey, .ubiquitousItemDownloadingStatusKey],
+                    options: [.skipsHiddenFiles]
+                )
+                
+                for file in iCloudFiles {
+                    let isDownloaded = isFileDownloaded(at: file)
+                    let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize
+                    allFiles.append((
+                        url: file,
+                        isDownloaded: isDownloaded,
+                        isICloudFile: true,
+                        size: size.map { Int64($0) }
+                    ))
+                }
+            }
+        }
+        
+        // Check local files
+        let localDocumentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let localAudioDir = localDocumentsURL.appendingPathComponent("AudioFiles", isDirectory: true)
+        
+        if fileManager.fileExists(atPath: localAudioDir.path) {
+            let localFiles = try fileManager.contentsOfDirectory(
+                at: localAudioDir,
+                includingPropertiesForKeys: [.fileSizeKey],
+                options: [.skipsHiddenFiles]
+            )
+            
+            for file in localFiles {
+                let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize
+                allFiles.append((
+                    url: file,
+                    isDownloaded: true,
+                    isICloudFile: false,
+                    size: size.map { Int64($0) }
+                ))
+            }
+        }
+        
+        return allFiles
+    }
+    
+    /// Download all iCloud files to ensure they're available locally
+    func downloadAllICloudFiles() async throws -> (downloaded: Int, alreadyLocal: Int, failed: Int) {
+        var downloaded = 0
+        var alreadyLocal = 0
+        var failed = 0
+        
+        let allFiles = try getAllAudioFilesWithStatus()
+        let iCloudFiles = allFiles.filter { $0.isICloudFile }
+        
+        print("📥 Starting download of \(iCloudFiles.count) iCloud files...")
+        
+        for fileInfo in iCloudFiles {
+            if fileInfo.isDownloaded {
+                alreadyLocal += 1
+                print("✅ Already downloaded: \(fileInfo.url.lastPathComponent)")
+            } else {
+                do {
+                    print("⬇️ Downloading: \(fileInfo.url.lastPathComponent)")
+                    try await ensureFileIsDownloaded(at: fileInfo.url)
+                    downloaded += 1
+                    print("✅ Downloaded: \(fileInfo.url.lastPathComponent)")
+                } catch {
+                    failed += 1
+                    print("❌ Failed to download: \(fileInfo.url.lastPathComponent) - \(error)")
+                }
+            }
+        }
+        
+        print("📥 Download complete: \(downloaded) downloaded, \(alreadyLocal) already local, \(failed) failed")
+        return (downloaded: downloaded, alreadyLocal: alreadyLocal, failed: failed)
+    }
+    
+    /// Print comprehensive status of all files
+    func printFileStatus() {
+        print("\n🔍 COMPREHENSIVE FILE STATUS CHECK")
+        print("================================")
+        
+        // Check iCloud availability
+        print("☁️ iCloud Status:")
+        if let iCloudURL = iCloudContainerURL {
+            print("   ✅ iCloud available at: \(iCloudURL.path)")
+        } else {
+            print("   ❌ iCloud not available")
+        }
+        
+        // Get all files
+        do {
+            let allFiles = try getAllAudioFilesWithStatus()
+            
+            print("\n📊 File Summary:")
+            print("   Total files: \(allFiles.count)")
+            
+            let iCloudFiles = allFiles.filter { $0.isICloudFile }
+            let localFiles = allFiles.filter { !$0.isICloudFile }
+            let downloadedICloudFiles = iCloudFiles.filter { $0.isDownloaded }
+            let notDownloadedICloudFiles = iCloudFiles.filter { !$0.isDownloaded }
+            
+            print("   iCloud files: \(iCloudFiles.count)")
+            print("   - Downloaded: \(downloadedICloudFiles.count)")
+            print("   - Not downloaded: \(notDownloadedICloudFiles.count)")
+            print("   Local files: \(localFiles.count)")
+            
+            // List all files with details
+            print("\n📁 Detailed File List:")
+            
+            if !iCloudFiles.isEmpty {
+                print("\n☁️ iCloud Files:")
+                for (index, file) in iCloudFiles.enumerated() {
+                    let status = file.isDownloaded ? "✅ Downloaded" : "⏳ Not Downloaded"
+                    let sizeStr = file.size.map { formatFileSize($0) } ?? "Unknown size"
+                    print("   \(index + 1). \(file.url.lastPathComponent)")
+                    print("      Status: \(status)")
+                    print("      Size: \(sizeStr)")
+                    print("      Path: \(file.url.path)")
+                }
+            }
+            
+            if !localFiles.isEmpty {
+                print("\n💾 Local Files:")
+                for (index, file) in localFiles.enumerated() {
+                    let sizeStr = file.size.map { formatFileSize($0) } ?? "Unknown size"
+                    print("   \(index + 1). \(file.url.lastPathComponent)")
+                    print("      Size: \(sizeStr)")
+                    print("      Path: \(file.url.path)")
+                }
+            }
+            
+            if allFiles.isEmpty {
+                print("   No audio files found in storage")
+            }
+            
+        } catch {
+            print("❌ Error checking files: \(error)")
+        }
+        
+        print("================================\n")
+    }
+    
+    private func formatFileSize(_ bytes: Int64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useBytes, .useKB, .useMB, .useGB]
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: bytes)
+    }
 }
