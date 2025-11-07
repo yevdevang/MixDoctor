@@ -15,16 +15,16 @@ struct PAZFrequencyAnalyzer: View {
         [
             FrequencyBand(
                 label: "Sub Bass",
-                range: "20-60 Hz",
-                value: result.lowEndBalance * 0.3, // Estimate sub-bass as portion of low end
-                color: Color(red: 0.8, green: 0.2, blue: 0.2),
+                range: "20-80 Hz",
+                value: result.lowEndBalance * 0.25, // Estimate sub-bass as portion of low end
+                color: Color(red: 0.4, green: 0.2, blue: 0.8),
                 isCritical: false
             ),
             FrequencyBand(
                 label: "Bass",
-                range: "60-250 Hz",
-                value: result.lowEndBalance * 0.7, // Main bass portion
-                color: Color(red: 1.0, green: 0.3, blue: 0.3),
+                range: "80-250 Hz",
+                value: result.lowEndBalance * 0.75, // Main bass portion
+                color: Color(red: 0.5, green: 0.3, blue: 1.0),
                 isCritical: true
             ),
             FrequencyBand(
@@ -101,13 +101,19 @@ struct PAZFrequencyAnalyzer: View {
             Divider()
                 .padding(.vertical, 4)
 
-            // Chart-style spectrum analyzer
-            VStack(spacing: 12) {
-                // Chart visualization
+            // Chart-style spectrum analyzer with proper spacing
+            VStack(spacing: 16) {
+                // Chart visualization with fixed height to prevent overlap
                 FrequencyChart(bands: frequencyBands)
+                    .frame(height: 250) // Ensure chart doesn't expand
+                    .clipped() // Prevent any content from overflowing
+                
+                // Clear divider between chart and frequency breakdown
+                Divider()
+                    .padding(.vertical, 8)
                 
                 // Frequency band details below chart
-                VStack(spacing: 6) {
+                VStack(spacing: 8) {
                     ForEach(frequencyBands, id: \.label) { band in
                         FrequencyBandDetail(band: band)
                     }
@@ -120,8 +126,8 @@ struct PAZFrequencyAnalyzer: View {
             }
         }
         .padding()
-        .background(Color.backgroundSecondary)
-        .cornerRadius(AppConstants.cornerRadius)
+        .background(Color.gray.opacity(0.1))
+        .cornerRadius(12)
     }
     
     private func frequencyBalanceDescription(_ score: Double) -> String {
@@ -140,101 +146,55 @@ struct FrequencyChart: View {
     let bands: [FrequencyBand]
     
     var body: some View {
-        VStack(spacing: 12) {
-            // Chart area with spectrum analyzer
+        // Chart area with spectrum analyzer - fixed height container without dB axis
+        ZStack {
+            // Dark background like professional analyzers
+            Rectangle()
+                .fill(Color.black.opacity(0.8))
+            
+            // Grid
+            SpectrumGrid()
+            
+            // Frequency response curve
             GeometryReader { geometry in
-                ZStack {
-                    // Dark background like professional analyzers
-                    Rectangle()
-                        .fill(Color.black.opacity(0.8))
+                SpectrumCurve(bands: bands, size: CGSize(width: geometry.size.width, height: geometry.size.height))
+            }
+            
+            // Frequency labels positioned INSIDE the analyzer with proper padding
+            VStack {
+                Spacer() // Push labels to bottom
+                
+                GeometryReader { labelGeometry in
+                    let width = labelGeometry.size.width - 40 // Account for padding
+                    let frequencies: [(freq: Double, label: String)] = [
+                        (20, "20"), (50, "50"), (100, "100"), (200, "200"), 
+                        (500, "500"), (1000, "1k"), (2000, "2k"), (5000, "5k"), 
+                        (10000, "10k"), (20000, "20k")
+                    ]
                     
-                    // Grid
-                    SpectrumGrid()
-                    
-                    // Frequency response curve
-                    SpectrumCurve(bands: bands, size: geometry.size)
-                    
-                    // Frequency labels inside the chart at the bottom
-                    VStack {
-                        Spacer()
+                    ForEach(Array(frequencies.enumerated()), id: \.offset) { index, freqData in
+                        let logFreq = log10(freqData.freq)
+                        let logMin = log10(20.0)
+                        let logMax = log10(20000.0)
+                        let normalizedX = (logFreq - logMin) / (logMax - logMin)
+                        let xPosition = 20 + normalizedX * width // Add left padding
                         
-                        HStack {
-                            Text("20")
-                                .font(.caption2)
-                                .foregroundStyle(.white.opacity(0.8))
-                            
-                            Spacer()
-                            
-                            Text("30")
-                                .font(.caption2)
-                                .foregroundStyle(.white.opacity(0.8))
-                            
-                            Spacer()
-                            
-                            Text("50")
-                                .font(.caption2)
-                                .foregroundStyle(.white.opacity(0.8))
-                            
-                            Spacer()
-                            
-                            Text("100")
-                                .font(.caption2)
-                                .foregroundStyle(.white.opacity(0.8))
-                            
-                            Spacer()
-                            
-                            Text("200")
-                                .font(.caption2)
-                                .foregroundStyle(.white.opacity(0.8))
-                            
-                            Spacer()
-                            
-                            Text("500")
-                                .font(.caption2)
-                                .foregroundStyle(.white.opacity(0.8))
-                            
-                            Spacer()
-                            
-                            Text("1k")
-                                .font(.caption2)
-                                .foregroundStyle(.white.opacity(0.8))
-                            
-                            Spacer()
-                            
-                            Text("2k")
-                                .font(.caption2)
-                                .foregroundStyle(.white.opacity(0.8))
-                            
-                            Spacer()
-                            
-                            Text("5k")
-                                .font(.caption2)
-                                .foregroundStyle(.white.opacity(0.8))
-                            
-                            Spacer()
-                            
-                            Text("10k")
-                                .font(.caption2)
-                                .foregroundStyle(.white.opacity(0.8))
-                            
-                            Spacer()
-                            
-                            Text("20k")
-                                .font(.caption2)
-                                .foregroundStyle(.white.opacity(0.8))
-                        }
-                        .padding(.horizontal, 25)
-                        .padding(.bottom, 8)
+                        Text(freqData.label)
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.8))
+                            .position(x: xPosition, y: 10) // Position inside analyzer
                     }
                 }
+                .frame(height: 20) // Fixed height for labels
+                .padding(.bottom, 10) // Padding from bottom edge
             }
-            .frame(height: 250)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.black)
-                    .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-            )
         }
+        .frame(height: 230) // Fixed height for analyzer
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.black)
+                .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+        )
     }
 }
 
@@ -245,14 +205,14 @@ struct SpectrumGrid: View {
     var body: some View {
         ZStack {
             // Professional spectrum analyzer grid like the image
-            // Horizontal grid lines (dB levels) - more like the reference
+            // Horizontal grid lines (dB levels) - aligned with dB scale
             VStack(spacing: 0) {
-                ForEach(0..<13) { index in // More grid lines like in image
+                ForEach(0..<11) { index in // 11 lines for dB values (0 to -60 in 6dB steps)
                     Rectangle()
                         .fill(Color.blue.opacity(0.2))
                         .frame(height: 0.5)
                     
-                    if index < 12 {
+                    if index < 10 {
                         Spacer()
                     }
                 }
@@ -271,25 +231,7 @@ struct SpectrumGrid: View {
                 }
             }
             
-            // Major grid lines for key frequencies
-            GeometryReader { geometry in
-                let width = geometry.size.width
-                let majorFreqs: [Double] = [100, 1000, 10000] // Major frequency markers
-                
-                ForEach(majorFreqs.indices, id: \.self) { index in
-                    let freq = majorFreqs[index]
-                    let logFreq = log10(freq)
-                    let logMin = log10(20.0)
-                    let logMax = log10(20000.0)
-                    let normalizedX = (logFreq - logMin) / (logMax - logMin)
-                    let x = normalizedX * width
-                    
-                    Rectangle()
-                        .fill(Color.blue.opacity(0.4))
-                        .frame(width: 1)
-                        .offset(x: x - width/2)
-                }
-            }
+
         }
         .padding(10)
     }
@@ -305,7 +247,6 @@ struct SpectrumCurve: View {
         var path = Path()
         let width = size.width - 40 // Padding
         let height = size.height - 40
-        let baselineY = height * 0.7 // Position baseline like in the image
         
         // Create detailed frequency points for realistic spectrum analyzer look
         // Generate many frequency points with random variations like real spectrum data
@@ -338,16 +279,21 @@ struct SpectrumCurve: View {
             let baseEnergy = getEnergyForFrequency(frequency)
             
             // Add realistic spectrum analyzer noise and variations
-            let randomVariation = Double.random(in: -8...12) // Random spectrum variations
+            let randomVariation = Double.random(in: -2...3) // Minimal random variations
             let harmonicContent = getHarmonicContent(frequency) // Harmonic peaks
             let noiseFloor = getNoiseFloor(frequency) // Noise floor characteristics
             
             let totalEnergy = baseEnergy + randomVariation + harmonicContent + noiseFloor
             let clampedEnergy = max(0, min(100, totalEnergy))
             
-            // Convert to Y position (inverted, 0 dB at top)
-            let normalizedY = clampedEnergy / 100.0
-            let y = baselineY - (normalizedY * height * 0.6) // Scale to visible range
+            // For mastered audio (-0.1 dB peak), center the wave in the canvas
+            // Map so that high energy content appears around the center/upper-center of analyzer
+            let centeredEnergy = 50.0 + (clampedEnergy - 50.0) * 0.6 // Center around 50% with reduced range
+            let dbValue = -15.0 + (centeredEnergy / 100.0) * 15.0 // Map to -15 to 0 dB
+            
+            // Convert dB to Y position (0 dB at top, -15 dB at bottom)
+            let normalizedY = (dbValue + 15.0) / 15.0 // 0 to 1 scale
+            let y = 20 + (1.0 - normalizedY) * (height - 40) // Inverted, with padding
             
             points.append(CGPoint(x: x, y: y))
         }
@@ -379,13 +325,13 @@ struct SpectrumCurve: View {
     }
     
     private func getNoiseFloor(_ frequency: Double) -> Double {
-        // Simulate realistic noise floor characteristics
+        // Simulate realistic noise floor characteristics for mastered audio
         if frequency < 100 {
-            return Double.random(in: (-15)...(-5)) // Low frequency noise
+            return Double.random(in: (-8)...(-2)) // Low frequency noise - higher for mastered audio
         } else if frequency > 15000 {
-            return Double.random(in: (-20)...(-8)) // High frequency noise
+            return Double.random(in: (-10)...(-3)) // High frequency noise - higher for mastered audio
         } else {
-            return Double.random(in: (-12)...(-3)) // Mid frequency noise
+            return Double.random(in: (-6)...0) // Mid frequency noise - much higher for mastered audio
         }
     }
     
@@ -453,9 +399,9 @@ struct SpectrumCurve: View {
                 .stroke(
                     LinearGradient(
                         colors: [
-                            Color.pink.opacity(0.9),
-                            Color.red.opacity(0.8),
-                            Color.orange.opacity(0.7)
+                            Color.cyan.opacity(0.9),
+                            Color.blue.opacity(0.8),
+                            Color.teal.opacity(0.7)
                         ],
                         startPoint: .leading,
                         endPoint: .trailing
@@ -539,7 +485,7 @@ struct FrequencyChartBar: View {
         case 0..<15: return .orange // Too low
         case 15..<55: return band.color // Good range
         case 55..<75: return band.color.opacity(0.9) // Slightly high
-        default: return .red // Too high
+        default: return .purple // Too high
         }
     }
     
@@ -597,7 +543,7 @@ struct FrequencyBandDetail: View {
         case 0..<15: return .orange
         case 15..<55: return band.color
         case 55..<75: return band.color.opacity(0.8)
-        default: return .red.opacity(0.8)
+        default: return .purple.opacity(0.8)
         }
     }
     

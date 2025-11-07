@@ -19,7 +19,7 @@ public final class SubscriptionService {
     var isInTrialPeriod: Bool = false
     var currentOffering: Offering?
     var customerInfo: CustomerInfo?
-    
+     
     // Free tier limits
     private let freeAnalysisLimit = 3
     private let monthlyResetKey = "lastMonthlyReset"

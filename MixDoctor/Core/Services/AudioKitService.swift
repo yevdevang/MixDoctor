@@ -358,41 +358,57 @@ public class AudioKitService: ObservableObject {
         // Convert pointer to array for processing
         let samples = Array(UnsafeBufferPointer(start: data, count: frameCount))
         
-        // FFT size should be power of 2, find the closest one
-        let fftSize = Int(pow(2, floor(log2(Double(frameCount)))))
-        let actualSamples = Array(samples.prefix(fftSize))
+        // Enhanced FFT size calculation for better frequency resolution
+        // Use larger FFT sizes for professional frequency analysis accuracy
+        let minFFTSize = 4096  // Minimum FFT size for good frequency resolution
+        let maxFFTSize = 16384 // Maximum practical FFT size
         
-        // Perform FFT using built-in Accelerate framework
+        let targetFFTSize = min(maxFFTSize, max(minFFTSize, Int(pow(2, ceil(log2(Double(frameCount)))))))
+        
+        // Ensure we have enough samples for the target FFT size
+        let actualFFTSize = min(targetFFTSize, Int(pow(2, floor(log2(Double(frameCount))))))
+        let actualSamples = Array(samples.prefix(actualFFTSize))
+        
+        print("📊 ENHANCED FFT ANALYSIS:")
+        print("   Frame count: \(frameCount)")
+        print("   Target FFT size: \(targetFFTSize)")
+        print("   Actual FFT size: \(actualFFTSize)")
+        print("   Frequency resolution: \(String(format: "%.2f", sampleRate / Double(actualFFTSize))) Hz per bin")
+        
+        // Enhanced FFT analysis with professional smoothing
         let magnitudes = performFFTAnalysis(actualSamples)
         
-        // Debug: Check FFT spectrum quality
-        let totalMagnitude = magnitudes.reduce(0.0) { sum, mag in sum + Double(mag) }
-        let maxMagnitude = magnitudes.max() ?? 0.0
-        let nonZeroCount = magnitudes.filter { $0 > 0.0001 }.count
-        print("📊 FFT SPECTRUM DEBUG:")
+        // Apply professional spectral smoothing like real analyzers
+        let smoothedMagnitudes = applySpectralSmoothing(magnitudes)
+        
+        // Debug: Check FFT spectrum quality with smoothed data
+        let totalMagnitude = smoothedMagnitudes.reduce(0.0) { sum, mag in sum + Double(mag) }
+        let maxMagnitude = smoothedMagnitudes.max() ?? 0.0
+        let nonZeroCount = smoothedMagnitudes.filter { $0 > 0.0001 }.count
+        print("📊 FFT SPECTRUM DEBUG (SMOOTHED):")
         print("   Total magnitude: \(totalMagnitude)")
         print("   Max magnitude: \(maxMagnitude)")
-        print("   Non-zero bins: \(nonZeroCount)/\(magnitudes.count)")
-        print("   First 10 magnitudes: \(Array(magnitudes.prefix(10)))")
-        print("   Last 10 magnitudes: \(Array(magnitudes.suffix(10)))")
+        print("   Non-zero bins: \(nonZeroCount)/\(smoothedMagnitudes.count)")
+        print("   First 10 magnitudes: \(Array(smoothedMagnitudes.prefix(10)))")
+        print("   Last 10 magnitudes: \(Array(smoothedMagnitudes.suffix(10)))")
         
         // Define frequency bands (using actual sample rate)
         let nyquist = sampleRate / 2.0
-        let binWidth = nyquist / Double(magnitudes.count / 2)
+        let binWidth = nyquist / Double(smoothedMagnitudes.count / 2)
         
-        // Debug: Show sample rate being used in FFT
         print("🔬 FFT ANALYSIS DEBUG:")
         print("   Using sample rate: \(sampleRate) Hz")
         print("   Nyquist frequency: \(nyquist) Hz") 
         print("   Bin width: \(String(format: "%.2f", binWidth)) Hz")
-        print("   FFT size: \(magnitudes.count)")
+        print("   FFT size: \(smoothedMagnitudes.count)")
         
         // Ensure we only use the meaningful half of the spectrum
-        let usefulBins = magnitudes.count / 2
+        let usefulBins = smoothedMagnitudes.count / 2
         
         // Professional mastering frequency bands (matching industry standards)
-        let subBassRange = max(1, Int(20.0 / binWidth))..<min(usefulBins, Int(60.0 / binWidth))    // 20Hz - 60Hz (sub-bass)
-        let bassRange = max(1, Int(60.0 / binWidth))..<min(usefulBins, Int(250.0 / binWidth))      // 60Hz - 250Hz (bass)
+        // These bands now match typical professional EQ and analyzer divisions
+        let subBassRange = max(1, Int(20.0 / binWidth))..<min(usefulBins, Int(80.0 / binWidth))    // 20Hz - 80Hz (sub-bass)
+        let bassRange = max(1, Int(80.0 / binWidth))..<min(usefulBins, Int(250.0 / binWidth))      // 80Hz - 250Hz (bass)
         let lowMidRange = max(1, Int(250.0 / binWidth))..<min(usefulBins, Int(500.0 / binWidth))   // 250Hz - 500Hz (low-mid)
         let midRange = max(1, Int(500.0 / binWidth))..<min(usefulBins, Int(2000.0 / binWidth))     // 500Hz - 2kHz (mid)
         let highMidRange = max(1, Int(2000.0 / binWidth))..<min(usefulBins, Int(6000.0 / binWidth)) // 2kHz - 6kHz (high-mid)
@@ -411,18 +427,18 @@ public class AudioKitService: ObservableObject {
         print("   Total useful bins: \(usefulBins)")
         
         // Calculate energy in each frequency band with proper professional weighting
-        let subBass = calculateBandEnergy(magnitudes, range: subBassRange)
-        let bass = calculateBandEnergy(magnitudes, range: bassRange)
-        let lowMid = calculateBandEnergy(magnitudes, range: lowMidRange)
-        let mid = calculateBandEnergy(magnitudes, range: midRange)
-        let highMid = calculateBandEnergy(magnitudes, range: highMidRange)
-        let presence = calculateBandEnergy(magnitudes, range: presenceRange)
-        let air = calculateBandEnergy(magnitudes, range: airRange)
+        let subBass = calculateBandEnergy(smoothedMagnitudes, range: subBassRange, sampleRate: sampleRate)
+        let bass = calculateBandEnergy(smoothedMagnitudes, range: bassRange, sampleRate: sampleRate)
+        let lowMid = calculateBandEnergy(smoothedMagnitudes, range: lowMidRange, sampleRate: sampleRate)
+        let mid = calculateBandEnergy(smoothedMagnitudes, range: midRange, sampleRate: sampleRate)
+        let highMid = calculateBandEnergy(smoothedMagnitudes, range: highMidRange, sampleRate: sampleRate)
+        let presence = calculateBandEnergy(smoothedMagnitudes, range: presenceRange, sampleRate: sampleRate)
+        let air = calculateBandEnergy(smoothedMagnitudes, range: airRange, sampleRate: sampleRate)
         
         // Debug: Show frequency band energies 
         print("🎵 FREQUENCY BAND ENERGIES:")
-        print("   Sub-Bass (20-60Hz): \(String(format: "%.2f", subBass))%")
-        print("   Bass (60-250Hz): \(String(format: "%.2f", bass))%")
+        print("   Sub-Bass (20-80Hz): \(String(format: "%.2f", subBass))%")
+        print("   Bass (80-250Hz): \(String(format: "%.2f", bass))%")
         print("   Low-Mid (250-500Hz): \(String(format: "%.2f", lowMid))%")
         print("   Mid (500Hz-2kHz): \(String(format: "%.2f", mid))%")
         print("   High-Mid (2-6kHz): \(String(format: "%.2f", highMid))%")
@@ -430,8 +446,8 @@ public class AudioKitService: ObservableObject {
         print("   Air (12-20kHz): \(String(format: "%.2f", air))%")
         print("   Total: \(String(format: "%.2f", subBass + bass + lowMid + mid + highMid + presence + air))%")
         
-        // Calculate spectral centroid
-        let spectralCentroid = calculateSpectralCentroid(magnitudes, binWidth: binWidth)
+        // Calculate spectral centroid with smoothed data
+        let spectralCentroid = calculateSpectralCentroid(smoothedMagnitudes, binWidth: binWidth)
         
         // Combine professional bands into the existing 5-band structure for compatibility
         // This maintains API compatibility while using proper professional frequency ranges
@@ -740,61 +756,119 @@ public class AudioKitService: ObservableObject {
         return magnitudeSum > 0 ? weightedSum / magnitudeSum : 0.0
     }
     
-    private func calculateBandEnergy(_ magnitudes: [Float], range: Range<Int>) -> Double {
+    private func calculateBandEnergy(_ magnitudes: [Float], range: Range<Int>, sampleRate: Double = 44100.0) -> Double {
         guard !range.isEmpty && range.upperBound <= magnitudes.count && range.lowerBound >= 0 else { 
             print("⚠️ Invalid range: \(range) for magnitudes count: \(magnitudes.count)")
-            return 0.0 
+            return -80.0  // Return dB floor instead of 0
         }
 
-        let bandMagnitudes = Array(magnitudes[range])
+        // CRITICAL FIX: Professional analyzers show ABSOLUTE dB levels, NOT relative percentages
+        // FabFilter Pro-Q, Waves PAZ, etc. display the actual signal level in each band
         
-        // Apply professional perceptual weighting for more accurate frequency perception
-        var weightedEnergy = 0.0
+        let bandMagnitudes = Array(magnitudes[range])
+        let binWidth = (sampleRate / 2.0) / Double(magnitudes.count / 2)
+        
+        // Calculate RMS magnitude for the band (like professional analyzers)
+        var rmsSum = 0.0
+        var binCount = 0
+        
         for (index, magnitude) in bandMagnitudes.enumerated() {
             let binIndex = range.lowerBound + index
-            let weight = calculatePerceptualWeight(binIndex: binIndex, magnitudeCount: magnitudes.count)
-            let energy = Double(magnitude * magnitude) * weight
-            weightedEnergy += energy
+            let frequency = Double(binIndex) * binWidth
+            
+            // Apply A-weighting for perceptual accuracy (professional standard)
+            let aWeight = calculateAWeighting(frequency: frequency)
+            let weightedMagnitude = Double(magnitude) * pow(10.0, aWeight / 20.0)
+            
+            // Accumulate RMS energy
+            rmsSum += weightedMagnitude * weightedMagnitude
+            binCount += 1
         }
         
-        // Calculate total weighted energy only from meaningful spectrum (up to Nyquist)
-        let usefulMagnitudes = Array(magnitudes.prefix(magnitudes.count / 2))
-        var totalWeightedEnergy = 0.0
-        for (index, magnitude) in usefulMagnitudes.enumerated() {
-            let weight = calculatePerceptualWeight(binIndex: index, magnitudeCount: magnitudes.count)
-            totalWeightedEnergy += Double(magnitude * magnitude) * weight
+        // Calculate RMS level for the band
+        let rmsLevel = binCount > 0 ? sqrt(rmsSum / Double(binCount)) : 0.0
+        
+        // Convert to dB (20*log10 for magnitude, like professional analyzers)
+        let dBLevel = rmsLevel > 1e-10 ? 20.0 * log10(rmsLevel) : -100.0
+        
+        // Professional analyzers typically have a noise floor around -80 to -100 dB
+        let flooredLevel = max(dBLevel, -80.0)
+        
+        // IMPORTANT: Convert dB to display scale used by professional tools
+        // Pro tools typically map -60dB to 0% and 0dB to 100%
+        let displayValue = max(0.0, min(100.0, (flooredLevel + 60.0) / 60.0 * 100.0))
+        
+        // Debug output for verification
+        if range.lowerBound % 50 == 0 {
+            let startFreq = Double(range.lowerBound) * binWidth
+            let endFreq = Double(range.upperBound - 1) * binWidth
+            print("🔊 Band \(Int(startFreq))-\(Int(endFreq))Hz: RMS=\(String(format: "%.6f", rmsLevel)), dB=\(String(format: "%.1f", dBLevel)), Display=\(String(format: "%.1f", displayValue))%")
         }
         
-        // Debug for zero energy cases
-        if weightedEnergy == 0.0 && !range.isEmpty {
-            print("⚠️ Zero energy in range \(range): band magnitudes = \(bandMagnitudes.prefix(10))")
-        }
+        return displayValue
+    }
+    
+    // Professional A-weighting calculation (ISO 226 standard)
+    private func calculateAWeighting(frequency: Double) -> Double {
+        guard frequency > 0 else { return -100.0 }
         
-        // Return energy as percentage of total energy with proper normalization
-        let percentage = totalWeightedEnergy > 0 ? (weightedEnergy / totalWeightedEnergy) * 100.0 : 0.0
+        let f = frequency
+        let f2 = f * f
+        let f4 = f2 * f2
         
-        return percentage
+        // ISO 226 A-weighting formula
+        let c1 = pow(12194.0, 2) * f4
+        let c2 = f2 + pow(20.6, 2)
+        let c3 = sqrt((f2 + pow(107.7, 2)) * (f2 + pow(737.9, 2)))
+        let c4 = f2 + pow(12194.0, 2)
+        
+        let aWeightDB = 20.0 * log10(c1 / (c2 * c3 * c4)) + 2.0
+        
+        return aWeightDB
     }
     
     // Professional perceptual weighting based on equal-loudness curves (ISO 226)
-    private func calculatePerceptualWeight(binIndex: Int, magnitudeCount: Int) -> Double {
-        // Calculate frequency for this bin
-        let sampleRate: Double = 44100.0
-        let nyquist = sampleRate / 2.0
+    // This now uses the actual sample rate from the audio file for accuracy
+    private func calculatePerceptualWeight(binIndex: Int, magnitudeCount: Int, actualSampleRate: Double = 44100.0) -> Double {
+        // Calculate frequency for this bin using actual sample rate
+        let nyquist = actualSampleRate / 2.0
         let binWidth = nyquist / Double(magnitudeCount / 2)
         let frequency = Double(binIndex) * binWidth
         
-        // Simplified A-weighting approximation for perceptual accuracy
-        // Based on the human ear's frequency response curve
-        if frequency < 20 { return 0.1 }        // Very low frequencies are less audible
-        if frequency < 60 { return 0.3 }        // Sub-bass region
-        if frequency < 250 { return 0.7 }       // Bass region  
-        if frequency < 500 { return 0.9 }       // Low-mid region
-        if frequency < 2000 { return 1.0 }      // Mid region (most sensitive)
-        if frequency < 6000 { return 1.0 }      // High-mid region (very sensitive)
-        if frequency < 12000 { return 0.8 }     // Presence region
-        if frequency < 20000 { return 0.5 }     // Air region
-        return 0.2                              // Very high frequencies
+        // Skip DC and very low frequencies
+        guard frequency >= 1.0 else { return 0.01 }
+        
+        // Professional A-weighting curve (ISO 226) for accurate perceptual weighting
+        // This matches how professional analyzers weight frequencies
+        let f = frequency
+        let f2 = f * f
+        let f4 = f2 * f2
+        
+        // Standard A-weighting formula
+        let c1 = pow(12194.0, 2) * f4
+        let c2 = f2 + pow(20.6, 2)
+        let c3 = f2 + pow(107.7, 2)
+        let c4 = f2 + pow(737.9, 2)
+        let c5 = f2 + pow(12194.0, 2)
+        
+        let numerator = c1
+        let denominator = c2 * sqrt(c3 * c4) * c5
+        
+        // Calculate A-weighting in dB
+        let aWeightingDB = 20.0 * log10(numerator / denominator) + 2.0  // +2dB normalization
+        
+        // Convert dB to linear scale (professional analyzers work with linear weights internally)
+        let linearWeight = pow(10.0, aWeightingDB / 20.0)
+        
+        // Clamp to reasonable range
+        let clampedWeight = max(0.001, min(10.0, linearWeight))
+        
+        // Only print weight for debug purposes occasionally
+        if binIndex % 200 == 0 { // Print every 200th bin to avoid spam
+            print("🔊 \(String(format: "%.1f", frequency))Hz: A-weight=\(String(format: "%.2f", aWeightingDB))dB, linear=\(String(format: "%.3f", clampedWeight))")
+        }
+        
+        return clampedWeight
     }
     
     private func checkFrequencyImbalance(_ lowEnd: Double, _ lowMid: Double, _ mid: Double, _ highMid: Double, _ high: Double, genre: String) -> Bool {
@@ -1740,9 +1814,9 @@ enum AudioKitError: Error {
     private func performFFTAnalysis(_ samples: [Float]) -> [Float] {
         guard !samples.isEmpty else { return [] }
         
-        // Ensure FFT size is power of 2
+        // Ensure FFT size is power of 2 and reasonable for professional analysis
         let fftSize = Int(pow(2, floor(log2(Double(samples.count)))))
-        guard fftSize >= 16 else { return [] }
+        guard fftSize >= 512 else { return [] }  // Minimum size for good frequency resolution
         
         let actualSamples = Array(samples.prefix(fftSize))
         let log2n = vDSP_Length(log2(Float(fftSize)))
@@ -1753,49 +1827,109 @@ enum AudioKitError: Error {
         }
         defer { vDSP_destroy_fftsetup(fftSetup) }
         
-        // Apply Hann windowing for professional frequency analysis
-        // This prevents spectral leakage and improves frequency accuracy
+        // PROFESSIONAL WINDOWING: Apply Hann window exactly like pro analyzers
         var windowedSamples = actualSamples
-        applyHannWindow(&windowedSamples)
+        vDSP_hann_window(&windowedSamples, vDSP_Length(fftSize), 0)
         
-        // Prepare input data with proper pointer handling
+        // Prepare real and imaginary arrays
         var realParts = windowedSamples
         var imagParts = Array(repeating: Float(0.0), count: fftSize)
         
-        // Create DSPSplitComplex with proper pointer lifetime management
-        let splitComplex = realParts.withUnsafeMutableBufferPointer { realPtr in
+        // Perform FFT with professional scaling
+        var mags = Array(repeating: Float(0.0), count: fftSize / 2)
+        
+        realParts.withUnsafeMutableBufferPointer { realPtr in
             imagParts.withUnsafeMutableBufferPointer { imagPtr in
-                var complex = DSPSplitComplex(realp: realPtr.baseAddress!, imagp: imagPtr.baseAddress!)
+                var splitComplex = DSPSplitComplex(realp: realPtr.baseAddress!, imagp: imagPtr.baseAddress!)
                 
-                // Perform forward FFT
-                vDSP_fft_zrip(fftSetup, &complex, 1, log2n, FFTDirection(FFT_FORWARD))
+                // Forward FFT
+                vDSP_fft_zrip(fftSetup, &splitComplex, 1, log2n, FFTDirection(FFT_FORWARD))
                 
-                // Calculate magnitudes
-                var magnitudes = Array(repeating: Float(0.0), count: fftSize / 2)
-                vDSP_zvmags(&complex, 1, &magnitudes, 1, vDSP_Length(fftSize / 2))
+                // Calculate magnitudes (professional method)
+                let nyquist = fftSize / 2
                 
-                // Convert to proper scale and take square root for magnitude
-                var count = Int32(fftSize / 2)
-                vvsqrtf(&magnitudes, magnitudes, &count)
-                
-                // Apply amplitude correction for windowing (Hann window factor ~1.63)
-                let windowCorrection: Float = 1.63
-                vDSP_vsmul(magnitudes, 1, [windowCorrection], &magnitudes, 1, vDSP_Length(magnitudes.count))
-                
-                return magnitudes
+                for i in 0..<nyquist {
+                    let real = realPtr[i]
+                    let imag = imagPtr[i]
+                    
+                    // Calculate magnitude correctly for professional analysis
+                    let magnitude = sqrt(real * real + imag * imag)
+                    
+                    // Professional scaling chain:
+                    // 1. Window correction (Hann window loses ~1.5 dB)
+                    // 2. FFT normalization 
+                    // 3. Single-sided spectrum correction (except DC and Nyquist)
+                    var correctedMag = magnitude
+                    
+                    // Hann window correction factor
+                    correctedMag *= 2.0  // Compensate for window energy loss
+                    
+                    // FFT normalization
+                    correctedMag /= Float(fftSize)
+                    
+                    // Single-sided spectrum (double the energy except DC)
+                    if i > 0 && i < nyquist - 1 {
+                        correctedMag *= 2.0
+                    }
+                    
+                    mags[i] = correctedMag
+                }
             }
         }
         
-        return splitComplex
+        return mags
     }
     
     // Professional Hann windowing function for accurate frequency analysis
-    private func applyHannWindow(_ samples: inout [Float]) {
-        let N = samples.count
-        for i in 0..<N {
-            let windowValue = 0.5 * (1.0 - cos(2.0 * Float.pi * Float(i) / Float(N - 1)))
-            samples[i] *= windowValue
+    // Professional spectral smoothing like real-time analyzers
+    private func applySpectralSmoothing(_ magnitudes: [Float]) -> [Float] {
+        guard magnitudes.count > 4 else { return magnitudes }
+        
+        var smoothed = magnitudes
+        let smoothingKernel: [Float] = [0.1, 0.2, 0.4, 0.2, 0.1]  // Gaussian-like smoothing
+        
+        // Apply smoothing to reduce noise and make display more readable
+        for i in 2..<(magnitudes.count - 2) {
+            var weightedSum: Float = 0.0
+            for j in 0..<smoothingKernel.count {
+                let index = i + j - 2
+                weightedSum += magnitudes[index] * smoothingKernel[j]
+            }
+            smoothed[i] = weightedSum
         }
+        
+        // Apply octave-based smoothing for more professional results
+        return applyOctaveSmoothing(smoothed)
+    }
+    
+    // Octave-based smoothing like professional analyzers
+    private func applyOctaveSmoothing(_ magnitudes: [Float]) -> [Float] {
+        var octaveSmoothed = magnitudes
+        let count = magnitudes.count
+        
+        // Apply variable smoothing based on frequency (more smoothing at higher frequencies)
+        for i in 0..<count {
+            let frequencyRatio = Float(i) / Float(count)
+            
+            // Higher frequencies get more smoothing
+            let smoothingWidth = max(1, Int(frequencyRatio * 8.0))
+            
+            if i >= smoothingWidth && i < count - smoothingWidth {
+                var sum: Float = 0.0
+                var totalWeight: Float = 0.0
+                
+                for j in -smoothingWidth...smoothingWidth {
+                    let index = i + j
+                    let weight = 1.0 / (1.0 + abs(Float(j)))  // Distance-based weighting
+                    sum += magnitudes[index] * weight
+                    totalWeight += weight
+                }
+                
+                octaveSmoothed[i] = sum / totalWeight
+            }
+        }
+        
+        return octaveSmoothed
     }
     
     private func analyzeFrequencyBalance(from spectrum: [Float]) -> FrequencyBalance {
