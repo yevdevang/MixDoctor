@@ -27,49 +27,49 @@ struct PAZFrequencyAnalyzer: View {
                 label: "Sub Bass",
                 range: "20-80 Hz",
                 value: subBassValue,
-                color: Color(red: 0.4, green: 0.2, blue: 0.8),
+                color: Color(red: 0.5, green: 0.3, blue: 0.8), // Purple
                 isCritical: false
             ),
             FrequencyBand(
                 label: "Bass",
                 range: "80-250 Hz",
                 value: bassValue,
-                color: Color(red: 0.5, green: 0.3, blue: 1.0),
+                color: Color(red: 0.6, green: 0.2, blue: 0.9), // Deep Purple
                 isCritical: true
             ),
             FrequencyBand(
                 label: "Low Mid",
                 range: "250-500 Hz",
                 value: lowMidValue,
-                color: Color(red: 1.0, green: 0.6, blue: 0.2),
+                color: Color(red: 1.0, green: 0.6, blue: 0.2), // Orange
                 isCritical: true
             ),
             FrequencyBand(
                 label: "Mid",
                 range: "500-2k Hz",
                 value: midValue,
-                color: Color(red: 0.9, green: 0.8, blue: 0.2),
+                color: Color(red: 0.9, green: 0.8, blue: 0.2), // Yellow
                 isCritical: true
             ),
             FrequencyBand(
                 label: "High Mid",
                 range: "2-6 kHz",
                 value: highMidValue,
-                color: Color(red: 0.5, green: 0.8, blue: 0.3),
+                color: Color(red: 0.4, green: 0.8, blue: 0.3), // Green
                 isCritical: true
             ),
             FrequencyBand(
                 label: "Presence",
                 range: "6-12 kHz",
                 value: presenceValue,
-                color: Color(red: 0.2, green: 0.7, blue: 0.9),
+                color: Color(red: 0.2, green: 0.7, blue: 0.9), // Cyan/Light Blue
                 isCritical: false
             ),
             FrequencyBand(
                 label: "Air",
                 range: "12-20 kHz",
                 value: airValue,
-                color: Color(red: 0.4, green: 0.5, blue: 1.0),
+                color: Color(red: 0.4, green: 0.5, blue: 1.0), // Blue
                 isCritical: false
             )
         ]
@@ -115,6 +115,71 @@ struct PAZFrequencyAnalyzer: View {
         return percentage
     }
     
+    // Calculate frequency balance score from actual FFT band energies
+    private var frequencyBalanceScore: Double {
+        let bands = frequencyBands
+        let values = bands.map { $0.value }
+        
+        // If all bands are 0, data hasn't been analyzed yet
+        let total = values.reduce(0, +)
+        if total < 0.1 {
+            return 0.0
+        }
+        
+        // Group into 5 main regions matching the scoring system
+        let lowEnd = (values[0] + values[1]) / 2.0      // Sub Bass + Bass
+        let lowMid = values[2]                           // Low Mid
+        let mid = values[3]                              // Mid
+        let highMid = values[4]                          // High Mid
+        let high = (values[5] + values[6]) / 2.0        // Presence + Air
+        
+        // Calculate ideal balance
+        // Professional mixes: Low End 15-35%, Low Mid 15-30%, Mid 20-40%, High Mid 15-30%, High 10-25%
+        let idealRanges: [(min: Double, max: Double, weight: Double)] = [
+            (15, 35, 1.2),  // Low End
+            (15, 30, 1.0),  // Low Mid
+            (20, 40, 1.5),  // Mid (most important)
+            (15, 30, 1.0),  // High Mid
+            (10, 25, 0.8)   // High
+        ]
+        
+        let mainBands = [lowEnd, lowMid, mid, highMid, high]
+        var totalScore = 0.0
+        var totalWeight = 0.0
+        
+        for (index, value) in mainBands.enumerated() {
+            let (minIdeal, maxIdeal, weight) = idealRanges[index]
+            
+            let bandScore: Double
+            if value >= minIdeal && value <= maxIdeal {
+                bandScore = 100.0
+            } else if value < minIdeal {
+                let deficit = minIdeal - value
+                bandScore = max(0, 100 - (deficit * 3))
+            } else {
+                let excess = value - maxIdeal
+                bandScore = max(0, 100 - (excess * 2))
+            }
+            
+            totalScore += bandScore * weight
+            totalWeight += weight
+        }
+        
+        let balanceScore = totalScore / totalWeight
+        
+        // Penalty for extreme imbalances
+        let maxBand = mainBands.max() ?? 0
+        let minBand = mainBands.min() ?? 0
+        let imbalanceRatio = maxBand > 0 ? (maxBand - minBand) / maxBand : 0
+        
+        if imbalanceRatio > 0.66 {
+            let imbalancePenalty = (imbalanceRatio - 0.66) * 50
+            return max(0, balanceScore - imbalancePenalty)
+        }
+        
+        return balanceScore
+    }
+    
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             // Header
@@ -128,13 +193,13 @@ struct PAZFrequencyAnalyzer: View {
 
                 Spacer()
 
-                Image(systemName: result.hasFrequencyImbalance ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
-                    .foregroundStyle(result.hasFrequencyImbalance ? .orange : .green)
+                Image(systemName: frequencyStatusIcon)
+                    .foregroundStyle(frequencyStatusColor)
             }
 
             // Overall Score
             HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(String(format: "%.1f", result.frequencyBalanceScore))
+                Text(String(format: "%.1f", max(0, frequencyBalanceScore)))
                     .font(.system(size: 28, weight: .bold))
 
                 Text("%")
@@ -143,17 +208,10 @@ struct PAZFrequencyAnalyzer: View {
                 
                 Spacer()
                 
-                Text(frequencyBalanceDescription(result.frequencyBalanceScore))
+                Text(frequencyBalanceDescription(frequencyBalanceScore))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
-
-            AmplitudeSummary(
-                peakLevel: result.peakLevel,
-                rmsLevel: result.rmsLevel,
-                loudnessLUFS: result.loudnessLUFS,
-                hasClipping: result.hasClipping
-            )
 
             Divider()
                 .padding(.vertical, 4)
@@ -182,7 +240,7 @@ struct PAZFrequencyAnalyzer: View {
             }
             
             // Analysis insights
-            if result.hasFrequencyImbalance {
+            if shouldShowInsights {
                 PAZAnalysisInsights(bands: frequencyBands)
             }
         }
@@ -191,11 +249,35 @@ struct PAZFrequencyAnalyzer: View {
         .cornerRadius(12)
     }
     
+    private var frequencyStatusIcon: String {
+        let score = frequencyBalanceScore
+        if score >= 85 { return "checkmark.circle.fill" }
+        if score >= 70 { return "checkmark.circle.fill" }
+        if score >= 50 { return "exclamationmark.triangle.fill" }
+        if score >= 30 { return "exclamationmark.triangle" }
+        return "xmark.circle.fill"
+    }
+    
+    private var frequencyStatusColor: Color {
+        let score = frequencyBalanceScore
+        if score >= 85 { return .green }
+        if score >= 70 { return .green }
+        if score >= 50 { return .orange }
+        if score >= 30 { return .orange }
+        return .red
+    }
+    
+    private var shouldShowInsights: Bool {
+        // Show insights if balance needs improvement
+        frequencyBalanceScore < 70
+    }
+    
     private func frequencyBalanceDescription(_ score: Double) -> String {
         switch score {
-        case 0..<50: return "Needs EQ work"
-        case 50..<70: return "Moderate balance"
-        case 70..<85: return "Good balance"
+        case 0..<20: return "Critical imbalance"
+        case 20..<35: return "Needs EQ work"
+        case 35..<60: return "Acceptable balance"
+        case 60..<80: return "Good balance"
         default: return "Excellent balance"
         }
     }
@@ -307,14 +389,9 @@ struct FrequencyChart: View {
                 SpectrumCanvasView(dataPoints: prepareDataPoints(fftData: fftData, sampleRate: sr))
                     .frame(height: 230)
             } else {
-                // Fallback: Dark background
+                // Fallback: Dark background without text
                 Rectangle()
                     .fill(Color.black.opacity(0.8))
-                    .overlay(
-                        Text("NO FFT DATA")
-                            .font(.caption2)
-                            .foregroundStyle(.orange.opacity(0.7))
-                    )
             }
         }
         .frame(height: 230)

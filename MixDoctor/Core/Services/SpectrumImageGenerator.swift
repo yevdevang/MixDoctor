@@ -46,36 +46,38 @@ struct SpectrumCanvasView: View {
                 with: .color(.black)
             )
             
-            let padding: CGFloat = 40
-            let graphWidth = size.width - padding * 2
+            let leftPadding: CGFloat = 10  // Minimal left padding to shift wave further left
+            let rightPadding: CGFloat = 60  // More space on right for dB labels
+            let padding: CGFloat = 40  // Top/bottom padding
+            let graphWidth = size.width - leftPadding - rightPadding
             let graphHeight = size.height - padding * 2
             
             // Draw grid
-            drawGrid(context: &context, size: size, padding: padding, graphWidth: graphWidth, graphHeight: graphHeight)
+            drawGrid(context: &context, size: size, leftPadding: leftPadding, rightPadding: rightPadding, padding: padding, graphWidth: graphWidth, graphHeight: graphHeight)
             
             // Draw spectrum curve - shows ALL frequency bins with peaks and valleys
-            drawSpectrum(context: &context, size: size, padding: padding, graphWidth: graphWidth, graphHeight: graphHeight)
+            drawSpectrum(context: &context, size: size, leftPadding: leftPadding, padding: padding, graphWidth: graphWidth, graphHeight: graphHeight)
             
             // Draw labels
-            drawLabels(context: &context, size: size, padding: padding, graphWidth: graphWidth, graphHeight: graphHeight)
+            drawLabels(context: &context, size: size, leftPadding: leftPadding, rightPadding: rightPadding, padding: padding, graphWidth: graphWidth, graphHeight: graphHeight)
         }
         .background(Color.black)
     }
     
-    private func drawGrid(context: inout GraphicsContext, size: CGSize, padding: CGFloat, graphWidth: CGFloat, graphHeight: CGFloat) {
+    private func drawGrid(context: inout GraphicsContext, size: CGSize, leftPadding: CGFloat, rightPadding: CGFloat, padding: CGFloat, graphWidth: CGFloat, graphHeight: CGFloat) {
         var path = Path()
         
         // Horizontal grid lines (dB levels: 0, -20, -40, -60, -80, -100)
         for i in 0...5 {
             let y = padding + (graphHeight / 5.0) * CGFloat(i)
-            path.move(to: CGPoint(x: padding, y: y))
-            path.addLine(to: CGPoint(x: size.width - padding, y: y))
+            path.move(to: CGPoint(x: leftPadding, y: y))
+            path.addLine(to: CGPoint(x: size.width - rightPadding, y: y))
         }
         
         // Vertical grid lines (frequency markers)
         let freqMarkers: [Double] = [20, 49, 100, 200, 499, 1000, 2000, 4000, 10000, 20000]
         for freq in freqMarkers {
-            let x = padding + xPosition(for: freq, width: graphWidth)
+            let x = leftPadding + xPosition(for: freq, width: graphWidth)
             path.move(to: CGPoint(x: x, y: padding))
             path.addLine(to: CGPoint(x: x, y: size.height - padding))
         }
@@ -83,20 +85,20 @@ struct SpectrumCanvasView: View {
         context.stroke(path, with: .color(.blue.opacity(0.2)), lineWidth: 0.5)
     }
     
-    private func drawSpectrum(context: inout GraphicsContext, size: CGSize, padding: CGFloat, graphWidth: CGFloat, graphHeight: CGFloat) {
+    private func drawSpectrum(context: inout GraphicsContext, size: CGSize, leftPadding: CGFloat, padding: CGFloat, graphWidth: CGFloat, graphHeight: CGFloat) {
         guard !dataPoints.isEmpty, let firstPoint = dataPoints.first else { return }
         
         var path = Path()
         
         // Start path
-        let startX = padding + xPosition(for: firstPoint.frequency, width: graphWidth)
+        let startX = leftPadding + xPosition(for: firstPoint.frequency, width: graphWidth)
         let startY = padding + yPosition(for: firstPoint.magnitude, height: graphHeight)
         
         path.move(to: CGPoint(x: startX, y: startY))
         
         // Draw line through ALL points - this will show natural peaks and valleys!
         for point in dataPoints.dropFirst() {
-            let x = padding + xPosition(for: point.frequency, width: graphWidth)
+            let x = leftPadding + xPosition(for: point.frequency, width: graphWidth)
             let y = padding + yPosition(for: point.magnitude, height: graphHeight)
             path.addLine(to: CGPoint(x: x, y: y))
         }
@@ -105,7 +107,7 @@ struct SpectrumCanvasView: View {
         context.stroke(path, with: .color(.blue), lineWidth: 1.5)
     }
     
-    private func drawLabels(context: inout GraphicsContext, size: CGSize, padding: CGFloat, graphWidth: CGFloat, graphHeight: CGFloat) {
+    private func drawLabels(context: inout GraphicsContext, size: CGSize, leftPadding: CGFloat, rightPadding: CGFloat, padding: CGFloat, graphWidth: CGFloat, graphHeight: CGFloat) {
         // Frequency labels (X-axis)
         let freqLabels: [(freq: Double, label: String)] = [
             (20, "20"), (49, "49"), (100, "100"), (200, "200"),
@@ -113,7 +115,7 @@ struct SpectrumCanvasView: View {
         ]
         
         for item in freqLabels {
-            let x = padding + xPosition(for: item.freq, width: graphWidth)
+            let x = leftPadding + xPosition(for: item.freq, width: graphWidth)
             let text = Text(item.label)
                 .font(.system(size: 10))
                 .foregroundColor(.white.opacity(0.8))
@@ -129,13 +131,13 @@ struct SpectrumCanvasView: View {
                 .font(.system(size: 10))
                 .foregroundColor(.white.opacity(0.8))
             
-            context.draw(text, at: CGPoint(x: size.width - padding + 20, y: y))
+            context.draw(text, at: CGPoint(x: size.width - rightPadding + 25, y: y))
         }
     }
     
     // Logarithmic X position for frequency (professional analyzer style)
     private func xPosition(for frequency: Double, width: CGFloat) -> CGFloat {
-        let minFreq = 20.0
+        let minFreq = 15.0  // Start from 15Hz instead of 20Hz to shift wave left
         let maxFreq = 20000.0
         
         let logMin = log10(minFreq)
