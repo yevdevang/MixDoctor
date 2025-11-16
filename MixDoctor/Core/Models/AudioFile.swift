@@ -163,6 +163,10 @@ public final class AnalysisResult {
     var aiRecommendations: [String]
     var claudeScore: Int?
     var isReadyForMastering: Bool
+    
+    // Full FFT Spectrum Data for professional analyzer visualization
+    var frequencySpectrum: [Float]?  // Full FFT magnitudes for spectrum display
+    var spectrumSampleRate: Double?  // Sample rate used for FFT
 
     init(audioFile: AudioFile?, analysisVersion: String = "1.0") {
         self.id = UUID()
@@ -212,6 +216,10 @@ public final class AnalysisResult {
         self.aiRecommendations = []
         self.claudeScore = nil
         self.isReadyForMastering = false
+        
+        // Initialize spectrum data
+        self.frequencySpectrum = nil
+        self.spectrumSampleRate = nil
     }
 }
 
