@@ -24,16 +24,60 @@ struct ResultsView: View {
     private let analysisService = AudioKitService.shared
 
     var body: some View {
-        ScrollView {
-            if let result = analysisResult {
-                resultContentView(result: result)
-            } else {
-                // Show empty state if no analysis result
-                emptyStateView
+        ZStack {
+            ScrollView {
+                if let result = analysisResult {
+                    resultContentView(result: result)
+                } else {
+                    // Show empty state if no analysis result
+                    emptyStateView
+                }
+            }
+            
+            // Show loading overlay during analysis
+            if isAnalyzing {
+                Color.black.opacity(0.5)
+                    .ignoresSafeArea()
+                
+                VStack(spacing: 20) {
+                    ProgressView()
+                        .scaleEffect(2.0)
+                        .tint(.white)
+                    
+                    Text("Re-analyzing...")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                    
+                    Text("This may take a few moments")
+                        .font(.subheadline)
+                        .foregroundColor(.white.opacity(0.8))
+                }
+                .padding(32)
+                .background(
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color(red: 0.435, green: 0.173, blue: 0.871))
+                )
             }
         }
         .navigationTitle("Analysis Results")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    Task {
+                        await performAnalysis()
+                    }
+                } label: {
+                    if isAnalyzing {
+                        ProgressView()
+                            .tint(Color(red: 0.435, green: 0.173, blue: 0.871))
+                    } else {
+                        Label("Re-analyze", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                }
+                .disabled(isAnalyzing)
+            }
+        }
         .sheet(isPresented: $showPaywall, onDismiss: {
             // If paywall was dismissed without purchase, return to dashboard
             if !mockService.isProUser {

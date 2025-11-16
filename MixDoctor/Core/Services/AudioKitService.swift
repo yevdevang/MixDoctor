@@ -2,12 +2,11 @@
 //  AudioKitService.swift
 //  MixDoctor
 //
-//  AudioKit-based audio analysis and processing service
+//  Audio analysis and processing service
 //
 
 import Foundation
 import AVFoundation
-import AudioKit
 import Combine
 import Accelerate
 
@@ -104,6 +103,10 @@ public class AudioKitService: ObservableObject {
         result.midBalance = analysisResult.mid
         result.highMidBalance = analysisResult.highMid
         result.highBalance = analysisResult.high
+        
+        // Store full FFT spectrum for professional analyzer visualization
+        result.frequencySpectrum = analysisResult.spectralBalance.frequencySpectrum
+        result.spectrumSampleRate = actualSampleRate
         
         result.dynamicRange = analysisResult.dynamicRange
         result.loudnessLUFS = analysisResult.loudness
@@ -355,31 +358,37 @@ public class AudioKitService: ObservableObject {
     // MARK: - AudioKit Analysis Methods
     
     private func performAudioKitFFT(_ data: UnsafePointer<Float>, frameCount: Int, sampleRate: Double) -> AudioKitFFTResult {
-        // Convert pointer to array for processing
-        let samples = Array(UnsafeBufferPointer(start: data, count: frameCount))
+        // 🧪 TEST MODE: Generate test signal instead of using real audio
+        _ = Array(UnsafeBufferPointer(start: data, count: frameCount))
         
-        // Enhanced FFT size calculation for better frequency resolution
-        // Use larger FFT sizes for professional frequency analysis accuracy
-        let minFFTSize = 4096  // Minimum FFT size for good frequency resolution
-        let maxFFTSize = 16384 // Maximum practical FFT size
+        print("\n🧪 GENERATING TEST SIGNAL")
+        let frequencies: [Double] = [100, 200, 300, 500, 800, 1200, 2400, 4800, 9600]
+        let amplitudes: [Float] = [1.0, 0.7, 0.5, 0.6, 0.4, 0.3, 0.25, 0.15, 0.08]
+        let actualFFTSize = 4096
+        var samples = [Float](repeating: 0, count: actualFFTSize)
+        for i in 0..<samples.count {
+            let t = Double(i) / sampleRate
+            var sample: Float = 0.0
+             for (freq, amp) in zip(frequencies, amplitudes) {
+                sample += amp * Float(sin(2.0 * .pi * freq * t))
+            }
+            samples[i] = sample / Float(frequencies.count)
+        }
+        print("🧪 Peaks at: \(frequencies.map { "\(Int($0))Hz" }.joined(separator: ", "))")
         
-        let targetFFTSize = min(maxFFTSize, max(minFFTSize, Int(pow(2, ceil(log2(Double(frameCount)))))))
+        // Use the test signal samples directly (already actualFFTSize = 4096)
+        let actualSamples = samples
         
-        // Ensure we have enough samples for the target FFT size
-        let actualFFTSize = min(targetFFTSize, Int(pow(2, floor(log2(Double(frameCount))))))
-        let actualSamples = Array(samples.prefix(actualFFTSize))
-        
-        print("📊 ENHANCED FFT ANALYSIS:")
+        print("📊 TEST SIGNAL FFT ANALYSIS:")
         print("   Frame count: \(frameCount)")
-        print("   Target FFT size: \(targetFFTSize)")
-        print("   Actual FFT size: \(actualFFTSize)")
+        print("   FFT size: \(actualFFTSize)")
         print("   Frequency resolution: \(String(format: "%.2f", sampleRate / Double(actualFFTSize))) Hz per bin")
         
         // Enhanced FFT analysis with professional smoothing
         let magnitudes = performFFTAnalysis(actualSamples)
         
-        // Apply professional spectral smoothing like real analyzers
-        let smoothedMagnitudes = applySpectralSmoothing(magnitudes)
+        // 🧪 TEST MODE: NO SMOOTHING - use raw FFT to see peaks!
+        let smoothedMagnitudes = magnitudes  // Skip smoothing to show test peaks
         
         // Debug: Check FFT spectrum quality with smoothed data
         let totalMagnitude = smoothedMagnitudes.reduce(0.0) { sum, mag in sum + Double(mag) }
@@ -466,6 +475,8 @@ public class AudioKitService: ObservableObject {
         let hasImbalance = checkFrequencyImbalance(combinedLowEnd, combinedLowMid, combinedMid, combinedHighMid, combinedHigh, genre: detectedGenre)
         print("   Has frequency imbalance: \(hasImbalance)")
         
+        // For spectrum visualization, use RAW unsmoothed magnitudes to show all frequency detail
+        // Professional analyzers show the actual measured spectrum, not overly smoothed data
         return AudioKitFFTResult(
             lowEnd: combinedLowEnd,
             lowMid: combinedLowMid,
@@ -473,7 +484,8 @@ public class AudioKitService: ObservableObject {
             highMid: combinedHighMid,
             high: combinedHigh,
             spectralCentroid: spectralCentroid,
-            hasImbalance: hasImbalance
+            hasImbalance: hasImbalance,
+            fullSpectrum: Array(magnitudes[0..<usefulBins]) // Use RAW magnitudes for visualization
         )
     }
     
@@ -1614,6 +1626,7 @@ struct AudioKitFFTResult {
     let high: Double
     let spectralCentroid: Double
     let hasImbalance: Bool
+    let fullSpectrum: [Float] // Full FFT magnitudes for spectrum analyzer visualization
 }
 
 struct AudioKitAmplitudeResult {
@@ -1650,6 +1663,7 @@ struct SpectralBalanceResult {
     let tiltMeasure: Double         // -1 to 1: Spectral tilt (negative = dark, positive = bright)
     let energyDistribution: [String: Double]  // Detailed frequency distribution
     let recommendations: [String]
+    let frequencySpectrum: [Float]? // Full FFT magnitudes for visualization
     
     init() {
         self.subBassEnergy = 0.14   // 14% - typical for modern masters
@@ -1663,9 +1677,10 @@ struct SpectralBalanceResult {
         self.tiltMeasure = 0.0
         self.energyDistribution = [:]
         self.recommendations = []
+        self.frequencySpectrum = nil
     }
     
-    init(subBassEnergy: Double, bassEnergy: Double, lowMidEnergy: Double, midEnergy: Double, highMidEnergy: Double, presenceEnergy: Double, airEnergy: Double, balanceScore: Double, tiltMeasure: Double, energyDistribution: [String: Double], recommendations: [String]) {
+    init(subBassEnergy: Double, bassEnergy: Double, lowMidEnergy: Double, midEnergy: Double, highMidEnergy: Double, presenceEnergy: Double, airEnergy: Double, balanceScore: Double, tiltMeasure: Double, energyDistribution: [String: Double], recommendations: [String], frequencySpectrum: [Float]? = nil) {
         self.subBassEnergy = subBassEnergy
         self.bassEnergy = bassEnergy
         self.lowMidEnergy = lowMidEnergy
@@ -1677,6 +1692,7 @@ struct SpectralBalanceResult {
         self.tiltMeasure = tiltMeasure
         self.energyDistribution = energyDistribution
         self.recommendations = recommendations
+        self.frequencySpectrum = frequencySpectrum
     }
 }
 
@@ -1814,9 +1830,10 @@ enum AudioKitError: Error {
     private func performFFTAnalysis(_ samples: [Float]) -> [Float] {
         guard !samples.isEmpty else { return [] }
         
-        // Ensure FFT size is power of 2 and reasonable for professional analysis
-        let fftSize = Int(pow(2, floor(log2(Double(samples.count)))))
-        guard fftSize >= 512 else { return [] }  // Minimum size for good frequency resolution
+        // Use smaller FFT for better temporal resolution and more variation
+        let maxSize = 2048 // Force smaller FFT to show more detail
+        let fftSize = min(Int(pow(2, floor(log2(Double(samples.count))))), maxSize)
+        guard fftSize >= 512 else { return [] }
         
         let actualSamples = Array(samples.prefix(fftSize))
         let log2n = vDSP_Length(log2(Float(fftSize)))
@@ -1827,15 +1844,18 @@ enum AudioKitError: Error {
         }
         defer { vDSP_destroy_fftsetup(fftSetup) }
         
-        // PROFESSIONAL WINDOWING: Apply Hann window exactly like pro analyzers
+        // Apply Hann window - CORRECTLY multiply samples by window coefficients
+        var window = [Float](repeating: 0, count: fftSize)
+        vDSP_hann_window(&window, vDSP_Length(fftSize), Int32(vDSP_HANN_NORM))
+        
         var windowedSamples = actualSamples
-        vDSP_hann_window(&windowedSamples, vDSP_Length(fftSize), 0)
+        vDSP_vmul(actualSamples, 1, window, 1, &windowedSamples, 1, vDSP_Length(fftSize))
         
         // Prepare real and imaginary arrays
         var realParts = windowedSamples
         var imagParts = Array(repeating: Float(0.0), count: fftSize)
         
-        // Perform FFT with professional scaling
+        // Perform FFT
         var mags = Array(repeating: Float(0.0), count: fftSize / 2)
         
         realParts.withUnsafeMutableBufferPointer { realPtr in
@@ -1845,34 +1865,19 @@ enum AudioKitError: Error {
                 // Forward FFT
                 vDSP_fft_zrip(fftSetup, &splitComplex, 1, log2n, FFTDirection(FFT_FORWARD))
                 
-                // Calculate magnitudes (professional method)
+                // Calculate magnitudes - SIMPLE raw calculation without excessive normalization
                 let nyquist = fftSize / 2
                 
                 for i in 0..<nyquist {
                     let real = realPtr[i]
                     let imag = imagPtr[i]
                     
-                    // Calculate magnitude correctly for professional analysis
+                    // Simple magnitude
                     let magnitude = sqrt(real * real + imag * imag)
                     
-                    // Professional scaling chain:
-                    // 1. Window correction (Hann window loses ~1.5 dB)
-                    // 2. FFT normalization 
-                    // 3. Single-sided spectrum correction (except DC and Nyquist)
-                    var correctedMag = magnitude
-                    
-                    // Hann window correction factor
-                    correctedMag *= 2.0  // Compensate for window energy loss
-                    
-                    // FFT normalization
-                    correctedMag /= Float(fftSize)
-                    
-                    // Single-sided spectrum (double the energy except DC)
-                    if i > 0 && i < nyquist - 1 {
-                        correctedMag *= 2.0
-                    }
-                    
-                    mags[i] = correctedMag
+                    // Minimal scaling - just normalize by FFT size
+                    // Don't over-normalize which smooths out variation
+                    mags[i] = magnitude / Float(fftSize)
                 }
             }
         }
@@ -2244,10 +2249,36 @@ enum AudioKitError: Error {
     
     /// Comprehensive spectral balance analysis for mastering
     private func analyzeSpectralBalance(_ data: UnsafePointer<Float>, frameCount: Int) -> SpectralBalanceResult {
-        let _ = Array(UnsafeBufferPointer(start: data, count: frameCount))
-        let magnitudes = performFFTAnalysis(data, frameCount: frameCount)
+        let samples = Array(UnsafeBufferPointer(start: data, count: frameCount))
         
         let sampleRate: Double = 44100.0
+        let windowSize = 4096
+        
+        // Use real audio data - find the loudest section for best frequency representation
+        print("\n📊 ANALYZING REAL AUDIO FILE")
+        
+        // Find the loudest window in the audio for best frequency analysis
+        var maxEnergy: Float = 0
+        var bestWindowStart = 0
+        
+        let stepSize = windowSize / 2 // 50% overlap
+        var currentStart = 0
+        while currentStart < frameCount - windowSize {
+            let windowSamples = Array(samples[currentStart..<min(currentStart + windowSize, frameCount)])
+            let energy = windowSamples.reduce(0.0) { $0 + abs($1) }
+            if energy > maxEnergy {
+                maxEnergy = energy
+                bestWindowStart = currentStart
+            }
+            currentStart += stepSize
+        }
+        
+        let windowSamples = Array(samples[bestWindowStart..<min(bestWindowStart + windowSize, frameCount)])
+        print("📊 Using loudest window at sample \(bestWindowStart) (energy: \(maxEnergy))")
+        
+        // Get FFT from real audio
+        let magnitudes = performFFTAnalysis(windowSamples)
+        
         let nyquist = sampleRate / 2.0
         let binWidth = nyquist / Double(magnitudes.count / 2)
         
@@ -2322,6 +2353,12 @@ enum AudioKitError: Error {
             recommendations.append("☀️ Mix is too bright - reduce harsh frequencies")
         }
         
+        // Use RAW FFT spectrum - just take first half (useful bins)
+        let halfSpectrum = magnitudes.count / 2
+        let spectrumForDisplay = Array(magnitudes[0..<min(halfSpectrum, 2048)])
+        
+        print("📊 SPECTRUM FOR DISPLAY: \(spectrumForDisplay.count) bins (RAW FFT)")
+        
         return SpectralBalanceResult(
             subBassEnergy: subBassEnergy,
             bassEnergy: bassEnergy,
@@ -2333,10 +2370,13 @@ enum AudioKitError: Error {
             balanceScore: clampedBalanceScore,
             tiltMeasure: tiltMeasure,
             energyDistribution: energyDistribution,
-            recommendations: recommendations
+            recommendations: recommendations,
+            frequencySpectrum: spectrumForDisplay // Store downsampled spectrum for display
         )
     }
     
+    /// Downsample FFT spectrum using LINEAR spacing and PEAK detection
+    /// This preserves actual frequency peaks without logarithmic smoothing
     /// Stereo correlation and imaging analysis for mastering
     private func analyzeStereoCorrelation(_ leftData: UnsafePointer<Float>, _ rightData: UnsafePointer<Float>, frameCount: Int) -> StereoCorrelationResult {
         let leftSamples = Array(UnsafeBufferPointer(start: leftData, count: frameCount))
@@ -2791,4 +2831,48 @@ public struct InstrumentBalanceResult {
     let balanceIssues: [InstrumentBalanceIssue]
     let isBalanced: Bool
     let recommendations: [String]
+}
+
+// MARK: - Test Signal Generator for Spectrum Analyzer Testing
+
+extension AudioKitService {
+    /// Generate a multi-tone test signal that produces clear frequency peaks in FFT
+    private func generateTestSignalWithPeaks(duration: Double = 1.0, sampleRate: Double) -> [Float] {
+        let numSamples = Int(duration * sampleRate)
+        var signal = [Float](repeating: 0, count: numSamples)
+        
+        // Define fundamental frequencies and harmonics (in Hz)
+        // This simulates a musical chord with overtones
+        let frequencies: [Double] = [
+            100,    // Fundamental (bass)
+            200,    // 2nd harmonic
+            300,    // 3rd harmonic
+            500,    // Presence
+            800,    // Mid
+            1200,   // High-mid
+            2400,   // Presence
+            4800,   // Brilliance
+            9600    // Air
+        ]
+        
+        // Amplitudes for each frequency (decreasing with higher frequencies)
+        let amplitudes: [Float] = [1.0, 0.7, 0.5, 0.6, 0.4, 0.3, 0.25, 0.15, 0.08]
+        
+        // Generate the signal by adding all sine waves
+        for i in 0..<numSamples {
+            let t = Double(i) / sampleRate
+            
+            var sample: Float = 0.0
+            for (freq, amp) in zip(frequencies, amplitudes) {
+                sample += amp * Float(sin(2.0 * .pi * freq * t))
+            }
+            
+            // Normalize to prevent clipping
+            signal[i] = sample / Float(frequencies.count)
+        }
+        
+        print("🧪 Generated test signal with peaks at: \(frequencies.map { "\(Int($0))Hz" }.joined(separator: ", "))")
+        
+        return signal
+    }
 }

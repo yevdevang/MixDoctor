@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import Charts
 
 struct PAZFrequencyAnalyzer: View {
     let result: AnalysisResult
@@ -98,13 +99,24 @@ struct PAZFrequencyAnalyzer: View {
                     .foregroundStyle(.secondary)
             }
 
+            AmplitudeSummary(
+                peakLevel: result.peakLevel,
+                rmsLevel: result.rmsLevel,
+                loudnessLUFS: result.loudnessLUFS,
+                hasClipping: result.hasClipping
+            )
+
             Divider()
                 .padding(.vertical, 4)
 
             // Chart-style spectrum analyzer with proper spacing
             VStack(spacing: 16) {
                 // Chart visualization with fixed height to prevent overlap
-                FrequencyChart(bands: frequencyBands)
+                FrequencyChart(
+                    bands: frequencyBands,
+                    spectrum: result.frequencySpectrum,  // REAL FFT data from audio file
+                    sampleRate: result.spectrumSampleRate
+                )
                     .frame(height: 250) // Ensure chart doesn't expand
                     .clipped() // Prevent any content from overflowing
                 
@@ -140,61 +152,167 @@ struct PAZFrequencyAnalyzer: View {
     }
 }
 
+// MARK: - Amplitude Summary
+
+struct AmplitudeSummary: View {
+    let peakLevel: Double
+    let rmsLevel: Double
+    let loudnessLUFS: Double
+    let hasClipping: Bool
+    
+    private struct AmplitudeMetric: Identifiable {
+        let id: String
+        let value: String
+        let unit: String
+        let color: Color
+        let icon: String
+    }
+    
+    private var metrics: [AmplitudeMetric] {
+        [
+            AmplitudeMetric(
+                id: "Peak",
+                value: formatted(peakLevel),
+                unit: "dB",
+                color: peakColor,
+                icon: hasClipping ? "exclamationmark.triangle.fill" : "waveform.path"
+            ),
+            AmplitudeMetric(
+                id: "RMS",
+                value: formatted(rmsLevel),
+                unit: "dB",
+                color: rmsColor,
+                icon: "dot.radiowaves.left.and.right"
+            ),
+            AmplitudeMetric(
+                id: "Loudness",
+                value: formatted(loudnessLUFS),
+                unit: "LUFS",
+                color: .blue,
+                icon: "gauge"
+            )
+        ]
+    }
+    
+    private var peakColor: Color {
+        if hasClipping { return .red }
+        if peakLevel > -1.0 { return .orange }
+        return .green
+    }
+    
+    private var rmsColor: Color {
+        if rmsLevel > -8.0 { return .orange }
+        if rmsLevel < -20.0 { return .yellow }
+        return .green
+    }
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            ForEach(metrics) { metric in
+                VStack(alignment: .leading, spacing: 4) {
+                    Label(metric.id, systemImage: metric.icon)
+                        .font(.caption.bold())
+                        .foregroundStyle(metric.color)
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text(metric.value)
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(.primary)
+                        Text(metric.unit)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 10)
+                .padding(.horizontal, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.primary.opacity(0.05))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(metric.color.opacity(0.25), lineWidth: 1)
+                )
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    
+    private func formatted(_ value: Double) -> String {
+        guard value.isFinite else { return "--" }
+        return String(format: "%.1f", value)
+    }
+}
+
 // MARK: - Frequency Chart Component
 
 struct FrequencyChart: View {
     let bands: [FrequencyBand]
+    let spectrum: [Float]?      // REAL FFT data
+    let sampleRate: Double?     // Actual sample rate
     
     var body: some View {
-        // Chart area with spectrum analyzer - fixed height container without dB axis
+        // Chart area with spectrum analyzer
         ZStack {
-            // Dark background like professional analyzers
-            Rectangle()
-                .fill(Color.black.opacity(0.8))
-            
-            // Grid
-            SpectrumGrid()
-            
-            // Frequency response curve
-            GeometryReader { geometry in
-                SpectrumCurve(bands: bands, size: CGSize(width: geometry.size.width, height: geometry.size.height))
-            }
-            
-            // Frequency labels positioned INSIDE the analyzer with proper padding
-            VStack {
-                Spacer() // Push labels to bottom
-                
-                GeometryReader { labelGeometry in
-                    let width = labelGeometry.size.width - 40 // Account for padding
-                    let frequencies: [(freq: Double, label: String)] = [
-                        (20, "20"), (50, "50"), (100, "100"), (200, "200"), 
-                        (500, "500"), (1000, "1k"), (2000, "2k"), (5000, "5k"), 
-                        (10000, "10k"), (20000, "20k")
-                    ]
-                    
-                    ForEach(Array(frequencies.enumerated()), id: \.offset) { index, freqData in
-                        let logFreq = log10(freqData.freq)
-                        let logMin = log10(20.0)
-                        let logMax = log10(20000.0)
-                        let normalizedX = (logFreq - logMin) / (logMax - logMin)
-                        let xPosition = 20 + normalizedX * width // Add left padding
-                        
-                        Text(freqData.label)
+            // Use Canvas-based spectrum generator for professional visualization
+            if let fftData = spectrum, let sr = sampleRate, fftData.count > 0 {
+                SpectrumCanvasView(dataPoints: prepareDataPoints(fftData: fftData, sampleRate: sr))
+                    .frame(height: 230)
+            } else {
+                // Fallback: Dark background
+                Rectangle()
+                    .fill(Color.black.opacity(0.8))
+                    .overlay(
+                        Text("NO FFT DATA")
                             .font(.caption2)
-                            .foregroundStyle(.white.opacity(0.8))
-                            .position(x: xPosition, y: 10) // Position inside analyzer
-                    }
-                }
-                .frame(height: 20) // Fixed height for labels
-                .padding(.bottom, 10) // Padding from bottom edge
+                            .foregroundStyle(.orange.opacity(0.7))
+                    )
             }
         }
-        .frame(height: 230) // Fixed height for analyzer
+        .frame(height: 230)
         .background(
             RoundedRectangle(cornerRadius: 8)
                 .fill(Color.black)
                 .stroke(Color.gray.opacity(0.3), lineWidth: 1)
         )
+    }
+    
+    // Prepare data points for Canvas view
+    private func prepareDataPoints(fftData: [Float], sampleRate: Double) -> [(frequency: Double, magnitude: Double)] {
+        let nyquist = sampleRate / 2.0
+        let binWidth = nyquist / Double(fftData.count)
+        
+        let minFreq = 20.0
+        let maxFreq = 20000.0
+        
+        var dataPoints: [(frequency: Double, magnitude: Double)] = []
+        
+        // Debug: show ONLY the bins in audible range
+        print("🔍 FFT DATA in AUDIBLE RANGE (20Hz - 20kHz):")
+        print("📊 Sample rate: \(sampleRate)Hz, Nyquist: \(nyquist)Hz, Bin width: \(String(format: "%.2f", binWidth))Hz")
+        print("📊 Total FFT bins: \(fftData.count)")
+        
+        var debugCount = 0
+        for (index, mag) in fftData.enumerated() {
+            let frequency = Double(index) * binWidth
+            guard frequency >= minFreq && frequency <= maxFreq else { continue }
+            
+            // Debug first 50 audible bins
+            if debugCount < 50 {
+                let dB = 20.0 * log10(max(Double(mag), 1e-12))
+                print("  Bin \(index): \(String(format: "%.1f", frequency))Hz = \(String(format: "%.4f", mag)) = \(String(format: "%.1f", dB))dB")
+                debugCount += 1
+            }
+            
+            let dB = 20.0 * log10(max(Double(mag), 1e-12))
+            let clampedDB = max(dB, -100.0)
+            
+            dataPoints.append((frequency: frequency, magnitude: clampedDB))
+        }
+        
+        print("📊 Created \(dataPoints.count) data points for visualization")
+        print("📊 Magnitude variation: min=\(String(format: "%.1f", dataPoints.map { $0.magnitude }.min() ?? 0))dB, max=\(String(format: "%.1f", dataPoints.map { $0.magnitude }.max() ?? 0))dB")
+        
+        return dataPoints
     }
 }
 
@@ -242,186 +360,241 @@ struct SpectrumGrid: View {
 struct SpectrumCurve: View {
     let bands: [FrequencyBand]
     let size: CGSize
+    let spectrum: [Float]?      // REAL FFT data from audio file
+    let sampleRate: Double?     // Actual sample rate
     
-    private func createPath() -> Path {
-        var path = Path()
-        let width = size.width - 40 // Padding
-        let height = size.height - 40
-        
-        // Create detailed frequency points for realistic spectrum analyzer look
-        // Generate many frequency points with random variations like real spectrum data
-        var frequencyPoints: [Double] = []
-        
-        let minFreq = 20.0
-        let maxFreq = 20000.0
-        let numPoints = 200 // High resolution for detailed spectrum
-        
-        for i in 0..<numPoints {
-            let logMin = log10(minFreq)
-            let logMax = log10(maxFreq)
-            let logStep = (logMax - logMin) / Double(numPoints - 1)
-            let logFreq = logMin + Double(i) * logStep
-            let frequency = pow(10, logFreq)
-            frequencyPoints.append(frequency)
-        }
-        
-        var points: [CGPoint] = []
-        
-        for (_, frequency) in frequencyPoints.enumerated() {
-            // Calculate x position using logarithmic scale
-            let logFreq = log10(frequency)
-            let logMin = log10(20.0)
-            let logMax = log10(20000.0)
-            let normalizedX = (logFreq - logMin) / (logMax - logMin)
-            let x = 20 + normalizedX * width
-            
-            // Calculate y position with realistic spectrum analyzer variations
-            let baseEnergy = getEnergyForFrequency(frequency)
-            
-            // Add realistic spectrum analyzer noise and variations
-            let randomVariation = Double.random(in: -2...3) // Minimal random variations
-            let harmonicContent = getHarmonicContent(frequency) // Harmonic peaks
-            let noiseFloor = getNoiseFloor(frequency) // Noise floor characteristics
-            
-            let totalEnergy = baseEnergy + randomVariation + harmonicContent + noiseFloor
-            let clampedEnergy = max(0, min(100, totalEnergy))
-            
-            // For mastered audio (-0.1 dB peak), center the wave in the canvas
-            // Map so that high energy content appears around the center/upper-center of analyzer
-            let centeredEnergy = 50.0 + (clampedEnergy - 50.0) * 0.6 // Center around 50% with reduced range
-            let dbValue = -15.0 + (centeredEnergy / 100.0) * 15.0 // Map to -15 to 0 dB
-            
-            // Convert dB to Y position (0 dB at top, -15 dB at bottom)
-            let normalizedY = (dbValue + 15.0) / 15.0 // 0 to 1 scale
-            let y = 20 + (1.0 - normalizedY) * (height - 40) // Inverted, with padding
-            
-            points.append(CGPoint(x: x, y: y))
-        }
-        
-        // Create jagged, realistic spectrum analyzer path
-        guard points.count > 1 else { return path }
-        
-        path.move(to: points[0])
-        
-        // Connect points with straight lines for jagged spectrum appearance
-        for i in 1..<points.count {
-            path.addLine(to: points[i])
-        }
-        
-        return path
-    }
-    
-    private func getHarmonicContent(_ frequency: Double) -> Double {
-        // Simulate harmonic peaks at musical intervals
-        let fundamentalFreqs: [Double] = [110, 220, 440, 880, 1760, 3520] // Musical harmonics
-        
-        for fundamental in fundamentalFreqs {
-            let harmonicDistance = abs(frequency - fundamental) / fundamental
-            if harmonicDistance < 0.1 { // Within 10% of harmonic
-                return Double.random(in: 5...15) // Harmonic peak
-            }
-        }
-        return 0
-    }
-    
-    private func getNoiseFloor(_ frequency: Double) -> Double {
-        // Simulate realistic noise floor characteristics for mastered audio
-        if frequency < 100 {
-            return Double.random(in: (-8)...(-2)) // Low frequency noise - higher for mastered audio
-        } else if frequency > 15000 {
-            return Double.random(in: (-10)...(-3)) // High frequency noise - higher for mastered audio
-        } else {
-            return Double.random(in: (-6)...0) // Mid frequency noise - much higher for mastered audio
-        }
-    }
-    
-    private func getEnergyForFrequency(_ frequency: Double) -> Double {
-        // Enhanced frequency mapping with smooth interpolation between bands
-        // This creates wave-like transitions between frequency bands
-        
-        // Define band boundaries and their corresponding energy values
-        let bandData: [(range: ClosedRange<Double>, energy: Double, label: String)] = [
-            (20...60, bands.first(where: { $0.label == "Sub Bass" })?.value ?? 0, "Sub Bass"),
-            (60...250, bands.first(where: { $0.label == "Bass" })?.value ?? 0, "Bass"),
-            (250...500, bands.first(where: { $0.label == "Low Mid" })?.value ?? 0, "Low Mid"),
-            (500...2000, bands.first(where: { $0.label == "Mid" })?.value ?? 0, "Mid"),
-            (2000...6000, bands.first(where: { $0.label == "High Mid" })?.value ?? 0, "High Mid"),
-            (6000...12000, bands.first(where: { $0.label == "Presence" })?.value ?? 0, "Presence"),
-            (12000...20000, bands.first(where: { $0.label == "Air" })?.value ?? 0, "Air")
-        ]
-        
-        // Find the appropriate band and create smooth interpolation
-        for i in 0..<bandData.count {
-            let band = bandData[i]
-            if band.range.contains(frequency) {
-                // Add smooth transitions at band boundaries
-                var energy = band.energy
-                
-                // Smooth transition to next band
-                if i < bandData.count - 1 {
-                    let nextBand = bandData[i + 1]
-                    let bandWidth = band.range.upperBound - band.range.lowerBound
-                    let positionInBand = frequency - band.range.lowerBound
-                    let transitionZone = bandWidth * 0.3 // 30% of band for transition
-                    
-                    if positionInBand > bandWidth - transitionZone {
-                        // We're in transition zone to next band
-                        let transitionRatio = (positionInBand - (bandWidth - transitionZone)) / transitionZone
-                        energy = band.energy + (nextBand.energy - band.energy) * transitionRatio * 0.5
-                    }
-                }
-                
-                // Add natural frequency response curve characteristics
-                let naturalCurve = getNaturalFrequencyResponse(frequency)
-                return energy + naturalCurve
-            }
-        }
-        
-        return 0 // Fallback
-    }
-    
-    private func getNaturalFrequencyResponse(_ frequency: Double) -> Double {
-        // Simulate natural frequency response characteristics for wave-like appearance
-        let logFreq = log10(frequency)
-        let logMid = log10(1000.0) // 1kHz reference
-        
-        // Create gentle frequency response curve
-        let distance = abs(logFreq - logMid)
-        let curve = cos(distance * .pi / 2) * 5.0 // Gentle curve ±5%
-        
-        return curve
-    }
+    private let minFreq = 20.0
+    private let maxFreq = 20000.0
     
     var body: some View {
         ZStack {
-            // Main spectrum waveform - jagged like real analyzer
-            createPath()
-                .stroke(
-                    LinearGradient(
-                        colors: [
-                            Color.cyan.opacity(0.9),
-                            Color.blue.opacity(0.8),
-                            Color.teal.opacity(0.7)
-                        ],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    ),
-                    style: StrokeStyle(lineWidth: 1.5, lineJoin: .miter)
-                )
-                .animation(.easeInOut(duration: 0.3), value: bands.map { $0.value })
-            
-            // Secondary spectrum line for depth (like dual channel)
-            createPath()
-                .stroke(
-                    Color.cyan.opacity(0.6),
-                    style: StrokeStyle(lineWidth: 1.0, lineJoin: .miter)
-                )
-                .offset(y: Double.random(in: -2...2)) // Slight offset for realism
-                .animation(.easeInOut(duration: 0.25), value: bands.map { $0.value })
-            
-            // No fill area - keep it clean like real spectrum analyzer
+            if let fftData = spectrum, let sr = sampleRate, fftData.count > 0 {
+                // REAL SPECTRUM from FFT using Charts
+                realSpectrumChart(fftData: fftData, sampleRate: sr)
+                
+                // Debug label
+                VStack {
+                    HStack {
+                        Text("FFT: \(fftData.count) bins @ \(Int(sr))Hz")
+                            .font(.caption2)
+                            .foregroundStyle(.green.opacity(0.7))
+                            .padding(4)
+                            .background(Color.black.opacity(0.5))
+                            .cornerRadius(4)
+                        Spacer()
+                    }
+                    Spacer()
+                }
+                .padding(20)
+            } else {
+                // Fallback: Use band averages
+                bandAveragesChart()
+                
+                // Debug label
+                VStack {
+                    HStack {
+                        Text("NO FFT DATA - using band averages")
+                            .font(.caption2)
+                            .foregroundStyle(.orange.opacity(0.7))
+                            .padding(4)
+                            .background(Color.black.opacity(0.5))
+                            .cornerRadius(4)
+                        Spacer()
+                    }
+                    Spacer()
+                }
+                .padding(20)
+            }
         }
     }
+    
+    // Chart with REAL FFT data - professional analyzer style with spikes and peaks
+    @ViewBuilder
+    private func realSpectrumChart(fftData: [Float], sampleRate: Double) -> some View {
+        let dataPoints = prepareFFTDataPoints(fftData: fftData, sampleRate: sampleRate)
+        
+        Chart(dataPoints) { point in
+            // Ultra-thin line with NO smoothing - shows every FFT bin
+            LineMark(
+                x: .value("Frequency", log10(point.frequency)),
+                y: .value("Magnitude", point.magnitude)
+            )
+            .interpolationMethod(.linear)
+            .foregroundStyle(Color.yellow)
+            .lineStyle(StrokeStyle(lineWidth: 0.5)) // Very thin line
+        }
+        .chartXScale(domain: log10(minFreq)...log10(maxFreq))
+        .chartYScale(domain: 0...1)
+        .chartXAxis {
+            AxisMarks(values: [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000].map { log10(Double($0)) }) { value in
+                if let logFreq = value.as(Double.self) {
+                    let freq = pow(10.0, logFreq)
+                    AxisValueLabel {
+                        Text(formatFrequency(freq))
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.8))
+                    }
+                }
+            }
+        }
+        .chartYAxis {
+            AxisMarks(values: [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]) { value in
+                if let val = value.as(Double.self) {
+                    AxisValueLabel {
+                        Text("\(Int(-100 + val * 100))")
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.6))
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, 20)
+        .padding(.bottom, 30)
+    }
+    
+    // Chart with band averages (fallback)
+    @ViewBuilder
+    private func bandAveragesChart() -> some View {
+        let dataPoints = prepareBandDataPoints()
+        
+        Chart {
+            ForEach(dataPoints) { point in
+                LineMark(
+                    x: .value("Frequency", point.logFrequency),
+                    y: .value("Magnitude", point.magnitude)
+                )
+                .foregroundStyle(Color.cyan.opacity(0.8))
+                .lineStyle(StrokeStyle(lineWidth: 2))
+            }
+        }
+        .chartXScale(domain: log10(minFreq)...log10(maxFreq))
+        .chartYScale(domain: 0...1)
+        .chartXAxis {
+            AxisMarks(values: [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000]) { value in
+                if let freq = value.as(Double.self) {
+                    AxisValueLabel {
+                        Text(formatFrequency(freq))
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.8))
+                    }
+                }
+            }
+        }
+        .chartYAxis(.hidden)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, 20)
+        .padding(.bottom, 30)
+    }
+    
+    // Prepare FFT data for Chart - Professional spectrum analyzer style like Waves PAZ
+    private func prepareFFTDataPoints(fftData: [Float], sampleRate: Double) -> [SpectrumDataPoint] {
+        let nyquist = sampleRate / 2.0
+        let binWidth = nyquist / Double(fftData.count)
+        
+        var dataPoints: [SpectrumDataPoint] = []
+        
+        print("📊 FFT Analysis: \(fftData.count) bins, sample rate: \(sampleRate)Hz, bin width: \(String(format: "%.2f", binWidth))Hz")
+        
+        // Debug: Print some raw FFT values to see if there's variation
+        print("📊 RAW FFT magnitudes sample (first 20 bins):")
+        for i in 0..<min(20, fftData.count) {
+            let freq = Double(i) * binWidth
+            print("   Bin \(i) (\(String(format: "%.1f", freq))Hz): \(fftData[i])")
+        }
+        
+        // Professional spectrum analyzer processing like Waves PAZ
+        // Use proper RMS magnitude calculation and dB scaling - NO artificial variation!
+        for binIndex in 0..<fftData.count {
+            let frequency = Double(binIndex) * binWidth
+            
+            // Only include audible frequencies (20Hz - 20kHz)
+            guard frequency >= minFreq && frequency <= maxFreq else { continue }
+            
+            let magnitude = fftData[binIndex]
+            
+            // Professional dB conversion: 20*log10(magnitude)
+            // Reference level: assume full scale is 0 dB (like professional analyzers)
+            let dBValue = 20.0 * log10(max(Double(magnitude), 1e-12)) // Prevent log(0)
+            
+            // Professional analyzer range: -100 dB to 0 dB for better low-level detail
+            let clampedDB = max(dBValue, -100.0)
+            
+            // Convert to 0-1 range for display (-100 dB = 0, 0 dB = 1)
+            let normalizedMagnitude = (clampedDB + 100.0) / 100.0
+            
+            dataPoints.append(SpectrumDataPoint(
+                id: binIndex,
+                frequency: frequency,
+                logFrequency: 0,  // Not used anymore
+                magnitude: max(normalizedMagnitude, 0.0) // Ensure non-negative
+            ))
+        }
+        
+        print("📊 FFT Data Points: \(dataPoints.count) bins from \(String(format: "%.0f", dataPoints.first?.frequency ?? 0))Hz to \(String(format: "%.0f", dataPoints.last?.frequency ?? 0))Hz")
+        print("📊 Magnitude range: \(String(format: "%.3f", dataPoints.map { $0.magnitude }.min() ?? 0)) to \(String(format: "%.3f", dataPoints.map { $0.magnitude }.max() ?? 0))")
+        
+        return dataPoints
+    }
+    
+    // Prepare band average data for Chart
+    private func prepareBandDataPoints() -> [SpectrumDataPoint] {
+        let bandDefinitions: [(label: String, lower: Double, upper: Double)] = [
+            ("Sub Bass", 20, 80),
+            ("Bass", 80, 250),
+            ("Low Mid", 250, 500),
+            ("Mid", 500, 2000),
+            ("High Mid", 2000, 6000),
+            ("Presence", 6000, 12000),
+            ("Air", 12000, 20000)
+        ]
+        
+        var dataPoints: [SpectrumDataPoint] = []
+        let numPoints = 200
+        
+        for i in 0..<numPoints {
+            let t = Double(i) / Double(numPoints - 1)
+            let logMin = log10(minFreq)
+            let logMax = log10(maxFreq)
+            let logFreq = logMin + t * (logMax - logMin)
+            let frequency = pow(10.0, logFreq)
+            
+            // Find band and get value
+            var bandValue = 0.0
+            for bandDef in bandDefinitions {
+                if frequency >= bandDef.lower && frequency < bandDef.upper {
+                    bandValue = bands.first(where: { $0.label == bandDef.label })?.value ?? 0
+                    break
+                }
+            }
+            
+            let energy = min(max(bandValue / 100.0, 0.0), 1.0)
+            
+            dataPoints.append(SpectrumDataPoint(
+                id: i,
+                frequency: frequency,
+                logFrequency: logFreq,
+                magnitude: energy
+            ))
+        }
+        
+        return dataPoints
+    }
+    
+    private func formatFrequency(_ freq: Double) -> String {
+        if freq >= 1000 {
+            return "\(Int(freq / 1000))k"
+        }
+        return "\(Int(freq))"
+    }
+}
+
+// Data point for Chart
+struct SpectrumDataPoint: Identifiable {
+    let id: Int
+    let frequency: Double
+    let logFrequency: Double
+    let magnitude: Double
 }
 
 // MARK: - Frequency Markers
