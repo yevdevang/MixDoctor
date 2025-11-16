@@ -13,57 +13,106 @@ struct PAZFrequencyAnalyzer: View {
     
     // PAZ-style frequency bands with proper Hz ranges
     private var frequencyBands: [FrequencyBand] {
-        [
+        // Calculate realistic frequency band energies from spectrum data
+        let subBassValue = calculateBandEnergy(start: 20, end: 80)
+        let bassValue = calculateBandEnergy(start: 80, end: 250)
+        let lowMidValue = calculateBandEnergy(start: 250, end: 500)
+        let midValue = calculateBandEnergy(start: 500, end: 2000)
+        let highMidValue = calculateBandEnergy(start: 2000, end: 6000)
+        let presenceValue = calculateBandEnergy(start: 6000, end: 12000)
+        let airValue = calculateBandEnergy(start: 12000, end: 20000)
+        
+        return [
             FrequencyBand(
                 label: "Sub Bass",
                 range: "20-80 Hz",
-                value: result.lowEndBalance * 0.25, // Estimate sub-bass as portion of low end
+                value: subBassValue,
                 color: Color(red: 0.4, green: 0.2, blue: 0.8),
                 isCritical: false
             ),
             FrequencyBand(
                 label: "Bass",
                 range: "80-250 Hz",
-                value: result.lowEndBalance * 0.75, // Main bass portion
+                value: bassValue,
                 color: Color(red: 0.5, green: 0.3, blue: 1.0),
                 isCritical: true
             ),
             FrequencyBand(
                 label: "Low Mid",
                 range: "250-500 Hz",
-                value: result.lowMidBalance,
+                value: lowMidValue,
                 color: Color(red: 1.0, green: 0.6, blue: 0.2),
                 isCritical: true
             ),
             FrequencyBand(
                 label: "Mid",
                 range: "500-2k Hz",
-                value: result.midBalance,
+                value: midValue,
                 color: Color(red: 0.9, green: 0.8, blue: 0.2),
                 isCritical: true
             ),
             FrequencyBand(
                 label: "High Mid",
                 range: "2-6 kHz",
-                value: result.highMidBalance,
+                value: highMidValue,
                 color: Color(red: 0.5, green: 0.8, blue: 0.3),
                 isCritical: true
             ),
             FrequencyBand(
                 label: "Presence",
                 range: "6-12 kHz",
-                value: result.highBalance * 0.6, // Main presence portion
+                value: presenceValue,
                 color: Color(red: 0.2, green: 0.7, blue: 0.9),
-                isCritical: true
+                isCritical: false
             ),
             FrequencyBand(
                 label: "Air",
                 range: "12-20 kHz",
-                value: result.highBalance * 0.4, // Air frequencies
+                value: airValue,
                 color: Color(red: 0.4, green: 0.5, blue: 1.0),
                 isCritical: false
             )
         ]
+    }
+    
+    // Calculate energy percentage for a frequency band from spectrum data
+    private func calculateBandEnergy(start: Double, end: Double) -> Double {
+        guard let spectrum = result.frequencySpectrum,
+              let sampleRate = result.spectrumSampleRate,
+              !spectrum.isEmpty else {
+            // Fallback to old calculation if no spectrum data
+            if start >= 20 && end <= 80 { return result.lowEndBalance * 0.25 }
+            if start >= 80 && end <= 250 { return result.lowEndBalance * 0.75 }
+            if start >= 250 && end <= 500 { return result.lowMidBalance }
+            if start >= 500 && end <= 2000 { return result.midBalance }
+            if start >= 2000 && end <= 6000 { return result.highMidBalance }
+            if start >= 6000 && end <= 12000 { return result.highBalance * 0.6 }
+            return result.highBalance * 0.4
+        }
+        
+        let nyquist = sampleRate / 2.0
+        let binWidth = nyquist / Double(spectrum.count)
+        
+        let startBin = max(0, Int(start / binWidth))
+        let endBin = min(spectrum.count - 1, Int(end / binWidth))
+        
+        guard startBin < endBin else { return 0 }
+        
+        // Calculate RMS energy for the band
+        var sumSquared: Double = 0
+        for i in startBin...endBin {
+            let spectrumValue: Float = spectrum[i]
+            let magnitudeValue: Double = Double(spectrumValue)
+            sumSquared += magnitudeValue * magnitudeValue
+        }
+        
+        let rms: Double = sqrt(sumSquared / Double(endBin - startBin + 1))
+        
+        // Convert to percentage (normalize to typical music spectrum range)
+        // Professional music typically has RMS values between 0.001 and 0.1 per band
+        let percentage = min(100, rms * 1000) // Scale factor for typical music
+        
+        return percentage
     }
     
     var body: some View {
@@ -707,19 +756,6 @@ struct FrequencyChartBar: View {
 struct FrequencyBandDetail: View {
     let band: FrequencyBand
     
-    private var statusColor: Color {
-        if !band.isCritical {
-            return band.color.opacity(0.7)
-        }
-        
-        switch band.value {
-        case 0..<15: return .orange
-        case 15..<55: return band.color
-        case 55..<75: return band.color.opacity(0.8)
-        default: return .purple.opacity(0.8)
-        }
-    }
-    
     var body: some View {
         HStack(spacing: 12) {
             // Color indicator
@@ -731,6 +767,7 @@ struct FrequencyBandDetail: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(band.label)
                     .font(.caption.weight(.medium))
+                    .foregroundStyle(band.color)
                 
                 Text(band.range)
                     .font(.caption2)
@@ -739,16 +776,16 @@ struct FrequencyBandDetail: View {
             
             Spacer()
             
-            // Value with status
+            // Value with status - all using band.color for consistency
             HStack(spacing: 4) {
                 Text(String(format: "%.1f%%", band.value))
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(statusColor)
+                    .foregroundStyle(band.color)
                 
-                // Status indicator
+                // Status indicator - same color as band
                 Image(systemName: statusIcon)
                     .font(.caption2)
-                    .foregroundStyle(statusColor)
+                    .foregroundStyle(band.color)
             }
         }
         .padding(.horizontal, 8)
@@ -760,13 +797,18 @@ struct FrequencyBandDetail: View {
     }
     
     private var statusIcon: String {
-        guard band.isCritical else { return "checkmark.circle.fill" }
+        // For non-critical bands (Sub Bass, Presence, Air), always show checkmark if value > 0
+        if !band.isCritical {
+            return band.value > 0 ? "checkmark.circle.fill" : "arrow.down.circle.fill"
+        }
         
+        // For critical bands, use professional EQ standards
+        // Good range: 15-45% (typical for well-balanced music)
         switch band.value {
-        case 0..<15: return "arrow.down.circle.fill"
-        case 15..<55: return "checkmark.circle.fill"
-        case 55..<75: return "exclamationmark.triangle.fill"
-        default: return "xmark.circle.fill"
+        case 0..<10: return "arrow.down.circle.fill"  // Too low
+        case 10..<50: return "checkmark.circle.fill"  // Good range
+        case 50..<70: return "exclamationmark.triangle.fill"  // High but acceptable
+        default: return "exclamationmark.triangle.fill"  // Too high
         }
     }
 }
