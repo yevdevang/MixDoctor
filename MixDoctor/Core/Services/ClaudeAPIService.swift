@@ -123,11 +123,21 @@ class ClaudeAPIService {
         }
         
         print("✅ Claude API request successful, parsing response...")
+        
+        // 🔍 DEBUG: Print the raw JSON response
+        if let jsonString = String(data: data, encoding: .utf8) {
+            print("📦 RAW JSON RESPONSE:")
+            print(jsonString)
+            print("📦 END RAW JSON\n")
+        }
+        
         return try parseClaudeResponse(data)
     }
     
     private func determineModel(isProUser: Bool) -> String {
-        return isProUser ? "claude-sonnet-4-5" : "claude-haiku-4-5"
+        // Using official Anthropic Claude 4.5 models (Nov 2025)
+        // Pro users get Sonnet (smartest), free users get Haiku (fastest)
+        return isProUser ? "claude-sonnet-4-5-20250929" : "claude-haiku-4-5-20251001"
     }
     
     private func createAnalysisPrompt(from metrics: AudioMetricsForClaude) -> String {
@@ -323,13 +333,14 @@ class ClaudeAPIService {
         • High (8-20kHz): \(String(format: "%.1f", metrics.high))%
           - EXCELLENT MASTER: 6-16% (air and sparkle)
           - GOOD MASTER: 4-20% (brightness and detail)
-          - ACCEPTABLE: 3-24% (sufficient air)
-          - PROBLEMATIC: >28% (harsh/sibilant) or <2% (dark master)
+          - ACCEPTABLE: 1-24% (sufficient air) ✅ Dark/warm masters (1-3%) are a VALID CREATIVE CHOICE
+          - PROBLEMATIC: >28% (harsh/sibilant) ONLY - Low highs are NOT a problem
 
         📊 MASTERED FREQUENCY STANDARDS BY GENRE:
-        - Pop/Rock Master: Low 15-25%, LowMid 20-28%, Mid 22-32%, HighMid 12-20%, High 8-16%
-        - Electronic Master: Low 18-28%, LowMid 16-26%, Mid 18-28%, HighMid 14-24%, High 10-18%
-        - Hip-Hop Master: Low 20-30%, LowMid 18-28%, Mid 20-30%, HighMid 10-20%, High 6-14%
+        - Pop/Rock Master: Low 15-25%, LowMid 20-28%, Mid 22-32%, HighMid 12-20%, High 6-16%
+        - Electronic Master: Low 18-35%, LowMid 16-26%, Mid 18-28%, HighMid 14-24%, High 8-18%
+        - Hip-Hop Master: Low 25-40%, LowMid 18-28%, Mid 20-30%, HighMid 8-18%, High 4-12%
+        - Dark/Alternative Master: Low 20-40%, LowMid 15-28%, Mid 22-35%, HighMid 6-16%, High 1-8% ✅ VALID STYLE
         - Classical Master: Low 10-18%, LowMid 20-28%, Mid 28-40%, HighMid 8-16%, High 4-10%
         - Jazz Master: Low 12-22%, LowMid 22-30%, Mid 25-35%, HighMid 10-18%, High 6-12%
 
@@ -352,50 +363,59 @@ class ClaudeAPIService {
         • Loudness <-23 LUFS = Too quiet (Score -5)
         • Loudness >-8 LUFS = Too loud/aggressive (Score -5)
 
-        MASTERED TRACK SCORING:
-        • Start at 80 points (baseline mastered track - higher than before)
-        • PENALTIES for mastered track issues:
-          - Peak >0dB: -15 points (critical for masters)
-          - True Peak >-0.1: -10 points
-          - Dynamic Range <4dB: -10 points (over-limited)
-          - Phase Coherence <50%: -10 points (serious issue)
-          - Phase Coherence 50-60%: -5 points (minor issue)
-          - Extreme bass dominance (>85% combined low): -5 points (was too harsh)
-          - Clipping detected: -10 points
-        • BONUSES for mastered excellence:
-          - Peak level -0.1 to -1dB: +5 points (perfect mastering)
-          - Loudness -8 to -23 LUFS: +3 points (professional range)
-          - Dynamic Range 6-15dB: +5 points (good dynamics preserved)
-          - Excellent phase coherence (>85%): +5 points
-          - Genre-appropriate frequency response: +5 points (NEW)
-          - Professional dark/warm masters (like Abbey Road): +3 points for intentional character
-
-        Be REALISTIC for MASTERED TRACKS:
-        • IMPORTANT: Dark/warm masters are a PROFESSIONAL CHOICE, not a flaw
-        • ABBEY ROAD/VINTAGE STYLE: Low high frequencies (0.5-3%) is ACCEPTABLE for this style
-        • ELECTRONIC/HIP-HOP: Bass-heavy (40-70% low end) is normal and acceptable
-        • POP: Balanced but can vary (20-40% lows, 3-12% highs)
-        • Focus on TECHNICAL QUALITY: no clipping, good phase coherence, appropriate dynamics
-        • Genre detection should INFORM scoring, not penalize creative choices
-        • For ELECTRONIC: Bass dominance is expected and should not be heavily penalized
+        🎯 SCORING RULES - CALCULATE CAREFULLY:
         
-        🚨 SIMPLE SCORING SYSTEM:
-        • Professional Masters (Green Day, major labels): 85-95
-        • Good Commercial Quality: 75-84  
-        • Amateur but Good: 65-74
-        • Needs Work: 50-64
-        • Poor Quality: Below 50
+        Start with base score and adjust:
+        
+        BASE SCORE = 85 (mastered track baseline)
+        
+        TECHNICAL BONUSES (add points):
+        • Peak -0.1 to -1.0dB = +10 points (professional limiting)
+        • Peak -1.0 to -3.0dB = +5 points (good headroom management)
+        • DR 12-15dB = +10 points (excellent dynamics)
+        • DR 8-12dB = +5 points (good dynamics)
+        • DR 6-8dB = +0 points (acceptable for master)
+        • Loudness -14 to -18 LUFS = +5 points (streaming optimized)
+        • Phase >80% = +5 points (excellent phase)
+        • No clipping detected = +5 points
+        
+        TECHNICAL PENALTIES (subtract points):
+        • Peak >0dB = -20 points (clipping)
+        • True Peak >-0.1dBFS = -10 points (clipping risk)
+        • DR <4dB = -15 points (over-limited)
+        • DR 4-6dB = -5 points (heavily limited)
+        • Loudness >-8 LUFS = -10 points (too loud)
+        • Loudness <-23 LUFS = -5 points (too quiet)
+        • Phase <50% = -10 points (phase problems)
+        • Single frequency band >60% = -10 points (severe imbalance)
+        
+        DO NOT PENALIZE:
+        • Frequency balance is artistic choice (unless extreme >60% in one band)
+        • Dark/warm sound (low highs 1-5%) is VALID and PROFESSIONAL
+        • Phase 50-100% is all acceptable
+        
+        EXAMPLE CALCULATION:
+        Professional track: Peak -0.2dB, DR 12dB, Loudness -16 LUFS, Phase 87%
+        = 85 (base) +10 (peak) +10 (DR) +5 (loudness) +5 (phase) +5 (no clip) = 120 → cap at 100
+        
+        YOUR CALCULATION:
+        Base: 85
+        Adjustments: [list each bonus/penalty you're applying]
+        FINAL SCORE: [calculate total, cap at 100]
 
-        🚨 CONSISTENCY RULES:
-        • If you call it "Good Commercial Master" → Score 75+
-        • If you call it "Excellent" → Score 85+
-        • If you call it "Professional" → Score 80+
-        • NEVER contradict yourself between analysis and conclusion
-
+        📝 RESPONSE FORMAT RULES:
+        • DO NOT use ## headers or numbered lists (1. 2. 3.)
+        • Keep response concise and natural
+        • If score is 85+ (excellent): 2-3 sentences maximum, focus on positive highlights
+        • If score is 70-84 (good): Brief analysis with 1-2 minor suggestions
+        • If score is below 70: Detailed analysis with specific improvements needed
+        
         Format response as:
-        SCORE: [realistic 0-100 score - be generous for professional work]
-        ANALYSIS: [2-3 sentences about quality - be CONSISTENT with score]
-        RECOMMENDATIONS: [Brief feedback that MATCHES your analysis tone]
+        SCORE: [realistic 0-100 score]
+        
+        ANALYSIS: [Natural paragraph without formatting - be concise if score is high]
+        
+        RECOMMENDATIONS: [Brief bullet points only if score below 85, otherwise skip]
         """
     }
     
@@ -537,23 +557,21 @@ class ClaudeAPIService {
         for line in lines {
             let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
             
-            // Check for SCORE: with or without asterisks/formatting
-            if trimmedLine.contains("SCORE:") {
-                // currentSection = "score"  // 🔍 COMMENTED OUT
-                let scoreText = trimmedLine.replacingOccurrences(of: "*", with: "")
-                    .replacingOccurrences(of: "SCORE:", with: "")
+            // ✅ FIXED: Only parse score from lines that START with "SCORE:" (with optional asterisks)
+            let cleanedLine = trimmedLine.replacingOccurrences(of: "*", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if cleanedLine.hasPrefix("SCORE:") {
+                let scoreText = cleanedLine.replacingOccurrences(of: "SCORE:", with: "")
                     .trimmingCharacters(in: .whitespacesAndNewlines)
-                print("🔍 Parsing score: '\(scoreText)'")
+                print("🔍 Found SCORE line: '\(scoreText)'")
                 
-                // Try to extract just the number (handle cases like "25 points", "25/100", etc.)
+                // Extract the first number from the score line (handle "85", "85 points", "85/100", etc.)
                 let numbers = scoreText.components(separatedBy: CharacterSet.decimalDigits.inverted).filter { !$0.isEmpty }
-                if let firstNumber = numbers.first {
-                    score = Int(firstNumber)
+                if let firstNumber = numbers.first, let parsedScore = Int(firstNumber) {
+                    score = parsedScore
                     print("🔍 Extracted score: \(score!)")
                 } else {
-                    score = Int(scoreText) // fallback to original parsing
+                    print("⚠️ Could not parse score from: '\(scoreText)'")
                 }
-                print("🔍 Parsed score: \(score ?? -1)")
             }
             /* 🔍 COMMENTED OUT - summary and recommendations parsing
             else if trimmedLine.hasPrefix("ANALYSIS:") {
@@ -582,11 +600,12 @@ class ClaudeAPIService {
             */
         }
         
-        // 🔍 COMMENTED OUT - fallback parsing logic
-        // If no structured format found, use the raw text as analysis
-        // if analysis.isEmpty && recommendations.isEmpty {
-        //     analysis = textContent.trimmingCharacters(in: .whitespacesAndNewlines)
-        // }
+        // 🔍 DEBUG: Print what we extracted
+        print("\n🔍 CLAUDE RESPONSE PARSING:")
+        print("   Extracted Score: \(score ?? -1)")
+        print("   Full Response Text Length: \(textContent.count) chars")
+        print("   Full Response Preview: \(String(textContent.prefix(500)))")
+        print("🔍 END PARSING\n")
         
         // Determine if ready for mastering: few or no recommendations AND good score
         // let isReadyForMastering = recommendations.count <= 2 && (score ?? 0) >= 75  // 🔍 COMMENTED OUT - using simple score check instead

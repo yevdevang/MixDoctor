@@ -55,7 +55,11 @@ final class AnalysisResultPersistence {
             "aiSummary": result.aiSummary as Any,
             "aiRecommendations": result.aiRecommendations,
             "claudeScore": result.claudeScore as Any,
-            "isReadyForMastering": result.isReadyForMastering
+            "isReadyForMastering": result.isReadyForMastering,
+            // FFT spectrum data for visualization
+            "frequencySpectrum": result.frequencySpectrum as Any,
+            "spectrumSampleRate": result.spectrumSampleRate as Any,
+            "rmsLevel": result.rmsLevel
         ]
         
         // Convert to JSON
@@ -140,7 +144,17 @@ final class AnalysisResultPersistence {
             result.claudeScore = data["claudeScore"] as? Int
             result.isReadyForMastering = data["isReadyForMastering"] as? Bool ?? false
             
+            // Load FFT spectrum data
+            if let spectrumArray = data["frequencySpectrum"] as? [Double] {
+                result.frequencySpectrum = spectrumArray.map { Float($0) }
+            }
+            result.spectrumSampleRate = data["spectrumSampleRate"] as? Double
+            result.rmsLevel = data["rmsLevel"] as? Double ?? 0
+            
             print("✅ Loaded analysis result for: \(audioFileName)")
+            if result.frequencySpectrum != nil {
+                print("   📊 FFT spectrum data loaded: \(result.frequencySpectrum?.count ?? 0) bins")
+            }
             return result
             
         } catch {

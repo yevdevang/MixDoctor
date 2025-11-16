@@ -164,9 +164,25 @@ public final class AnalysisResult {
     var claudeScore: Int?
     var isReadyForMastering: Bool
     
+    // Mixing Status
+    var isProfessionallyMixed: Bool  // True if mixed, False if unmixed recording
+    
     // Full FFT Spectrum Data for professional analyzer visualization
     var frequencySpectrum: [Float]?  // Full FFT magnitudes for spectrum display
     var spectrumSampleRate: Double?  // Sample rate used for FFT
+    
+    // Unmixed Detection Result (stored as JSON data)
+    @Transient
+    var unmixedDetection: UnmixedDetectionResult? {
+        get {
+            guard let data = unmixedDetectionData else { return nil }
+            return try? JSONDecoder().decode(UnmixedDetectionResult.self, from: data)
+        }
+        set {
+            unmixedDetectionData = try? JSONEncoder().encode(newValue)
+        }
+    }
+    var unmixedDetectionData: Data?  // Backing storage
 
     init(audioFile: AudioFile?, analysisVersion: String = "1.0") {
         self.id = UUID()
@@ -216,6 +232,7 @@ public final class AnalysisResult {
         self.aiRecommendations = []
         self.claudeScore = nil
         self.isReadyForMastering = false
+        self.isProfessionallyMixed = true  // Assume mixed until proven otherwise
         
         // Initialize spectrum data
         self.frequencySpectrum = nil
@@ -229,11 +246,68 @@ extension AnalysisResult {
     }
     
     /// Overall frequency balance score (0-100)
-    /// Calculated as average of all frequency bands
+    /// Evaluates how well-balanced the frequency spectrum is
+    /// Higher score = better balance across all bands
     var frequencyBalanceScore: Double {
-        let bands = [lowEndBalance, midBalance, highBalance]
-        let average = bands.reduce(0, +) / Double(bands.count)
-        return average
+        let bands = [lowEndBalance, lowMidBalance, midBalance, highMidBalance, highBalance]
+        
+        // If all bands are 0, data hasn't been analyzed yet
+        let total = bands.reduce(0, +)
+        if total < 0.1 {
+            return 0.0
+        }
+        
+        // Calculate ideal balance (each band should have reasonable energy)
+        // Professional mixes typically have:
+        // Low End: 15-35%, Low Mid: 15-30%, Mid: 20-40%, High Mid: 15-30%, High: 10-25%
+        let idealRanges: [(min: Double, max: Double, weight: Double)] = [
+            (15, 35, 1.2),  // Low End - weighted higher (critical for foundation)
+            (15, 30, 1.0),  // Low Mid
+            (20, 40, 1.5),  // Mid - weighted highest (most important for clarity)
+            (15, 30, 1.0),  // High Mid
+            (10, 25, 0.8)   // High - slightly less critical
+        ]
+        
+        var totalScore = 0.0
+        var totalWeight = 0.0
+        
+        for (index, value) in bands.enumerated() {
+            let (minIdeal, maxIdeal, weight) = idealRanges[index]
+            
+            // Calculate how well this band fits the ideal range
+            let bandScore: Double
+            if value >= minIdeal && value <= maxIdeal {
+                // Perfect - in ideal range
+                bandScore = 100.0
+            } else if value < minIdeal {
+                // Too low - score based on how far below minimum
+                let deficit = minIdeal - value
+                bandScore = max(0, 100 - (deficit * 3)) // Penalty of 3 points per % below
+            } else {
+                // Too high - score based on how far above maximum
+                let excess = value - maxIdeal
+                bandScore = max(0, 100 - (excess * 2)) // Penalty of 2 points per % above
+            }
+            
+            totalScore += bandScore * weight
+            totalWeight += weight
+        }
+        
+        // Calculate weighted average
+        let balanceScore = totalScore / totalWeight
+        
+        // Apply penalty for extreme imbalances (one band dominating)
+        let maxBand = bands.max() ?? 0
+        let minBand = bands.min() ?? 0
+        let imbalanceRatio = maxBand > 0 ? (maxBand - minBand) / maxBand : 0
+        
+        // If one band is more than 3x another, apply additional penalty
+        if imbalanceRatio > 0.66 {
+            let imbalancePenalty = (imbalanceRatio - 0.66) * 50 // Up to 17 point penalty
+            return max(0, balanceScore - imbalancePenalty)
+        }
+        
+        return balanceScore
     }
     
     var hasAnyIssues: Bool {

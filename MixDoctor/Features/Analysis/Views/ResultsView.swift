@@ -163,17 +163,24 @@ struct ResultsView: View {
             }
             .frame(maxWidth: .infinity, alignment: .center)
 
-            // Overall Score Card
-            overallScoreCard(result: result)
+            // Overall Score Card - ONLY show for professionally mixed audio
+            if result.isProfessionallyMixed {
+                overallScoreCard(result: result)
+            }
+            
+            // Unmixed Detection Warning - ONLY show for unmixed audio
+            if !result.isProfessionallyMixed, let unmixedDetection = result.unmixedDetection {
+                unmixedDetectionCard(detection: unmixedDetection)
+            }
 
             // Individual Metrics
             VStack(spacing: 16) {
                 stereoWidthCard(result: result)
                 phaseCoherenceCard(result: result)
+                monoCompatibilityCard(result: result)
                 // PAZ-style frequency analyzer
                 PAZFrequencyAnalyzer(result: result)
                 dynamicRangeCard(result: result)
-                loudnessCard(result: result)
             }
             
             // Issues Section
@@ -211,6 +218,98 @@ struct ResultsView: View {
             actionButtons(result: result)
         }
         .padding()
+    }
+
+    // MARK: - Unmixed Detection Card
+    
+    private func unmixedDetectionCard(detection: UnmixedDetectionResult) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Header with icon based on detection result
+            HStack {
+                Image(systemName: detection.isLikelyUnmixed ? "exclamationmark.triangle.fill" : "checkmark.shield.fill")
+                    .foregroundStyle(detection.isLikelyUnmixed ? .orange : .green)
+                    .font(.title2)
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(detection.isLikelyUnmixed ? "Unmixed Audio Detected" : "Professional Mix")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                    
+                    Text("Mixing Quality: \(Int(detection.mixingQualityScore))%")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                
+                Spacer()
+            }
+            
+            // Quality bar
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    // Background
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.gray.opacity(0.2))
+                        .frame(height: 8)
+                    
+                    // Fill based on quality
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(qualityColor(detection.mixingQualityScore))
+                        .frame(width: geometry.size.width * CGFloat(detection.mixingQualityScore / 100.0), height: 8)
+                }
+            }
+            .frame(height: 8)
+            
+            // Detection criteria that failed
+            if detection.isLikelyUnmixed && !detection.detectionCriteria.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Detected Issues")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.secondary)
+                    
+                    ForEach(Array(detection.detectionCriteria.filter { $0.value }.keys.sorted()), id: \.self) { criterion in
+                        HStack(spacing: 8) {
+                            Image(systemName: "circle.fill")
+                                .font(.system(size: 6))
+                                .foregroundStyle(.orange)
+                            
+                            Text(criterion)
+                                .font(.caption)
+                                .foregroundStyle(.primary)
+                        }
+                    }
+                }
+            }
+            
+            // Main recommendation
+            if !detection.recommendations.isEmpty {
+                Text(detection.recommendations.first ?? "")
+                    .font(.callout)
+                    .foregroundStyle(detection.isLikelyUnmixed ? .orange : .green)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill((detection.isLikelyUnmixed ? Color.orange : Color.green).opacity(0.1))
+                    )
+            }
+        }
+        .padding()
+        .background(Color.backgroundSecondary)
+        .cornerRadius(AppConstants.cornerRadius)
+    }
+    
+    private func qualityColor(_ score: Double) -> Color {
+        switch score {
+        case 80...100:
+            return .green
+        case 60..<80:
+            return .yellow
+        case 40..<60:
+            return .orange
+        default:
+            return .red
+        }
     }
 
     // MARK: - Modern Score Card
@@ -287,22 +386,25 @@ struct ResultsView: View {
         // Calculate issues based on actual metrics and score instead of boolean flags
         let issues = calculateActualIssues(result: result)
         let issueCount = issues.count
+        
+        // If score is below 70, show quality message instead of "no issues"
+        let showQualityMessage = result.overallScore > 0 && result.overallScore < 70 && issueCount == 0
 
         return HStack(spacing: 8) {
-            Image(systemName: issueCount == 0 ? "checkmark.shield.fill" : "exclamationmark.triangle.fill")
-                .foregroundColor(issueCount == 0 ? .green : .orange)
+            Image(systemName: showQualityMessage ? "info.circle.fill" : (issueCount == 0 ? "checkmark.shield.fill" : "exclamationmark.triangle.fill"))
+                .foregroundColor(showQualityMessage ? .orange : (issueCount == 0 ? .green : .orange))
                 .font(.title3)
 
-            Text(issueCount == 0 ? "No issues detected" : "\(issueCount) issue\(issueCount == 1 ? "" : "s") detected")
+            Text(showQualityMessage ? "Could be improved - check recommendations" : (issueCount == 0 ? "No critical issues detected" : "\(issueCount) issue\(issueCount == 1 ? "" : "s") detected"))
                 .font(.subheadline)
                 .fontWeight(.medium)
-                .foregroundStyle(issueCount == 0 ? .green : .orange)
+                .foregroundStyle(showQualityMessage ? .orange : (issueCount == 0 ? .green : .orange))
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 20)
-                .fill((issueCount == 0 ? Color.green : Color.orange).opacity(0.1))
+                .fill((showQualityMessage || issueCount > 0 ? Color.orange : Color.green).opacity(0.1))
         )
     }
     
@@ -315,72 +417,112 @@ struct ResultsView: View {
             issues.append("Clipping detected")
         }
         
-        // Only flag issues for scores below 60 (even more lenient)
-        if result.overallScore < 60 {
-            // Peak levels - be more lenient for professional masters
-            if result.peakLevel > -0.1 {
-                issues.append("Peak levels too high")
+        // Only flag serious issues - be very conservative
+        // Peak levels - only flag if actually clipping or dangerously close
+        // Modern masters typically go to -0.1 dB, so only flag if > 0
+        if result.peakLevel > 0.0 {
+            issues.append("Clipping detected")
+        }
+        
+        // Phase issues - only flag poor phase coherence
+        if result.phaseCoherence < 0.25 {
+            issues.append("Poor phase coherence")
+        }
+        
+        // Stereo width - only flag extreme issues
+        if result.stereoWidthScore < 10 {
+            issues.append("Mono or very narrow stereo")
+        } else if result.stereoWidthScore > 98 {
+            issues.append("Excessive stereo width")
+        }
+        
+        // Frequency balance - use FFT data if available, otherwise use old values
+        let hasFFTData = result.frequencySpectrum != nil && !(result.frequencySpectrum?.isEmpty ?? true)
+        
+        if hasFFTData {
+            // Use FFT-based calculation for accurate high frequency detection
+            let highFreqEnergy = calculateHighFrequencyEnergy(result: result)
+            
+            // Only flag if truly no high frequencies (both presence and air < 0.5%)
+            if highFreqEnergy < 0.5 {
+                issues.append("Severe high frequency loss")
+            }
+        } else {
+            // Fallback to old values
+            let lowBalance = result.lowEndBalance
+            let midBalance = result.midBalance  
+            let highBalance = result.highBalance
+            
+            if lowBalance > 75 {
+                issues.append("Excessive bass content")
             }
             
-            // Phase issues (critical for stereo) - much more lenient
-            if result.phaseCoherence < 0.4 {
-                issues.append("Phase coherence issues")
+            if midBalance < 8 {
+                issues.append("Severe mid deficiency")
             }
             
-            // Stereo width issues (more lenient)
-            if result.stereoWidthScore < 20 || result.stereoWidthScore > 95 {
-                issues.append("Stereo width issues")
-            }
-            
-            // Frequency balance issues - only flag extreme cases
-            if result.hasFrequencyImbalance {
-                let lowBalance = result.lowEndBalance
-                let midBalance = result.midBalance  
-                let highBalance = result.highBalance
-                
-                if lowBalance > 70 {
-                    issues.append("Excessive low frequency content")
-                }
-                
-                if midBalance < 12 {
-                    issues.append("Mid frequency deficiency")
-                }
-                
-                if highBalance < 3 {
-                    issues.append("High frequency deficiency")
-                }
-            }
-            
-            // Dynamic range issues - very lenient for modern masters
-            if result.dynamicRange < 4 {
-                issues.append("Limited dynamic range")
-            }
-            
-            // Loudness issues - very wide acceptable range
-            if result.loudnessLUFS > -8 || result.loudnessLUFS < -30 {
-                issues.append("Loudness issues")
-            }
-            
-            // Instrument balance issues
-            if result.hasInstrumentBalanceIssues {
-                issues.append("Instrument balance issues")
-            }
-        } else if result.overallScore < 55 {
-            // For very low scores, only flag the most critical issues
-            if result.phaseCoherence < 0.2 {
-                issues.append("Critical phase issues")
-            }
-            
-            if result.peakLevel > 0 {
-                issues.append("Dangerous peak levels")
-            }
-            
-            if result.dynamicRange < 2 {
-                issues.append("Severely compressed")
+            if highBalance < 0.5 {
+                issues.append("Severe high frequency loss")
             }
         }
         
+        // Dynamic range - only flag severely compressed
+        if result.dynamicRange < 2 {
+            issues.append("Severely over-compressed")
+        }
+        
+        // Loudness - only flag dangerous levels
+        if result.loudnessLUFS > -5 {
+            issues.append("Dangerously loud")
+        } else if result.loudnessLUFS < -40 {
+            issues.append("Very quiet mix")
+        }
+        
         return issues
+    }
+    
+    // Helper to calculate high frequency energy from FFT spectrum
+    private func calculateHighFrequencyEnergy(result: AnalysisResult) -> Double {
+        guard let spectrum = result.frequencySpectrum,
+              let sampleRate = result.spectrumSampleRate,
+              !spectrum.isEmpty else {
+            return result.highBalance
+        }
+        
+        let nyquist = sampleRate / 2.0
+        let binWidth = nyquist / Double(spectrum.count)
+        
+        // Calculate presence (6-12 kHz) + air (12-20 kHz)
+        let presenceStart = Int(6000.0 / binWidth)
+        let presenceEnd = Int(12000.0 / binWidth)
+        let airStart = Int(12000.0 / binWidth)
+        let airEnd = min(spectrum.count - 1, Int(20000.0 / binWidth))
+        
+        var presenceEnergy: Double = 0
+        var airEnergy: Double = 0
+        
+        // Calculate presence energy
+        if presenceStart < presenceEnd {
+            var sum: Double = 0
+            for i in presenceStart...presenceEnd {
+                let val = Double(spectrum[i])
+                sum += val * val
+            }
+            presenceEnergy = sqrt(sum / Double(presenceEnd - presenceStart + 1)) * 1000
+        }
+        
+        // Calculate air energy
+        if airStart < airEnd {
+            var sum: Double = 0
+            for i in airStart...airEnd {
+                let val = Double(spectrum[i])
+                sum += val * val
+            }
+            airEnergy = sqrt(sum / Double(airEnd - airStart + 1)) * 1000
+        }
+        
+        // Return average of presence and air
+        return (presenceEnergy + airEnergy) / 2.0
     }
 
     // MARK: - Modern Issues Section
@@ -826,35 +968,34 @@ struct ResultsView: View {
 
     // MARK: - Helper Functions
     
-    // Clean all markdown formatting from text
+    // Clean all markdown formatting and unwanted symbols from text
     private func cleanMarkdownText(_ text: String) -> String {
-        let originalText = text
-        let cleanedText = text
-            // Remove markdown headers (##, ###, ####, etc.) - more comprehensive
-            .replacingOccurrences(of: "^\\s*#{1,6}\\s+.*$", with: "", options: .regularExpression)
-            .replacingOccurrences(of: "#{1,6}\\s+", with: "", options: .regularExpression)
+        var cleanedText = text
+            // Remove all emojis and special unicode symbols (charts, icons, etc.)
+            .replacingOccurrences(of: "📊|📈|📉|🎵|🎶|🎚️|🎛️|✅|❌|⚠️|🔧|💡|📌|🔍|⭐|🌟|✨|🎯|📝|🎤|🎸|🥁|🎹", with: "", options: .regularExpression)
+            // Remove pipe symbols used for formatting
+            .replacingOccurrences(of: "\\s*\\|\\s*", with: " ", options: .regularExpression)
+            // Remove markdown headers (##, ###, ####, etc.) - applies per line
+            .replacingOccurrences(of: "#{1,6}\\s*", with: "", options: .regularExpression)
             // Remove bold formatting (**text**)
             .replacingOccurrences(of: "\\*\\*(.*?)\\*\\*", with: "$1", options: .regularExpression)
             // Remove italic formatting (*text*)
             .replacingOccurrences(of: "(?<!\\*)\\*([^*]+)\\*(?!\\*)", with: "$1", options: .regularExpression)
             // Remove horizontal rules (---, ***, ___)
-            .replacingOccurrences(of: "^\\s*[-*_]{3,}\\s*$", with: "", options: .regularExpression)
-            // Remove leading asterisks and dashes
-            .replacingOccurrences(of: "^\\s*[-*]\\s+", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "^\\s*[-*_]{3,}\\s*$", with: "", options: [.regularExpression, .anchored])
+            // Remove numbered list format at start of lines (1. 2. 3. etc.)
+            .replacingOccurrences(of: "^\\s*\\d+\\.\\s+", with: "", options: .regularExpression)
+            // Remove leading asterisks, dashes, bullets
+            .replacingOccurrences(of: "^\\s*[•\\-*]+\\s+", with: "", options: .regularExpression)
+            // Remove "ANALYSIS:" prefix
+            .replacingOccurrences(of: "ANALYSIS:\\s*", with: "", options: .regularExpression)
+            // Remove multiple consecutive spaces
+            .replacingOccurrences(of: "[ \\t]{2,}", with: " ", options: .regularExpression)
             // Remove multiple consecutive newlines
             .replacingOccurrences(of: "\\n\\s*\\n\\s*\\n+", with: "\n\n", options: .regularExpression)
-            // Remove excessive whitespace
-            .replacingOccurrences(of: "[ \\t]{2,}", with: " ", options: .regularExpression)
+            // Clean up bonus/penalty format: "| Bonus | value |" -> "Bonus: value"
+            .replacingOccurrences(of: "(\\w+)\\s+(Bonus|Penalty)\\s+([-+]?\\d+)", with: "$1 $2: $3", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        // Debug output to see if cleaning is working
-        if originalText != cleanedText {
-            print("🧹 Markdown cleaning applied:")
-            print("   Original length: \(originalText.count)")
-            print("   Cleaned length: \(cleanedText.count)")
-            print("   Original: \(String(originalText.prefix(100)))...")
-            print("   Cleaned: \(String(cleanedText.prefix(100)))...")
-        }
         
         return cleanedText
     }
@@ -982,23 +1123,20 @@ struct ResultsView: View {
         var strengths: [String] = []
         
         for line in lines {
-            let cleanLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            let lowercased = cleanLine.lowercased()
+            let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmedLine.isEmpty { continue }
             
-            // Skip empty lines
-            if cleanLine.isEmpty { continue }
+            let cleanedLine = cleanMarkdownText(trimmedLine)
+            if cleanedLine.isEmpty { continue }
+            
+            let lowercased = cleanedLine.lowercased()
             
             // Look for strength indicators
-            if lowercased.contains("✅") {
-                strengths.append(cleanLine)
-            } else if lowercased.contains("excellent") || lowercased.contains("perfect") {
-                strengths.append(cleanLine)
-            } else if lowercased.contains("good") && (lowercased.contains("stereo") || lowercased.contains("dynamic") || lowercased.contains("control")) {
-                strengths.append(cleanLine)
-            } else if lowercased.contains("conservative") && lowercased.contains("ready") {
-                strengths.append(cleanLine)
-            } else if lowercased.contains("no clipping") || lowercased.contains("no distortion") {
-                strengths.append(cleanLine)
+            if lowercased.contains("excellent") || lowercased.contains("perfect") ||
+               lowercased.contains("good") || lowercased.contains("healthy") ||
+               lowercased.contains("professional") || lowercased.contains("conservative") ||
+               lowercased.contains("bonus") || lowercased.contains("no clipping") {
+                strengths.append(cleanedLine)
             }
         }
         
@@ -1035,6 +1173,20 @@ struct ResultsView: View {
             unit: "%",
             status: result.hasPhaseIssues ? .error : .good,
             description: phaseDescription(result.phaseCoherence)
+        )
+    }
+    
+    private func monoCompatibilityCard(result: AnalysisResult) -> some View {
+        let compatibilityPercent = result.monoCompatibility * 100
+        let status: MetricCard.Status = compatibilityPercent >= 80 ? .good : compatibilityPercent >= 60 ? .warning : .error
+        
+        return MetricCard(
+            title: "Mono Compatibility",
+            icon: "speaker.wave.1",
+            value: compatibilityPercent,
+            unit: "%",
+            status: status,
+            description: monoCompatibilityDescription(result.monoCompatibility)
         )
     }
 
@@ -1088,63 +1240,123 @@ struct ResultsView: View {
     }
 
     private func dynamicRangeCard(result: AnalysisResult) -> some View {
-        MetricCard(
-            title: "Dynamic Range",
-            icon: "waveform",
-            value: result.dynamicRange,
-            unit: "dB",
-            status: result.hasDynamicRangeIssues ? .warning : .good,
-            description: dynamicRangeDescription(result.dynamicRange)
-        )
-    }
-
-    private func loudnessCard(result: AnalysisResult) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 16) {
+            // Header
             HStack {
-                Image(systemName: "speaker.wave.3.fill")
+                Image(systemName: "waveform")
                     .foregroundStyle(.purple)
+                    .font(.title2)
 
-                Text("Loudness")
+                Text("Dynamic Range")
                     .font(.headline)
 
                 Spacer()
+
+                Image(systemName: result.hasDynamicRangeIssues ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                    .foregroundStyle(result.hasDynamicRangeIssues ? .orange : .green)
             }
 
-            HStack(spacing: 20) {
+            // Overall Score
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(String(format: "%.1f", result.dynamicRange))
+                    .font(.system(size: 28, weight: .bold))
+
+                Text("dB")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                
+                Spacer()
+                
+                Text(dynamicRangeDescription(result.dynamicRange))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            
+            // Peak, RMS, Loudness Metrics
+            HStack(spacing: 12) {
+                // Peak
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Integrated")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    Text(String(format: "%.1f LUFS", result.loudnessLUFS))
-                        .font(.title3)
-                        .fontWeight(.semibold)
+                    Label("Peak", systemImage: "waveform.path")
+                        .font(.caption.bold())
+                        .foregroundStyle(result.hasClipping ? .red : result.peakLevel > -1.0 ? .orange : .green)
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text(String(format: "%.1f", result.peakLevel))
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(.primary)
+                        Text("dB")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
-
-                Divider()
-
+                .padding(.vertical, 10)
+                .padding(.horizontal, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.primary.opacity(0.05))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke((result.hasClipping ? Color.red : result.peakLevel > -1.0 ? Color.orange : Color.green).opacity(0.25), lineWidth: 1)
+                )
+                
+                // RMS
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Peak")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    Text(String(format: "%.1f dBFS", result.peakLevel))
-                        .font(.title3)
-                        .fontWeight(.semibold)
-                        .foregroundColor(result.peakLevel > -0.1 ? .red : .primary)
+                    Label("RMS", systemImage: "dot.radiowaves.left.and.right")
+                        .font(.caption.bold())
+                        .foregroundStyle(result.rmsLevel > -8.0 ? .orange : result.rmsLevel < -20.0 ? .yellow : .green)
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text(String(format: "%.1f", result.rmsLevel))
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(.primary)
+                        Text("dB")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
+                .padding(.vertical, 10)
+                .padding(.horizontal, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.primary.opacity(0.05))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke((result.rmsLevel > -8.0 ? Color.orange : result.rmsLevel < -20.0 ? Color.yellow : Color.green).opacity(0.25), lineWidth: 1)
+                )
+                
+                // Loudness
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Loudness", systemImage: "gauge")
+                        .font(.caption.bold())
+                        .foregroundStyle(.blue)
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text(String(format: "%.1f", result.loudnessLUFS))
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(.primary)
+                        Text("LUFS")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 10)
+                .padding(.horizontal, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.primary.opacity(0.05))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color.blue.opacity(0.25), lineWidth: 1)
+                )
             }
-
-            if result.peakLevel > -0.1 {
-                Label("Potential clipping detected", systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding()
-        .background(Color.backgroundSecondary)
-        .cornerRadius(AppConstants.cornerRadius)
+        .background(Color.gray.opacity(0.1))
+        .cornerRadius(12)
     }
+
+
 
     // MARK: - Recommendations
 
@@ -1307,6 +1519,21 @@ struct ResultsView: View {
         case (-0.3)..<0.3: return "Possible phase issues"
         case 0.3..<0.7: return "Good phase relationship"
         default: return "Excellent phase coherence"
+        }
+    }
+    
+    private func monoCompatibilityDescription(_ compatibility: Double) -> String {
+        switch compatibility {
+        case 0.9...1.0:
+            return "Excellent - Perfect mono translation"
+        case 0.8..<0.9:
+            return "Very Good - Minimal loss in mono"
+        case 0.6..<0.8:
+            return "Good - Acceptable mono playback"
+        case 0.4..<0.6:
+            return "Fair - Some elements may cancel"
+        default:
+            return "Poor - Significant phase cancellation"
         }
     }
 
