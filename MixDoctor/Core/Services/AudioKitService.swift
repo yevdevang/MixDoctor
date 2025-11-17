@@ -262,25 +262,56 @@ public class AudioKitService: ObservableObject {
             
             let claudeResponse = try await ClaudeAPIService.shared.analyzeAudioMetrics(metrics)
             
-            // Check if audio is unmixed - if so, mark it and DON'T show score
-            if let unmixed = result.unmixedDetection, unmixed.isLikelyUnmixed {
-                print("⚠️ UNMIXED AUDIO DETECTED - Hiding score, showing quality card")
-                print("   Mixing Quality: \(String(format: "%.0f", unmixed.mixingQualityScore))%")
-                print("   Failed Tests: \(unmixed.detectionCriteria.filter { $0.value }.count)/9")
+            // Check if audio is unmixed OR scored ≤50 - hide score, show quality card
+            let scoreIsLow = claudeResponse.score <= 50
+            let detectedAsUnmixed = result.unmixedDetection?.isLikelyUnmixed ?? false
+            
+            if detectedAsUnmixed || scoreIsLow {
+                print("⚠️ LOW QUALITY / UNMIXED AUDIO DETECTED - Hiding score, showing quality card")
+                print("   Claude Score: \(claudeResponse.score)")
+                if let unmixed = result.unmixedDetection {
+                    print("   Mixing Quality: \(String(format: "%.0f", unmixed.mixingQualityScore))%")
+                    print("   Failed Tests: \(unmixed.detectionCriteria.filter { $0.value }.count)/12")
+                    
+                    // If Claude score is very low (≤50), override mixing quality to show RED status
+                    if scoreIsLow {
+                        print("   ⚠️ Overriding mixing quality to 0% due to low Claude score")
+                        // Create new result with 0% quality for red status bar
+                        result.unmixedDetection = UnmixedDetectionResult(
+                            isLikelyUnmixed: true,
+                            confidenceScore: 100.0,
+                            detectionCriteria: unmixed.detectionCriteria,
+                            mixingQualityScore: 0.0,  // Force red status bar
+                            recommendations: unmixed.recommendations,
+                            dynamicRangeTest: unmixed.dynamicRangeTest,
+                            peakToLoudnessRatioTest: unmixed.peakToLoudnessRatioTest,
+                            transientAnalysis: unmixed.transientAnalysis,
+                            rmsVsPeakTest: unmixed.rmsVsPeakTest,
+                            frequencyMaskingTest: unmixed.frequencyMaskingTest,
+                            loudnessTest: unmixed.loudnessTest,
+                            crestFactorTest: unmixed.crestFactorTest
+                        )
+                    }
+                }
                 
                 // Mark as NOT professionally mixed
                 result.isProfessionallyMixed = false
                 
-                // Hide score for unmixed audio
+                // Hide score for low quality/unmixed audio
                 result.overallScore = 0.0
                 result.claudeScore = nil
                 
-                // Override AI summary with unmixed warning
-                result.aiSummary = "⚠️ UNMIXED AUDIO DETECTED\n\nThis appears to be a raw recording or arrangement without professional mixing. The audio has good balance but lacks mixing processing (compression, EQ, limiting).\n\n" + (claudeResponse.summary)
-                result.aiRecommendations = unmixed.recommendations + claudeResponse.recommendations
+                // Override AI summary with warning
+                if scoreIsLow {
+                    result.aiSummary = "⚠️ UNMIXED / LOW QUALITY AUDIO\n\nThis audio has significant technical problems that need to be addressed before it can be considered a professional mix.\n\n" + (claudeResponse.summary)
+                } else {
+                    result.aiSummary = "⚠️ UNMIXED AUDIO DETECTED\n\nThis appears to be a raw recording or arrangement without professional mixing. The audio has good balance but lacks mixing processing (compression, EQ, limiting).\n\n" + (claudeResponse.summary)
+                }
+                
+                result.aiRecommendations = (result.unmixedDetection?.recommendations ?? []) + claudeResponse.recommendations
                 result.isReadyForMastering = false
                 
-                print("🎯 Unmixed - hiding score, showing quality card")
+                print("🎯 Low quality/unmixed - hiding score, showing quality card with RED status")
             } else {
                 // Professional mix detected - SHOW SCORE
                 result.isProfessionallyMixed = true
@@ -2927,10 +2958,10 @@ enum AudioKitError: Error {
             recommendations.append("Overall levels are too quiet - track needs gain staging and limiting")
         }
         
-        // Calculate overall assessment - REQUIRE 5+ FAILS out of 14 points (36%+)
+        // Calculate overall assessment - REQUIRE 7+ FAILS out of 14 points (50%+)
         let totalTests = 12
         let confidenceScore = (Double(failedTests) / 14.0) * 100.0  // Out of 14 points max
-        let isLikelyUnmixed = failedTests >= 5  // Need 5+ points to flag as unmixed
+        let isLikelyUnmixed = failedTests >= 7  // Need 7+ points to flag as unmixed (50% threshold)
         
         // Calculate mixing quality score
         let mixingQualityScore = max(0, 100.0 - (Double(failedTests) / 14.0 * 100.0))
@@ -2941,9 +2972,8 @@ enum AudioKitError: Error {
             recommendations.append("Apply compression, EQ, limiting, and level matching to create a professional mix")
         } else if mixingQualityScore < 75 {
             recommendations.insert("⚡ Mix quality could be improved (\(String(format: "%.0f", mixingQualityScore))%)", at: 0)
-        } else {
-            recommendations.insert("✅ Appears to be professionally mixed (\(String(format: "%.0f", mixingQualityScore))% quality)", at: 0)
         }
+        // Don't show "Professionally mixed" message - it's redundant
         
         print("\n🔍 UNMIXED DETECTION ANALYSIS:")
         print("   Failed tests: \(failedTests)/\(totalTests)")
