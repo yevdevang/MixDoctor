@@ -363,59 +363,79 @@ class ClaudeAPIService {
         • Loudness <-23 LUFS = Too quiet (Score -5)
         • Loudness >-8 LUFS = Too loud/aggressive (Score -5)
 
-        🎯 SCORING RULES - CALCULATE CAREFULLY:
+        🎯 SCORING RULES - SIMPLE AND STABLE:
         
-        Start with base score and adjust:
+        Calculate a score 0-100 based ONLY on technical quality:
         
-        BASE SCORE = 85 (mastered track baseline)
+        START: 65 points (realistic baseline)
         
-        TECHNICAL BONUSES (add points):
-        • Peak -0.1 to -1.0dB = +10 points (professional limiting)
-        • Peak -1.0 to -3.0dB = +5 points (good headroom management)
-        • DR 12-15dB = +10 points (excellent dynamics)
-        • DR 8-12dB = +5 points (good dynamics)
-        • DR 6-8dB = +0 points (acceptable for master)
-        • Loudness -14 to -18 LUFS = +5 points (streaming optimized)
-        • Phase >80% = +5 points (excellent phase)
-        • No clipping detected = +5 points
+        ADD POINTS (Bonuses for professional quality):
+        • Peak Level -0.1 to -1.0dB: +15 points (mastered loud)
+        • Peak Level -1.0 to -3.0dB: +10 points (well limited)
+        • Dynamic Range 8-12dB: +10 points (modern professional)
+        • Dynamic Range 6-8dB or 12-15dB: +5 points (acceptable)
+        • Integrated Loudness -10 to -14 LUFS: +10 points (streaming optimized)
+        • Integrated Loudness -8 to -10 LUFS or -14 to -16 LUFS: +5 points (competitive)
+        • Phase Coherence >80%: +10 points (excellent stereo)
+        • Phase Coherence 70-80%: +5 points (good stereo)
+        • Mono Compatibility >75%: +10 points (club ready - CRITICAL)
+        • Mono Compatibility 65-75%: +5 points (acceptable)
+        • No clipping or true peak issues: +5 points
         
-        TECHNICAL PENALTIES (subtract points):
-        • Peak >0dB = -20 points (clipping)
-        • True Peak >-0.1dBFS = -10 points (clipping risk)
-        • DR <4dB = -15 points (over-limited)
-        • DR 4-6dB = -5 points (heavily limited)
-        • Loudness >-8 LUFS = -10 points (too loud)
-        • Loudness <-23 LUFS = -5 points (too quiet)
-        • Phase <50% = -10 points (phase problems)
-        • Single frequency band >60% = -10 points (severe imbalance)
+        SUBTRACT POINTS (Technical problems):
+        • Peak >0dB (clipping): -40 points (critical issue)
+        • True Peak >-0.1dBFS: -20 points (will clip on conversion)
+        • Dynamic Range <6dB: -25 points (over-compressed)
+        • Dynamic Range >15dB: -10 points (lacks punch/consistency)
+        • Loudness <-20 LUFS: -15 points (too quiet)
+        • Loudness >-8 LUFS: -10 points (too loud/distorted)
+        • Phase Coherence <50%: -20 points (severe phase issues)
+        • Phase Coherence 50-60%: -10 points (phase problems)
+        • Mono Compatibility <50%: -25 points (CRITICAL - will sound bad on mono systems)
+        • Mono Compatibility 50-60%: -15 points (poor club/phone translation)
         
-        DO NOT PENALIZE:
-        • Frequency balance is artistic choice (unless extreme >60% in one band)
-        • Dark/warm sound (low highs 1-5%) is VALID and PROFESSIONAL
-        • Phase 50-100% is all acceptable
+        IGNORE FREQUENCY BALANCE - artistic choice unless >80% in single band.
         
-        EXAMPLE CALCULATION:
-        Professional track: Peak -0.2dB, DR 12dB, Loudness -16 LUFS, Phase 87%
-        = 85 (base) +10 (peak) +10 (DR) +5 (loudness) +5 (phase) +5 (no clip) = 120 → cap at 100
+        REALISTIC SCORING EXAMPLES:
+        • Commercial master (Peak -0.2dB, DR 9dB, -12 LUFS, Phase 86%, Mono 78%) = 65 +15 +10 +10 +10 +10 +5 = 125 → 100/100
+        • Good master (Peak -0.5dB, DR 10dB, -14 LUFS, Phase 75%, Mono 70%) = 65 +10 +10 +5 +5 +5 +5 = 105 → 100/100
+        • Poor mono (Peak -1.5dB, DR 11dB, -15 LUFS, Phase 52%, Mono 41%) = 65 +10 +10 +5 -20 -25 = 45/100
+        • Average quality (Peak -3dB, DR 12dB, -16 LUFS, Phase 65%, Mono 60%) = 65 +10 +5 +5 -15 = 70/100
+        • Needs work (Peak -8dB, DR 18dB, -22 LUFS, Phase 55%, Mono 55%) = 65 -10 -15 = 40/100
+        • Over-processed (Peak -0.1dB, DR 4dB, -7 LUFS, Phase 60%, Mono 65%) = 65 +15 -25 -10 = 45/100
+        
+        YOUR TASK:
+        1. Calculate the score using ONLY the rules above
+        2. Provide 2-3 sentence summary of technical quality
+        3. Give 2-4 recommendations (only for actual problems, not preferences)
+        
+        📝 RESPONSE FORMAT - IMPORTANT:
+        • DO NOT use numbered lists (1. 2. 3.) - use bullet points (•) or natural paragraphs
+        • DO NOT use ## headers or markdown formatting
+        • Keep response concise and conversational
+        • Write in natural flowing paragraphs, not lists
+        
+        Format response as:
+        YOUR TASK:
+        Calculate the score using ONLY the rules above, provide 2-3 sentence summary, and give 2-4 recommendations for actual problems.
+        
+        📝 RESPONSE FORMAT - CRITICAL:
+        • DO NOT use numbered lists (1. 2. 3.) anywhere in your response
+        • DO NOT use ## headers or markdown formatting
+        • Use bullet points (•) or write as natural flowing paragraphs
+        • Keep it conversational and concise
+        
+        Format response as:
+        SCORE: [0-100]
+        
+        ANALYSIS: [Write 2-3 sentences as a natural paragraph - NO numbers, NO bullets]
+        
+        RECOMMENDATIONS: [If needed, use bullet points (•) or flowing text - NEVER use 1. 2. 3. numbering]
         
         YOUR CALCULATION:
         Base: 85
         Adjustments: [list each bonus/penalty you're applying]
         FINAL SCORE: [calculate total, cap at 100]
-
-        📝 RESPONSE FORMAT RULES:
-        • DO NOT use ## headers or numbered lists (1. 2. 3.)
-        • Keep response concise and natural
-        • If score is 85+ (excellent): 2-3 sentences maximum, focus on positive highlights
-        • If score is 70-84 (good): Brief analysis with 1-2 minor suggestions
-        • If score is below 70: Detailed analysis with specific improvements needed
-        
-        Format response as:
-        SCORE: [realistic 0-100 score]
-        
-        ANALYSIS: [Natural paragraph without formatting - be concise if score is high]
-        
-        RECOMMENDATIONS: [Brief bullet points only if score below 85, otherwise skip]
         """
     }
     
@@ -557,14 +577,15 @@ class ClaudeAPIService {
         for line in lines {
             let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
             
-            // ✅ FIXED: Only parse score from lines that START with "SCORE:" (with optional asterisks)
+            // ✅ FIXED: Parse score from lines with "SCORE:" or "FINAL SCORE:" (with optional asterisks)
             let cleanedLine = trimmedLine.replacingOccurrences(of: "*", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-            if cleanedLine.hasPrefix("SCORE:") {
-                let scoreText = cleanedLine.replacingOccurrences(of: "SCORE:", with: "")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            if cleanedLine.contains("SCORE:") {
+                // Remove everything before "SCORE:" to handle "FINAL SCORE:", "**SCORE:**", etc.
+                let scoreText = cleanedLine.components(separatedBy: "SCORE:").last?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                 print("🔍 Found SCORE line: '\(scoreText)'")
                 
-                // Extract the first number from the score line (handle "85", "85 points", "85/100", etc.)
+                // Extract the first number from the score line (handle "100", "100/100", "85 points", etc.)
                 let numbers = scoreText.components(separatedBy: CharacterSet.decimalDigits.inverted).filter { !$0.isEmpty }
                 if let firstNumber = numbers.first, let parsedScore = Int(firstNumber) {
                     score = parsedScore
@@ -607,15 +628,39 @@ class ClaudeAPIService {
         print("   Full Response Preview: \(String(textContent.prefix(500)))")
         print("🔍 END PARSING\n")
         
+        // Clean up numbered lists from the response
+        let cleanedText = removeNumberedLists(from: textContent)
+        
         // Determine if ready for mastering: few or no recommendations AND good score
         // let isReadyForMastering = recommendations.count <= 2 && (score ?? 0) >= 75  // 🔍 COMMENTED OUT - using simple score check instead
         
         return ClaudeAnalysisResponse(
             score: score ?? 50, // Default score if not found
-            summary: textContent.trimmingCharacters(in: .whitespacesAndNewlines), // 🔍 RAW CLAUDE OUTPUT - no parsing
+            summary: cleanedText.trimmingCharacters(in: .whitespacesAndNewlines), // 🔍 RAW CLAUDE OUTPUT - cleaned up
             recommendations: [], // 🔍 COMMENTED OUT - showing raw output instead
             isReadyForMastering: (score ?? 0) >= 75
         )
+    }
+    
+    /// Remove numbered list formatting (1. 2. 3.) from Claude's response
+    private func removeNumberedLists(from text: String) -> String {
+        var result = text
+        
+        // Remove patterns like "1. ", "2. ", "3. " at the start of lines
+        result = result.replacingOccurrences(
+            of: #"(?m)^\s*\d+\.\s+"#,
+            with: "• ",
+            options: .regularExpression
+        )
+        
+        // Also remove patterns in the middle of text
+        result = result.replacingOccurrences(
+            of: #"\n\s*\d+\.\s+"#,
+            with: "\n• ",
+            options: .regularExpression
+        )
+        
+        return result
     }
     
     private func getGenreFrequencyGuidelines(genre: String, metrics: AudioMetricsForClaude) -> String {
