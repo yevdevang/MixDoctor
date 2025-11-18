@@ -370,39 +370,45 @@ class ClaudeAPIService {
         START: 65 points (realistic baseline)
         
         ADD POINTS (Bonuses for professional quality):
-        • Peak Level -0.1 to -1.0dB: +15 points (mastered loud)
+        • Peak Level -0.0 to -1.0dB: +15 points (perfectly mastered - loud without clipping)
         • Peak Level -1.0 to -3.0dB: +10 points (well limited)
         • Dynamic Range 8-12dB: +10 points (modern professional)
         • Dynamic Range 6-8dB or 12-15dB: +5 points (acceptable)
         • Integrated Loudness -10 to -14 LUFS: +10 points (streaming optimized)
         • Integrated Loudness -8 to -10 LUFS or -14 to -16 LUFS: +5 points (competitive)
-        • Phase Coherence >80%: +10 points (excellent stereo)
-        • Phase Coherence 70-80%: +5 points (good stereo)
-        • Mono Compatibility >75%: +10 points (club ready - CRITICAL)
-        • Mono Compatibility 65-75%: +5 points (acceptable)
-        • No clipping or true peak issues: +5 points
+        • Phase Coherence 40-100%: +0 points (NORMAL - professional stereo mixes are 40-80%)
+        • Mono Compatibility >70%: +10 points (excellent club/phone translation)
+        • Mono Compatibility 60-70%: +5 points (acceptable translation)
+        • No clipping detected: +5 points (clean peaks)
         
-        SUBTRACT POINTS (Technical problems):
-        • Peak >0dB (clipping): -40 points (critical issue)
-        • True Peak >-0.1dBFS: -20 points (will clip on conversion)
+        SUBTRACT POINTS (Technical problems - ONLY apply if these conditions are TRUE):
+        • Peak ABOVE 0.0dB (positive values = actual clipping/distortion): -40 points
+        • True Peak ABOVE 0.0dBFS (positive values = will clip on conversion): -20 points
         • Dynamic Range <6dB: -25 points (over-compressed)
         • Dynamic Range >15dB: -10 points (lacks punch/consistency)
         • Loudness <-20 LUFS: -15 points (too quiet)
         • Loudness >-8 LUFS: -10 points (too loud/distorted)
-        • Phase Coherence <50%: -20 points (severe phase issues)
-        • Phase Coherence 50-60%: -10 points (phase problems)
-        • Mono Compatibility <50%: -25 points (CRITICAL - will sound bad on mono systems)
-        • Mono Compatibility 50-60%: -15 points (poor club/phone translation)
+        • Phase Coherence <30%: -25 points (severe phase cancellation - OUT OF PHASE signals)
+        • Mono Compatibility <50%: -30 points (CRITICAL - severe phase issues, will sound terrible on mono)
+        • Mono Compatibility 50-60%: -15 points (poor club/phone/Bluetooth translation)
         
-        IGNORE FREQUENCY BALANCE - artistic choice unless >80% in single band.
+        CRITICAL UNDERSTANDING:
+        • Peak -0.0dB = PERFECT (at maximum without clipping) = +15 BONUS
+        • Peak +0.5dB = CLIPPING (above zero, distorted) = -40 PENALTY
+        • True Peak -0.0dBFS = PERFECT (exactly at limit) = NO PENALTY
+        • True Peak +0.2dBFS = WILL CLIP (above zero) = -20 PENALTY
+        
+        IMPORTANT NOTES:
+        • Phase Coherence 40-80% is NORMAL for professional stereo mixes with width
+        • Mono Compatibility <60% indicates phase problems or excessive stereo processing
+        • IGNORE FREQUENCY BALANCE - artistic choice unless >80% in single band
         
         REALISTIC SCORING EXAMPLES:
-        • Commercial master (Peak -0.2dB, DR 9dB, -12 LUFS, Phase 86%, Mono 78%) = 65 +15 +10 +10 +10 +10 +5 = 125 → 100/100
-        • Good master (Peak -0.5dB, DR 10dB, -14 LUFS, Phase 75%, Mono 70%) = 65 +10 +10 +5 +5 +5 +5 = 105 → 100/100
-        • Poor mono (Peak -1.5dB, DR 11dB, -15 LUFS, Phase 52%, Mono 41%) = 65 +10 +10 +5 -20 -25 = 45/100
-        • Average quality (Peak -3dB, DR 12dB, -16 LUFS, Phase 65%, Mono 60%) = 65 +10 +5 +5 -15 = 70/100
-        • Needs work (Peak -8dB, DR 18dB, -22 LUFS, Phase 55%, Mono 55%) = 65 -10 -15 = 40/100
-        • Over-processed (Peak -0.1dB, DR 4dB, -7 LUFS, Phase 60%, Mono 65%) = 65 +15 -25 -10 = 45/100
+        • Perfect master (Peak -0.0dB, DR 10dB, -14 LUFS, Phase 42%, Mono 70%) = 65 +15 +10 +5 +10 +5 = 110 → 100/100
+        • Commercial master (Peak -0.2dB, DR 9dB, -12 LUFS, Phase 65%, Mono 75%) = 65 +15 +10 +10 +10 +5 = 115 → 100/100
+        • Good master (Peak -0.5dB, DR 10dB, -14 LUFS, Phase 55%, Mono 68%) = 65 +15 +10 +5 +5 +5 = 105 → 100/100
+        • Poor mono (Peak -1.5dB, DR 11dB, -15 LUFS, Phase 52%, Mono 41%) = 65 +10 +10 +5 -30 = 60/100
+        • Actual clipping (Peak +0.5dB, DR 8dB, -10 LUFS, Phase 60%, Mono 70%) = 65 -40 +10 +10 +10 = 55/100
         
         YOUR TASK:
         1. Calculate the score using ONLY the rules above
