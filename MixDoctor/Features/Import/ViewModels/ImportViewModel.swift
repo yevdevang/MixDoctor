@@ -35,6 +35,11 @@ final class ImportViewModel {
     func importFiles(_ urls: [URL]) async {
         guard !urls.isEmpty else { return }
 
+        print("📁 Starting import of \(urls.count) file(s)")
+        for (index, url) in urls.enumerated() {
+            print("   [\(index + 1)] \(url.lastPathComponent)")
+        }
+        
         isImporting = true
         importProgress = 0
         errorMessage = nil
@@ -44,7 +49,10 @@ final class ImportViewModel {
         defer { isImporting = false }
 
         do {
-            let files = try await importService.importMultipleFiles(urls)
+            // Pass modelContext to importService so it can check for duplicates BEFORE copying to iCloud
+            let files = try await importService.importMultipleFiles(urls, modelContext: modelContext)
+            
+            print("✅ Import service returned \(files.count) file(s)")
             
             // Check for duplicates before inserting
             var duplicateCount = 0
@@ -54,25 +62,38 @@ final class ImportViewModel {
                 if !isDuplicate(file) {
                     modelContext.insert(file)
                     insertedCount += 1
+                    print("   ✅ Inserted: \(file.fileName)")
                 } else {
                     duplicateCount += 1
-                    print("⚠️ Skipping duplicate file: \(file.fileName)")
+                    print("   ⚠️ Skipping duplicate: \(file.fileName)")
                     
                     // Remove the physical file since it's a duplicate
                     let fileURL = file.fileURL
                     if FileManager.default.fileExists(atPath: fileURL.path) {
                         do {
                             try FileManager.default.removeItem(at: fileURL)
-                            print("🗑️ Removed duplicate file from storage: \(fileURL.lastPathComponent)")
+                            print("   🗑️ Removed duplicate file from storage")
                         } catch {
-                            print("❌ Failed to remove duplicate file: \(error.localizedDescription)")
+                            print("   ❌ Failed to remove duplicate file: \(error.localizedDescription)")
                         }
                     }
                 }
             }
 
             try modelContext.save()
+            print("💾 Saved context - inserted: \(insertedCount), duplicates: \(duplicateCount)")
+            print("💾 Context has \(modelContext.insertedModelsArray.count) inserted items")
+            
+            // Force refresh the query
+            try? await Task.sleep(for: .milliseconds(100))
+            
             loadImports()
+            print("📂 Reloaded imports - total files now: \(importedFiles.count)")
+            print("📂 Files in memory:")
+            for file in importedFiles.prefix(10) {
+                print("   - \(file.fileName)")
+            }
+            
             importProgress = 1.0
             
             // Show appropriate message based on results
@@ -88,6 +109,13 @@ final class ImportViewModel {
                 showInfo = true
             }
             // If insertedCount > 0 and duplicateCount == 0, no message needed (success)
+        } catch let error as AudioImportError where error == .duplicateFile {
+            // All files were duplicates - caught at import service level
+            infoMessage = urls.count == 1 
+                ? "This file is already imported" 
+                : "All \(urls.count) files are already imported"
+            showInfo = true
+            importProgress = 1.0
         } catch {
             if let importError = error as? AudioImportError {
                 errorMessage = importError.errorDescription
@@ -104,8 +132,12 @@ final class ImportViewModel {
     private func isDuplicate(_ file: AudioFile) -> Bool {
         let descriptor = FetchDescriptor<AudioFile>()
         guard let allFiles = try? modelContext.fetch(descriptor) else {
+            print("⚠️ Could not fetch existing files for duplicate check")
             return false
         }
+        
+        print("🔍 Checking for duplicates: \(file.fileName) (\(file.fileSize) bytes, \(String(format: "%.1f", file.duration))s)")
+        print("   Existing files in database: \(allFiles.count)")
         
         // Check for exact match on fileName and fileSize
         // Duration check within 1 second tolerance (for encoding variations)
@@ -114,11 +146,19 @@ final class ImportViewModel {
             let sameFileSize = existingFile.fileSize == file.fileSize
             let similarDuration = abs(existingFile.duration - file.duration) < 1.0
             
+            if sameFileName {
+                print("   Found file with same name: \(existingFile.fileName)")
+                print("     Size match: \(sameFileSize) (\(existingFile.fileSize) vs \(file.fileSize))")
+                print("     Duration match: \(similarDuration) (\(String(format: "%.1f", existingFile.duration))s vs \(String(format: "%.1f", file.duration))s)")
+            }
+            
             if sameFileName && sameFileSize && similarDuration {
+                print("   ✅ DUPLICATE DETECTED - skipping")
                 return true
             }
         }
         
+        print("   ✅ Not a duplicate - will import")
         return false
     }
 
@@ -148,5 +188,55 @@ final class ImportViewModel {
         // Notify other views that files were deleted
         print("📢 Posting audioFileDeleted notification from Import tab")
         NotificationCenter.default.post(name: .audioFileDeleted, object: nil)
+    }
+    
+    // MARK: - Orphaned File Recovery
+    
+    /// Scan iCloud folder for files that exist physically but aren't in the database
+    func scanForOrphanedFiles() async {
+        print("🔍 Scanning for orphaned files in iCloud...")
+        
+        let iCloudService = iCloudStorageService.shared
+        let audioDirectory = iCloudService.getAudioFilesDirectory()
+        
+        guard FileManager.default.fileExists(atPath: audioDirectory.path) else {
+            print("⚠️ Audio directory doesn't exist")
+            return
+        }
+        
+        do {
+            let fileURLs = try FileManager.default.contentsOfDirectory(
+                at: audioDirectory,
+                includingPropertiesForKeys: [.fileSizeKey, .nameKey],
+                options: [.skipsHiddenFiles]
+            )
+            
+            // Get all files currently in database
+            let descriptor = FetchDescriptor<AudioFile>()
+            let databaseFiles = (try? modelContext.fetch(descriptor)) ?? []
+            let databaseFileNames = Set(databaseFiles.map { $0.fileName })
+            
+            // Find files that exist physically but not in database
+            let orphanedURLs = fileURLs.filter { url in
+                let fileName = url.lastPathComponent
+                let isAudioFile = AppConstants.supportedAudioFormats.contains(url.pathExtension.lowercased())
+                return isAudioFile && !databaseFileNames.contains(fileName)
+            }
+            
+            if !orphanedURLs.isEmpty {
+                print("📁 Found \(orphanedURLs.count) orphaned file(s):")
+                for url in orphanedURLs {
+                    print("   - \(url.lastPathComponent)")
+                }
+                
+                // Re-import orphaned files
+                await importFiles(orphanedURLs)
+            } else {
+                print("✅ No orphaned files found")
+            }
+            
+        } catch {
+            print("❌ Error scanning for orphaned files: \(error)")
+        }
     }
 }

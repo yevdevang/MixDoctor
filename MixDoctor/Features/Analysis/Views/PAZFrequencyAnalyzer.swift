@@ -11,6 +11,17 @@ import Charts
 struct PAZFrequencyAnalyzer: View {
     let result: AnalysisResult
     
+    // Capture spectrum data once to avoid SwiftData detachment errors
+    private let spectrum: [Float]?
+    private let sampleRate: Double?
+    
+    init(result: AnalysisResult) {
+        self.result = result
+        // Capture the spectrum data immediately to prevent SwiftData detachment
+        self.spectrum = result.frequencySpectrum
+        self.sampleRate = result.spectrumSampleRate
+    }
+    
     // PAZ-style frequency bands with proper Hz ranges
     private var frequencyBands: [FrequencyBand] {
         // Calculate realistic frequency band energies from spectrum data
@@ -77,8 +88,8 @@ struct PAZFrequencyAnalyzer: View {
     
     // Calculate energy percentage for a frequency band from spectrum data
     private func calculateBandEnergy(start: Double, end: Double) -> Double {
-        guard let spectrum = result.frequencySpectrum,
-              let sampleRate = result.spectrumSampleRate,
+        guard let spectrum = spectrum,
+              let sampleRate = sampleRate,
               !spectrum.isEmpty else {
             // Fallback to old calculation if no spectrum data
             if start >= 20 && end <= 80 { return result.lowEndBalance * 0.25 }
@@ -221,8 +232,8 @@ struct PAZFrequencyAnalyzer: View {
                 // Chart visualization with fixed height to prevent overlap
                 FrequencyChart(
                     bands: frequencyBands,
-                    spectrum: result.frequencySpectrum,  // REAL FFT data from audio file
-                    sampleRate: result.spectrumSampleRate
+                    spectrum: spectrum,  // Use captured spectrum data
+                    sampleRate: sampleRate
                 )
                     .frame(height: 250) // Ensure chart doesn't expand
                     .clipped() // Prevent any content from overflowing

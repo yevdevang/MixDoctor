@@ -199,6 +199,13 @@ struct DashboardView: View {
             UINavigationBar.appearance().compactAppearance = appearance
             #endif
             
+            // Debug: Log database state
+            print("📊 DASHBOARD LOADED:")
+            print("   Total files in database: \(audioFiles.count)")
+            for file in audioFiles {
+                print("   - \(file.fileName) (imported: \(file.dateImported))")
+            }
+            
             // Check for missing files and trigger downloads
             Task {
                 await checkAndDownloadMissingFiles()
@@ -495,9 +502,10 @@ struct DashboardView: View {
                 options: [.skipsHiddenFiles]
             )
             
-            // Filter audio files
-            let audioExtensions = ["wav","aif","aiff"]
-            let audioFiles = files.filter { audioExtensions.contains($0.pathExtension.lowercased()) }
+            // Filter audio files - use all supported formats from AppConstants
+            let audioFiles = files.filter { 
+                AppConstants.supportedAudioFormats.contains($0.pathExtension.lowercased()) 
+            }
             
             var imported = 0
             
@@ -584,29 +592,54 @@ struct DashboardView: View {
     private func loadMissingAnalysisResults() async {
         print("🔍 Checking for missing analysis results in existing files...")
         
+        let currentVersion = "AudioKit-\(AppConstants.analysisVersion)"
         var loadedCount = 0
+        var clearedCount = 0
         
         // Check all files that don't have analysis results in SwiftData
         for audioFile in audioFiles where audioFile.analysisResult == nil {
             // Try to load from iCloud Drive JSON
             if let analysisResult = AnalysisResultPersistence.shared.loadAnalysisResult(forAudioFile: audioFile.fileName) {
-                print("✅ Loaded analysis for existing file: \(audioFile.fileName) - Score: \(analysisResult.overallScore)")
-                analysisResult.audioFile = audioFile
-                audioFile.analysisResult = analysisResult
-                audioFile.dateAnalyzed = analysisResult.dateAnalyzed
-                loadedCount += 1
+                // Check version compatibility
+                if analysisResult.analysisVersion == currentVersion {
+                    print("✅ Loaded analysis for existing file: \(audioFile.fileName) - Score: \(analysisResult.overallScore)")
+                    analysisResult.audioFile = audioFile
+                    audioFile.analysisResult = analysisResult
+                    audioFile.dateAnalyzed = analysisResult.dateAnalyzed
+                    loadedCount += 1
+                } else {
+                    print("⚠️ Outdated analysis version (\(analysisResult.analysisVersion) vs \(currentVersion)) - deleting cache for: \(audioFile.fileName)")
+                    AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: audioFile.fileName)
+                    clearedCount += 1
+                }
             }
         }
         
-        if loadedCount > 0 {
+        // Also check files that HAVE analysis results but with wrong version
+        for audioFile in audioFiles {
+            if let analysisResult = audioFile.analysisResult, analysisResult.analysisVersion != currentVersion {
+                print("⚠️ Clearing outdated analysis (\(analysisResult.analysisVersion) vs \(currentVersion)) for: \(audioFile.fileName)")
+                audioFile.analysisResult = nil
+                audioFile.dateAnalyzed = nil
+                AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: audioFile.fileName)
+                clearedCount += 1
+            }
+        }
+        
+        if loadedCount > 0 || clearedCount > 0 {
             do {
                 try modelContext.save()
-                print("📊 Loaded \(loadedCount) analysis result(s) from iCloud Drive")
+                if loadedCount > 0 {
+                    print("📊 Loaded \(loadedCount) analysis result(s) from iCloud Drive")
+                }
+                if clearedCount > 0 {
+                    print("🗑️ Cleared \(clearedCount) outdated analysis result(s)")
+                }
             } catch {
-                print("❌ Failed to save loaded analysis results: \(error)")
+                print("❌ Failed to save changes: \(error)")
             }
         } else {
-            print("ℹ️ No missing analysis results to load")
+            print("ℹ️ No missing or outdated analysis results")
         }
     }
 

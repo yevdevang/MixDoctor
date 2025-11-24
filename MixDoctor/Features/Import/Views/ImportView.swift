@@ -68,6 +68,10 @@ struct ImportView: View {
         .task {
             if viewModel.importedFiles.isEmpty {
                 viewModel.loadImports()
+                // Automatically scan for orphaned files when Import tab loads empty
+                Task {
+                    await viewModel.scanForOrphanedFiles()
+                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .audioFileDeleted)) { _ in
@@ -96,14 +100,31 @@ struct ImportView: View {
                     .multilineTextAlignment(.center)
             }
 
-            Button {
-                isShowingDocumentPicker = true
-            } label: {
-                Label("Browse Files", systemImage: "folder")
-                    .frame(maxWidth: 220)
+            HStack(spacing: 16) {
+                Button {
+                    isShowingDocumentPicker = true
+                } label: {
+                    Label("Browse Files", systemImage: "folder")
+                        .frame(maxWidth: 200)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                
+                // Sync button to recover orphaned files
+                if let viewModel {
+                    Button {
+                        Task {
+                            await viewModel.scanForOrphanedFiles()
+                        }
+                    } label: {
+                        Image(systemName: "arrow.clockwise.icloud")
+                            .font(.title3)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .disabled(viewModel.isImporting)
+                }
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
 
             supportedFormatsView
         }
@@ -136,6 +157,18 @@ struct ImportView: View {
                         .font(.headline)
                         .foregroundStyle(.primary)
                     Spacer()
+                    
+                    // Scan for orphaned files button
+                    Button {
+                        Task {
+                            await viewModel.scanForOrphanedFiles()
+                        }
+                    } label: {
+                        Image(systemName: "arrow.clockwise.icloud")
+                    }
+                    .font(.subheadline)
+                    .disabled(viewModel.isImporting)
+                    
                     Button("Import More") {
                         isShowingDocumentPicker = true
                     }

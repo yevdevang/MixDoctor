@@ -39,12 +39,21 @@ public class AudioKitService: ObservableObject {
         
         // Check if analysis already exists in iCloud Drive to avoid re-analyzing
         let fileName = url.lastPathComponent
+        let currentVersion = "AudioKit-\(AppConstants.analysisVersion)"
+        
         if let existingResult = AnalysisResultPersistence.shared.loadAnalysisResult(forAudioFile: fileName) {
-            print("✅ Found cached analysis for: \(fileName)")
-            return existingResult
+            // Check if cached version matches current version
+            if existingResult.analysisVersion == currentVersion {
+                print("✅ Found valid cached analysis (v\(existingResult.analysisVersion)) for: \(fileName)")
+                return existingResult
+            } else {
+                print("⚠️ Cached analysis version mismatch (\(existingResult.analysisVersion) vs \(currentVersion)) - re-analyzing")
+                // Delete old cached result to avoid confusion
+                AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: fileName)
+            }
         }
         
-        print("📊 No cached analysis found, performing new analysis for: \(fileName)")
+        print("📊 Performing new analysis for: \(fileName)")
         
         isAnalyzing = true
         defer { isAnalyzing = false }
@@ -89,7 +98,7 @@ public class AudioKitService: ObservableObject {
         // Create AnalysisResult with AudioKit data
         // Note: audioFile parameter is AVAudioFile, but AnalysisResult expects MixDoctor.AudioFile
         // For now, create with nil and populate data
-        let result = AnalysisResult(audioFile: nil, analysisVersion: "AudioKit-1.0")
+        let result = AnalysisResult(audioFile: nil, analysisVersion: "AudioKit-\(AppConstants.analysisVersion)")
         
         // Populate with AudioKit analysis results
         result.stereoWidthScore = analysisResult.stereoWidth * 100  // Convert to percentage (0-100)
@@ -262,69 +271,16 @@ public class AudioKitService: ObservableObject {
             
             let claudeResponse = try await ClaudeAPIService.shared.analyzeAudioMetrics(metrics)
             
-            // Check if audio is unmixed OR scored ≤50 - hide score, show quality card
-            let scoreIsLow = claudeResponse.score <= 50
-            let detectedAsUnmixed = result.unmixedDetection?.isLikelyUnmixed ?? false
+            // UNMIXED DETECTION DISABLED - always show score
+            // Simple arrangements shouldn't be penalized
+            print("✅ Using Claude score directly: \(claudeResponse.score)")
             
-            if detectedAsUnmixed || scoreIsLow {
-                print("⚠️ LOW QUALITY / UNMIXED AUDIO DETECTED - Hiding score, showing quality card")
-                print("   Claude Score: \(claudeResponse.score)")
-                if let unmixed = result.unmixedDetection {
-                    print("   Mixing Quality: \(String(format: "%.0f", unmixed.mixingQualityScore))%")
-                    print("   Failed Tests: \(unmixed.detectionCriteria.filter { $0.value }.count)/12")
-                    
-                    // If Claude score is very low (≤50), override mixing quality to show RED status
-                    if scoreIsLow {
-                        print("   ⚠️ Overriding mixing quality to 0% due to low Claude score")
-                        // Create new result with 0% quality for red status bar
-                        result.unmixedDetection = UnmixedDetectionResult(
-                            isLikelyUnmixed: true,
-                            confidenceScore: 100.0,
-                            detectionCriteria: unmixed.detectionCriteria,
-                            mixingQualityScore: 0.0,  // Force red status bar
-                            recommendations: unmixed.recommendations,
-                            dynamicRangeTest: unmixed.dynamicRangeTest,
-                            peakToLoudnessRatioTest: unmixed.peakToLoudnessRatioTest,
-                            transientAnalysis: unmixed.transientAnalysis,
-                            rmsVsPeakTest: unmixed.rmsVsPeakTest,
-                            frequencyMaskingTest: unmixed.frequencyMaskingTest,
-                            loudnessTest: unmixed.loudnessTest,
-                            crestFactorTest: unmixed.crestFactorTest
-                        )
-                    }
-                }
-                
-                // Mark as NOT professionally mixed
-                result.isProfessionallyMixed = false
-                
-                // Hide score for low quality/unmixed audio
-                result.overallScore = 0.0
-                result.claudeScore = nil
-                
-                // Override AI summary with warning
-                if scoreIsLow {
-                    result.aiSummary = "⚠️ UNMIXED / LOW QUALITY AUDIO\n\nThis audio has significant technical problems that need to be addressed before it can be considered a professional mix.\n\n" + (claudeResponse.summary)
-                } else {
-                    result.aiSummary = "⚠️ UNMIXED AUDIO DETECTED\n\nThis appears to be a raw recording or arrangement without professional mixing. The audio has good balance but lacks mixing processing (compression, EQ, limiting).\n\n" + (claudeResponse.summary)
-                }
-                
-                result.aiRecommendations = (result.unmixedDetection?.recommendations ?? []) + claudeResponse.recommendations
-                result.isReadyForMastering = false
-                
-                print("🎯 Low quality/unmixed - hiding score, showing quality card with RED status")
-            } else {
-                // Professional mix detected - SHOW SCORE
-                result.isProfessionallyMixed = true
-                
-                // Use Claude's AI score directly (like the original system)
-                result.aiSummary = claudeResponse.summary
-                result.aiRecommendations = claudeResponse.recommendations
-                result.isReadyForMastering = claudeResponse.isReadyForMastering
-                result.claudeScore = claudeResponse.score
-                result.overallScore = Double(claudeResponse.score)
-                
-                print("✅ Professional mix - showing Claude score: \(claudeResponse.score)")
-            }
+            result.isProfessionallyMixed = true
+            result.aiSummary = claudeResponse.summary
+            result.aiRecommendations = claudeResponse.recommendations
+            result.isReadyForMastering = claudeResponse.isReadyForMastering
+            result.claudeScore = claudeResponse.score
+            result.overallScore = Double(claudeResponse.score)
             
             print("✅ Claude analysis completed successfully")
             print("🎯 Final overallScore: \(result.overallScore)")
@@ -343,27 +299,14 @@ public class AudioKitService: ObservableObject {
             print("❌ Full error: \(error)")
             print("❌ ========================================")
             
-            // Check if audio is unmixed even when API fails
-            if let unmixed = result.unmixedDetection, unmixed.isLikelyUnmixed {
-                print("⚠️ UNMIXED AUDIO DETECTED (during API failure)")
-                result.isProfessionallyMixed = false
-                let unmixedScore = Int(unmixed.mixingQualityScore * 0.6)
-                result.overallScore = Double(unmixedScore)
-                result.claudeScore = unmixedScore
-                result.aiSummary = "⚠️ UNMIXED AUDIO DETECTED\n\nThis appears to be a raw recording without professional mixing. Apply compression, EQ, and limiting to create a professional mix.\n\n(AI analysis unavailable - try again later)"
-                result.aiRecommendations = unmixed.recommendations
-                result.isReadyForMastering = false
-                print("🎯 Unmixed - showing quality score: \(unmixedScore)")
-            } else {
-                // Professional mix - hide score even when API fails
-                result.isProfessionallyMixed = true
-                result.aiSummary = "Something went wrong. Try later."
-                result.aiRecommendations = []
-                result.isReadyForMastering = false
-                result.overallScore = 0.0  // Hide score
-                result.claudeScore = nil
-                print("❌ Professional mix - hiding score during API failure")
-            }
+            // API failed - show error message, still mark as professional
+            result.isProfessionallyMixed = true
+            result.aiSummary = "Something went wrong. Try later."
+            result.aiRecommendations = []
+            result.isReadyForMastering = false
+            result.overallScore = 0.0  // Hide score
+            result.claudeScore = nil
+            print("❌ Professional mix - hiding score during API failure")
             
             print("❌ User will see: '\(result.aiSummary?.prefix(50) ?? "Error")'...")
         }
@@ -408,16 +351,21 @@ public class AudioKitService: ObservableObject {
         let dynamicRangeAnalysis = analyzeDynamicRange(leftData, rightData ?? leftData, frameCount: frameCount)
         let peakToAverageRatio = analyzePeakToAverage(leftData, rightData ?? leftData, frameCount: frameCount)
         
-        // MARK: - Unmixed Detection Analysis
-        let unmixedDetection = detectUnmixedAudio(
-            dynamicRange: dynamicAnalysis.range,
-            loudness: amplitudeAnalysis.loudness,
-            peakLevel: amplitudeAnalysis.peak,
-            rmsLevel: amplitudeAnalysis.rms,
-            peakToAverage: peakToAverageRatio,
-            spectralBalance: spectralBalance,
-            monoCompatibility: stereoAnalysis.monoCompatibility,
-            phaseCoherence: stereoAnalysis.coherence
+        // MARK: - Unmixed Detection Analysis (DISABLED)
+        // Simple arrangements (vocal+guitar in center) were incorrectly flagged
+        let unmixedDetection = UnmixedDetectionResult(
+            isLikelyUnmixed: false,
+            confidenceScore: 0.0,
+            detectionCriteria: [:],
+            mixingQualityScore: 100.0,
+            recommendations: [],
+            dynamicRangeTest: false,
+            peakToLoudnessRatioTest: false,
+            transientAnalysis: false,
+            rmsVsPeakTest: false,
+            frequencyMaskingTest: false,
+            loudnessTest: false,
+            crestFactorTest: false
         )
         
         // Combine AudioKit results
@@ -2813,6 +2761,10 @@ enum AudioKitError: Error {
     
     /// Detects if audio is unmixed (raw recording/arrangement) vs. professionally mixed
     /// Based on: https://chat.com analysis of mixing characteristics
+    /// ARCHIVED: Unmixed detection disabled - was too aggressive for minimal arrangements
+    /// Simple mixes (vocal+guitar in center) were incorrectly flagged as unmixed
+    /// Keeping function for reference but it's no longer called
+    /*
     private func detectUnmixedAudio(
         dynamicRange: Double,
         loudness: Double,
@@ -2821,166 +2773,234 @@ enum AudioKitError: Error {
         peakToAverage: PeakToAverageResult,
         spectralBalance: SpectralBalanceResult,
         monoCompatibility: Double,
-        phaseCoherence: Double
+        phaseCoherence: Double,
+        stereoWidth: Double,
+        stereoBalance: Double
     ) -> UnmixedDetectionResult {
         
         var detectionCriteria: [String: Bool] = [:]
         var recommendations: [String] = []
         var failedTests = 0
         
-        // TEST 1: Dynamic Range Analysis
-        // Unmixed: Very wide DR (>15dB), Mixed: Controlled (6-12 dB for most genres)
-        let dynamicRangeTest = dynamicRange > 15.0
-        detectionCriteria["High Dynamic Range (>15dB)"] = dynamicRangeTest
-        if dynamicRangeTest {
-            failedTests += 1
-            recommendations.append("Very high dynamic range (\(String(format: "%.1f", dynamicRange))dB) suggests minimal compression")
-        }
+        // CRITICAL METRICS - These are the most reliable indicators
+        // Professional mixes MUST pass these, unmixed audio typically fails multiple
         
-        // TEST 2: Peak to Loudness Ratio
-        // Unmixed: PLR > 18dB, Mixed: Typically 8-14dB
-        let peakToLoudnessRatio = peakLevel - loudness
-        let plrTest = peakToLoudnessRatio > 18.0
-        detectionCriteria["High PLR (>18dB)"] = plrTest
-        if plrTest {
-            failedTests += 1
-            recommendations.append("Peak-to-Loudness ratio of \(String(format: "%.1f", peakToLoudnessRatio))dB indicates light compression")
-        }
-        
-        // TEST 3: RMS vs Peak Relationship
-        // Unmixed: Large gap (>15dB), Mixed: Closer (8-12dB)
-        let rmsVsPeak = peakLevel - rmsLevel
-        let rmsVsPeakTest = rmsVsPeak > 15.0
-        detectionCriteria["Large RMS-Peak gap (>15dB)"] = rmsVsPeakTest
-        if rmsVsPeakTest {
-            failedTests += 1
-            recommendations.append("Large gap between RMS and Peak (\(String(format: "%.1f", rmsVsPeak))dB) suggests unprocessed dynamics")
-        }
-        
-        // TEST 4: Loudness Level
-        // Unmixed: < -18 LUFS (very quiet), Mixed: -14 to -8 LUFS
-        let loudnessTest = loudness < -18.0
-        detectionCriteria["Low Loudness (<-18 LUFS)"] = loudnessTest
-        if loudnessTest {
-            failedTests += 1
-            recommendations.append("Loudness of \(String(format: "%.1f", loudness)) LUFS is below professional standards")
-        }
-        
-        // TEST 5: Crest Factor
-        // Unmixed: > 14dB, Mixed: 8-12dB
         let crestFactor = peakToAverage.peakToRmsRatio
-        let crestFactorTest = crestFactor > 14.0
-        detectionCriteria["High Crest Factor (>14dB)"] = crestFactorTest
-        if crestFactorTest {
-            failedTests += 1
-            recommendations.append("Crest factor of \(String(format: "%.1f", crestFactor))dB indicates minimal limiting")
-        }
-        
-        // TEST 6: True Peak Analysis
-        // Unmixed: True peak well below -1dB, Mixed: -0.1 to -1dB
         let truePeak = peakToAverage.truePeakLevel
-        let truePeakTest = truePeak < -4.0
-        detectionCriteria["Low True Peak (<-4dB)"] = truePeakTest
-        if truePeakTest {
-            failedTests += 1
-            recommendations.append("True peak at \(String(format: "%.1f", truePeak))dBFS indicates no limiting applied")
-        }
-        
-        // TEST 7: Loudness Range
-        // Unmixed: High LRA (>15 LU), Mixed: Controlled (4-10 LU)
         let loudnessRange = peakToAverage.loudnessRange
-        let lraTest = loudnessRange > 15.0
-        detectionCriteria["High Loudness Range (>15 LU)"] = lraTest
-        if lraTest {
-            failedTests += 1
-            recommendations.append("High loudness range (\(String(format: "%.1f", loudnessRange)) LU) suggests no compression or automation")
+        let punchiness = peakToAverage.punchiness
+        
+        // ========================================
+        // TIER 1: MONO COMPATIBILITY - MOST CRITICAL
+        // Professional mixes are ALWAYS checked for mono compatibility
+        // ========================================
+        
+        // Severe mono issues (<50%) - Almost never in professional mixes
+        let veryPoorMonoTest = monoCompatibility < 0.5
+        detectionCriteria["Very Poor Mono (<50%)"] = veryPoorMonoTest
+        if veryPoorMonoTest {
+            failedTests += 4  // Extremely high weight - this alone is a huge red flag
+            recommendations.append("🚨 CRITICAL: Mono compatibility (\(String(format: "%.0f", monoCompatibility * 100))%) - severe phase issues")
         }
         
-        // TEST 8: Punchiness
-        // Unmixed: Very high (>90) or very low (<35), Mixed: Controlled (40-85)
-        let punchiness = peakToAverage.punchiness
-        let punchiTest = punchiness > 90.0 || punchiness < 35.0
-        detectionCriteria["Uncontrolled Punchiness"] = punchiTest
-        if punchiTest {
-            if punchiness > 90.0 {
-                failedTests += 1
-                recommendations.append("Very high punchiness (\(String(format: "%.0f", punchiness))) - uncontrolled transients")
-            } else if punchiness < 35.0 {
-                failedTests += 1
-                recommendations.append("Very low punchiness (\(String(format: "%.0f", punchiness))) - may need dynamic processing")
+        // Poor mono issues (50-60%) - Uncommon in professional mixes
+        let poorMonoTest = monoCompatibility >= 0.5 && monoCompatibility < 0.6
+        detectionCriteria["Poor Mono (50-60%)"] = poorMonoTest
+        if poorMonoTest {
+            failedTests += 2  // Significant weight
+            recommendations.append("⚠️ Poor mono compatibility (\(String(format: "%.0f", monoCompatibility * 100))%) - phase issues need fixing")
+        }
+        
+        // ========================================
+        // TIER 1.5: STEREO IMAGING & PANNING - VERY CRITICAL
+        // Professional mixes have balanced, controlled stereo field
+        // ========================================
+        
+        // Extreme panning issues: Too narrow (mono/raw) or too wide (amateur)
+        let extremePanningTest = stereoWidth < 0.4 || stereoWidth > 1.8
+        detectionCriteria["Extreme Panning"] = extremePanningTest
+        if extremePanningTest {
+            failedTests += 2  // High weight - clear sign of poor mixing
+            if stereoWidth < 0.4 {
+                recommendations.append("🔇 Extremely narrow stereo image (\(String(format: "%.0f", stereoWidth * 100))%) - sounds mono/unmixed")
+            } else {
+                recommendations.append("⚡ Excessively wide stereo (\(String(format: "%.0f", stereoWidth * 100))%) - amateur over-panning")
             }
         }
         
-        // TEST 9: Mono Compatibility - CRITICAL for professional mixes
-        // Unmixed: Poor (<60%), Mixed: Good (>70%)
-        let monoCompatibilityTest = monoCompatibility < 0.6
-        detectionCriteria["Poor Mono Compatibility (<60%)"] = monoCompatibilityTest
-        if monoCompatibilityTest {
-            failedTests += 2  // Weight heavily - this is critical
-            recommendations.append("Poor mono compatibility (\(String(format: "%.0f", monoCompatibility * 100))%) - phase issues need fixing")
+        // Left-right imbalance (panning issues)
+        let panningImbalanceTest = abs(stereoBalance) > 0.15  // More than 15% imbalance
+        detectionCriteria["Panning Imbalance"] = panningImbalanceTest
+        if panningImbalanceTest {
+            failedTests += 1
+            let direction = stereoBalance > 0 ? "right" : "left"
+            recommendations.append("⚖️ Significant L/R imbalance (\(String(format: "%.0f", abs(stereoBalance) * 100))% to \(direction)) - check panning")
         }
         
-        // TEST 10: Phase Coherence
-        // Unmixed: Variable phase (<60%), Mixed: Controlled (>70%)
+        // ========================================
+        // TIER 2: DYNAMIC PROCESSING - CRITICAL
+        // Professional mixes ALWAYS use compression/limiting
+        // ========================================
+        
+        // No compression: High DR + High CF + High LRA together
+        let noCompressionTest = dynamicRange > 15.0 && crestFactor > 13.0 && loudnessRange > 15.0
+        detectionCriteria["No Compression"] = noCompressionTest
+        if noCompressionTest {
+            failedTests += 3  // Very high weight - compression is essential
+            recommendations.append("🎚️ No compression detected (DR: \(String(format: "%.1f", dynamicRange))dB, CF: \(String(format: "%.1f", crestFactor))dB, LRA: \(String(format: "%.1f", loudnessRange))LU)")
+        }
+        
+        // Light compression only: Moderate indicators
+        let lightCompressionTest = !noCompressionTest && (dynamicRange > 14.0 || crestFactor > 12.0)
+        detectionCriteria["Light Compression"] = lightCompressionTest
+        if lightCompressionTest {
+            failedTests += 1
+            recommendations.append("Minimal compression - needs more dynamic control")
+        }
+        
+        // ========================================
+        // TIER 3: LOUDNESS OPTIMIZATION
+        // Professional mixes target specific loudness standards
+        // ========================================
+        
+        // Quiet + Unprocessed: Low loudness + High DR + Quiet peak
+        let quietUnprocessedTest = loudness < -18.0 && dynamicRange > 14.0 && peakLevel < -6.0
+        detectionCriteria["Quiet & Unprocessed"] = quietUnprocessedTest
+        if quietUnprocessedTest {
+            failedTests += 3  // High weight - clear sign of no mastering
+            recommendations.append("📉 Severely under-leveled: \(String(format: "%.1f", loudness))LUFS - needs gain staging and limiting")
+        }
+        
+        // Just quiet (might be intentional dynamic master)
+        let justQuietTest = !quietUnprocessedTest && loudness < -18.0
+        detectionCriteria["Low Loudness"] = justQuietTest
+        if justQuietTest {
+            failedTests += 1
+            recommendations.append("Loudness below professional standards (\(String(format: "%.1f", loudness))LUFS)")
+        }
+        
+        // ========================================
+        // TIER 4: CLIPPING + PHASE ISSUES
+        // Bad gain staging on unmixed tracks
+        // ========================================
+        
+        // Clipping with phase issues - Amateur recording
+        let clippingWithPhaseTest = peakLevel > -1.0 && monoCompatibility < 0.6
+        detectionCriteria["Clipping + Phase Issues"] = clippingWithPhaseTest
+        if clippingWithPhaseTest {
+            failedTests += 3  // High weight - clear amateur mistake
+            recommendations.append("🔴 Clipping (\(String(format: "%.1f", peakLevel))dB) with phase issues - poor gain staging")
+        }
+        
+        // Just clipping (might be intentional loudness push)
+        let justClippingTest = !clippingWithPhaseTest && peakLevel > -0.5
+        detectionCriteria["Clipping"] = justClippingTest
+        if justClippingTest {
+            failedTests += 1
+            recommendations.append("Peaks clipping at \(String(format: "%.1f", peakLevel))dBFS - reduce levels")
+        }
+        
+        // ========================================
+        // TIER 5: SUPPORTING INDICATORS
+        // Additional evidence but lower weight
+        // ========================================
+        
+        // No limiting: True peak way below optimal
+        let noLimitingTest = truePeak < -4.0
+        detectionCriteria["No Limiting"] = noLimitingTest
+        if noLimitingTest {
+            failedTests += 1
+            recommendations.append("True peak at \(String(format: "%.1f", truePeak))dBFS - no limiting applied")
+        }
+        
+        // Phase coherence issues
         let phaseTest = phaseCoherence < 0.6
-        detectionCriteria["Low Phase Coherence (<60%)"] = phaseTest
+        detectionCriteria["Low Phase Coherence"] = phaseTest
         if phaseTest {
             failedTests += 1
             recommendations.append("Low phase coherence (\(String(format: "%.0f", phaseCoherence * 100))%) - check stereo imaging")
         }
         
-        // TEST 11: Reverb/Effects Detection
-        // Check for presence of reverb by analyzing high frequency energy and stereo correlation
-        // Reverb adds: high frequency content (air/presence), stereo width, and reduces mono compatibility
-        let airEnergy = spectralBalance.airEnergy * 100.0  // Convert to percentage (12kHz-20kHz)
-        let presenceEnergy = spectralBalance.presenceEnergy * 100.0  // Convert to percentage (6kHz-12kHz)
-        
-        // Unmixed tracks typically have:
-        // - Low air frequencies (<15% unless cymbals-heavy)
-        // - Dry presence (15-25% without reverb)
-        // - Better mono compatibility (>70% without stereo effects)
-        let hasLowAir = airEnergy < 15.0
-        let hasDryPresence = presenceEnergy < 20.0
-        let noReverbIndicators = hasLowAir && hasDryPresence && monoCompatibility > 0.7
-        
-        detectionCriteria["No Reverb/Effects Detected"] = noReverbIndicators
-        if noReverbIndicators {
+        // Uncontrolled transients
+        let wildTransientsTest = punchiness > 90.0 || punchiness < 35.0
+        detectionCriteria["Uncontrolled Transients"] = wildTransientsTest
+        if wildTransientsTest {
             failedTests += 1
-            recommendations.append("Dry sound with no reverb/delay effects - add spatial processing for depth")
+            if punchiness > 90.0 {
+                recommendations.append("Very high punchiness (\(String(format: "%.0f", punchiness))) - uncontrolled transients")
+            } else {
+                recommendations.append("Very low punchiness (\(String(format: "%.0f", punchiness))) - lacks punch")
+            }
         }
         
-        // TEST 12: Combined Level Test - CRITICAL INDICATOR
-        // If peak is quiet AND loudness is low AND DR is high = definitely unmixed
-        let combinedLevelTest = (peakLevel < -6.0 && loudness < -18.0 && dynamicRange > 14.0)
-        detectionCriteria["Low Overall Levels"] = combinedLevelTest
-        if combinedLevelTest {
-            failedTests += 2  // Weight this more heavily
-            recommendations.append("Overall levels are too quiet - track needs gain staging and limiting")
+        // ========================================
+        // TIER 6: COMBINATION PATTERNS - CRITICAL
+        // Multiple issues together = unmixed/poorly processed
+        // ========================================
+        
+        // Poor Processing Pattern #1: Narrow + Wild Dynamics + Clipping
+        // This is a clear sign of unmixed or badly processed audio
+        let poorProcessingPattern1 = stereoWidth < 0.35 && loudnessRange > 20.0 && peakLevel > -1.0
+        detectionCriteria["Poor Processing (Narrow+Wild+Clip)"] = poorProcessingPattern1
+        if poorProcessingPattern1 {
+            failedTests += 3  // Very high weight - this combo is a clear red flag
+            recommendations.append("🚨 Multiple processing issues: narrow stereo (\(String(format: "%.0f", stereoWidth * 100))%) + uncontrolled dynamics (\(String(format: "%.1f", loudnessRange))LU) + clipping")
         }
         
-        // Calculate overall assessment - REQUIRE 7+ FAILS out of 14 points (50%+)
-        let totalTests = 12
-        let confidenceScore = (Double(failedTests) / 14.0) * 100.0  // Out of 14 points max
-        let isLikelyUnmixed = failedTests >= 7  // Need 7+ points to flag as unmixed (50% threshold)
+        // Poor Processing Pattern #2: High LRA + Low CF = Uncompressed but loud
+        // Professional mixes don't have this combination
+        let poorProcessingPattern2 = loudnessRange > 18.0 && crestFactor < 10.0 && loudness > -18.0
+        detectionCriteria["Poor Processing (Wild+Loud)"] = poorProcessingPattern2
+        if poorProcessingPattern2 {
+            failedTests += 2  // High weight
+            recommendations.append("⚡ Conflicting dynamics: high loudness range (\(String(format: "%.1f", loudnessRange))LU) without proper compression - inconsistent processing")
+        }
+        
+        // ========================================
+        // COMPOSITE SCORING
+        // Maximum: 4+2+2+1+3+1+3+1+3+1+1+1+1+3+2 = 29 points
+        // Threshold: 7+ points = Unmixed (~24% failure rate)
+        // ========================================
+        
+        let totalTests = 15
+        let maxPoints = 29.0
+        let confidenceScore = (Double(failedTests) / maxPoints) * 100.0
+        
+        // CRITICAL OVERRIDE: If mono compatibility is extremely poor (<45%), ALWAYS flag as unmixed
+        // Professional mixes would NEVER ship with mono this bad
+        let criticalMonoFailure = monoCompatibility < 0.45
+        let isLikelyUnmixed = failedTests >= 7 || criticalMonoFailure  // Need significant failures OR critical mono issue
         
         // Calculate mixing quality score
-        let mixingQualityScore = max(0, 100.0 - (Double(failedTests) / 14.0 * 100.0))
+        let mixingQualityScore = max(0, 100.0 - (Double(failedTests) / maxPoints * 100.0))
         
         // Add overall recommendation
         if isLikelyUnmixed {
-            recommendations.insert("⚠️ This appears to be an UNMIXED recording (\(failedTests)/\(totalTests) indicators)", at: 0)
-            recommendations.append("Apply compression, EQ, limiting, and level matching to create a professional mix")
+            recommendations.insert("⚠️ UNMIXED AUDIO DETECTED (\(failedTests)/\(Int(maxPoints)) points failed)", at: 0)
+            recommendations.append("💡 Apply: Compression → EQ → Limiting → Check mono compatibility")
         } else if mixingQualityScore < 75 {
-            recommendations.insert("⚡ Mix quality could be improved (\(String(format: "%.0f", mixingQualityScore))%)", at: 0)
+            recommendations.insert("⚡ Mix quality could be improved (\(String(format: "%.0f", mixingQualityScore))% score)", at: 0)
         }
-        // Don't show "Professionally mixed" message - it's redundant
         
         print("\n🔍 UNMIXED DETECTION ANALYSIS:")
-        print("   Failed tests: \(failedTests)/\(totalTests)")
+        print("   Failed points: \(failedTests)/\(Int(maxPoints))")
         print("   Confidence: \(String(format: "%.0f", confidenceScore))%")
-        print("   Is Unmixed: \(isLikelyUnmixed)")
+        print("   Is Unmixed: \(isLikelyUnmixed) \(criticalMonoFailure ? "(CRITICAL MONO OVERRIDE)" : "")")
         print("   Mixing Quality: \(String(format: "%.0f", mixingQualityScore))%")
-        print("   Criteria: \(detectionCriteria)")
+        print("\n   📊 RAW METRICS:")
+        print("      Mono Compatibility: \(String(format: "%.1f", monoCompatibility * 100))%")
+        print("      Dynamic Range: \(String(format: "%.1f", dynamicRange))dB")
+        print("      Crest Factor: \(String(format: "%.1f", crestFactor))dB")
+        print("      Loudness: \(String(format: "%.1f", loudness))LUFS")
+        print("      Peak Level: \(String(format: "%.1f", peakLevel))dBFS")
+        print("      Stereo Width: \(String(format: "%.0f", stereoWidth * 100))%")
+        print("      Stereo Balance: \(String(format: "%.1f", stereoBalance * 100))%")
+        print("      Phase Coherence: \(String(format: "%.1f", phaseCoherence * 100))%")
+        print("      Loudness Range: \(String(format: "%.1f", loudnessRange))LU")
+        print("\n   ✓ FAILED TESTS:")
+        for (key, value) in detectionCriteria.sorted(by: { $0.key < $1.key }) where value {
+            print("      • \(key)")
+        }
         
         return UnmixedDetectionResult(
             isLikelyUnmixed: isLikelyUnmixed,
@@ -2988,15 +3008,16 @@ enum AudioKitError: Error {
             detectionCriteria: detectionCriteria,
             mixingQualityScore: mixingQualityScore,
             recommendations: recommendations,
-            dynamicRangeTest: dynamicRangeTest,
-            peakToLoudnessRatioTest: plrTest,
-            transientAnalysis: punchiTest,
-            rmsVsPeakTest: rmsVsPeakTest,
-            frequencyMaskingTest: lraTest,  // Repurposed for LRA
-            loudnessTest: loudnessTest,
-            crestFactorTest: crestFactorTest
+            dynamicRangeTest: dynamicRange > 15.0,
+            peakToLoudnessRatioTest: (peakLevel - loudness) > 18.0,
+            transientAnalysis: wildTransientsTest,
+            rmsVsPeakTest: (peakLevel - rmsLevel) > 15.0,
+            frequencyMaskingTest: loudnessRange > 15.0,
+            loudnessTest: loudness < -18.0,
+            crestFactorTest: crestFactor > 14.0
         )
     }
+    */
     
     // MARK: - Helper Functions for Mastering Analysis
     
