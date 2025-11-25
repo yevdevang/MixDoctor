@@ -230,22 +230,14 @@ struct AudioFileRow: View {
             // Score badge
             if let result = audioFile.analysisResult {
                 VStack(spacing: 2) {
-                    if !result.isProfessionallyMixed || result.overallScore == 0 {
-                        // Show "Unmixed" for unmixed/low quality tracks
-                        Text("Unmixed")
-                            .font(.caption)
-                            .fontWeight(.bold)
-                            .foregroundColor(.red)
-                    } else {
-                        Text("\(Int(result.overallScore))")
-                            .font(.title3)
-                            .fontWeight(.bold)
-                            .foregroundColor(Color.scoreColor(for: result.overallScore))
-                        
-                        Text("score")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
+                    Text("\(Int(result.overallScore))")
+                        .font(.title3)
+                        .fontWeight(.bold)
+                        .foregroundColor(Color.scoreColor(for: result.overallScore))
+                    
+                    Text("score")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
             }
             

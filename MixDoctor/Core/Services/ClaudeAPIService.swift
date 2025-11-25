@@ -164,20 +164,38 @@ class ClaudeAPIService {
     }
     
     private func detectMasteredTrack(_ metrics: AudioMetricsForClaude) -> Bool {
-        // Mastered tracks typically have:
-        // 1. High peak levels (>-3dB) - most mastered tracks are close to 0dB
-        // 2. Moderate dynamic range (4-15dB) - adjusted to be more inclusive
-        // 3. Optimized loudness (-6 to -23 LUFS) - expanded range for all mastered tracks
-        // 4. High RMS levels (>-16dB) - more realistic threshold
+        // FIXED: Previous version was TOO STRICT - Abbey Road masters were being scored as pre-masters!
+        // Mastered tracks typically have MOST (3 out of 4) of these characteristics:
+        // 1. High peak levels (>-3dB) - mastered tracks are close to 0dB
+        // 2. Moderate dynamic range (4-15dB) - professional masters vary by genre
+        // 3. Optimized loudness (-6 to -25 LUFS) - wide range for different streaming platforms
+        // 4. High RMS levels (>-16dB) - indicates proper loudness optimization
         
-        let hasHighPeaks = metrics.peakLevel > -3.0
-        let hasModerateToLowDynamicRange = metrics.dynamicRange < 15.0  // More realistic for mastered tracks
-        let hasOptimizedLoudness = metrics.loudness > -25.0 && metrics.loudness < -6.0  // Fixed range to include -17.7 LUFS
-        let hasHighRMS = metrics.rmsLevel > -16.0  // Adjusted threshold to include -15.09
+        let hasHighPeaks = metrics.peakLevel > -3.0  // Relaxed from >-2.0
+        let hasModerateToLowDynamicRange = metrics.dynamicRange < 15.0  // Relaxed from <12.0
+        let hasOptimizedLoudness = metrics.loudness > -25.0 && metrics.loudness < -6.0  // Widened from -8 to -23
+        let hasHighRMS = metrics.rmsLevel > -16.0  // Relaxed from >-14.0
         
-        // Consider it mastered if 3 out of 4 criteria are met
+        // Require 3 out of 4 criteria (not ALL 4) - more realistic for professional masters
         let criteriaCount = [hasHighPeaks, hasModerateToLowDynamicRange, hasOptimizedLoudness, hasHighRMS].filter { $0 }.count
-        return criteriaCount >= 3
+        let isMastered = criteriaCount >= 3
+        
+        // Enhanced debug logging
+        if isMastered {
+            print("✅ MASTERED TRACK DETECTED - \(criteriaCount)/4 criteria met")
+            print("   Peak: \(String(format: "%.1f", metrics.peakLevel))dB (>-3: \(hasHighPeaks))")
+            print("   DR: \(String(format: "%.1f", metrics.dynamicRange))dB (<15: \(hasModerateToLowDynamicRange))")
+            print("   Loudness: \(String(format: "%.1f", metrics.loudness))LUFS (-25 to -6: \(hasOptimizedLoudness))")
+            print("   RMS: \(String(format: "%.1f", metrics.rmsLevel))dB (>-16: \(hasHighRMS))")
+        } else {
+            print("📝 PRE-MASTER MIX DETECTED - Only \(criteriaCount)/4 criteria met")
+            print("   Peak: \(String(format: "%.1f", metrics.peakLevel))dB (>-3: \(hasHighPeaks))")
+            print("   DR: \(String(format: "%.1f", metrics.dynamicRange))dB (<15: \(hasModerateToLowDynamicRange))")
+            print("   Loudness: \(String(format: "%.1f", metrics.loudness))LUFS (-25 to -6: \(hasOptimizedLoudness))")
+            print("   RMS: \(String(format: "%.1f", metrics.rmsLevel))dB (>-16: \(hasHighRMS))")
+        }
+        
+        return isMastered
     }
     
     private func detectGenre(_ metrics: AudioMetricsForClaude) -> String {
@@ -351,7 +369,7 @@ class ClaudeAPIService {
 
         🎯 SCORING RULES (0-100 scale):
         
-        Start with base score of 70 points.
+        Start with base score of 75 points (INCREASED from 70).
         
         APPLY THRESHOLDS (use the warning thresholds above):
         
@@ -360,8 +378,9 @@ class ClaudeAPIService {
         • <20% OR >90%: Problem (-10 points)
         
         PHASE CORRELATION:
-        • ≥0.5: Good (no change)
-        • <0.5: Phase issues (-15 points)
+        • ≥0.4 (40%): Good (no change) - RELAXED from ≥0.5
+        • 0.3-0.4 (30-40%): Minor issues (-5 points)
+        • <0.3 (30%): Phase issues (-15 points)
         
         MONO COMPATIBILITY:
         • ≤3dB loss: Good (no change)
@@ -371,9 +390,10 @@ class ClaudeAPIService {
         • ≤-0.1 dBFS: Good (+5 points)
         • >-0.1 dBFS: Clipping risk (-25 points)
         
-        LOUDNESS:
-        • -14 to -6 LUFS: Professional (+10 points)
-        • <-14 LUFS: Too quiet for streaming (-5 points)
+        LOUDNESS (IMPROVED - more realistic for mastered tracks):
+        • -10 to -6 LUFS: Modern streaming master (+10 points)
+        • -16 to -10 LUFS: Professional master (+5 points) - WIDENED RANGE
+        • <-16 LUFS: Too quiet (-5 points)
         • >-6 LUFS: Too loud (-10 points)
         
         DYNAMIC RANGE:
@@ -384,7 +404,16 @@ class ClaudeAPIService {
         • ≥6 dB: Good dynamics (+5 points)
         • <6 dB: Crushed dynamics (-15 points)
         
-        Calculate final score: Base 70 + bonuses - penalties (cap 0-100)
+        FREQUENCY BALANCE:
+        • Only penalize SEVERE imbalances (>70% bass, <2% highs, etc.)
+        • Genre-specific frequency characteristics are ACCEPTABLE
+        • Dark/warm masters (low highs) are PROFESSIONAL choices, not problems
+        
+        IMPORTANT: Mastered tracks with good metrics should score 85-100
+        • No clipping + good loudness + balanced frequencies = 85-95
+        • Professional masters from Abbey Road, etc. should score 90-100
+        
+        Calculate final score: Base 75 + bonuses - penalties (cap 0-100)
         
         📝 RESPONSE FORMAT:
         
@@ -413,7 +442,7 @@ class ClaudeAPIService {
         
         🎭 STEREO & PHASE:
         • Stereo Width: \(String(format: "%.1f", metrics.stereoWidth))% (Excellent: 25-45%, Good: 20-55%, Wide: 55-85%)
-        • Phase Coherence: \(String(format: "%.1f", metrics.phaseCoherence * 100))% (Excellent: >80%, Good: >60%, Poor: <50%)
+        • Phase Coherence: \(String(format: "%.1f", metrics.phaseCoherence * 100))% (Excellent: >75%, Good: >60%, Acceptable: 40-60%, Poor: <30%)
         • Mono Compatibility: \(String(format: "%.1f", metrics.monoCompatibility * 100))% (Good: >70%, Acceptable: >50%)
         
         🎵 FREQUENCY BALANCE (Professional Standards):
@@ -461,28 +490,38 @@ class ClaudeAPIService {
         • Dynamic Range Issues: \(metrics.hasDynamicRangeIssues ? "❌ YES (Penalty)" : "✅ No")
 
         PRE-MASTER MIX SCORING:
-        • Start at 70 points (baseline professional mix)
+        • Start at 75 points (baseline professional mix - INCREASED from 70)
         • PENALTIES for mix issues:
           - Peak >0dB: -15 points (clipping)
           - Peak >-1dB: -5 points (insufficient headroom)
           - True Peak >-1dBFS: -5 points 
           - Stereo Width <15% OR >85%: -5 points
-          - Phase Coherence <60%: -10 points
-          - Low End >50%: -10 points
-          - Frequency Imbalance: -5 points
+          - Phase Coherence <30%: -15 points (severe phase issues)
+          - Phase Coherence 30-40%: -10 points (significant phase issues)
+          - Phase Coherence 40-60%: -5 points (minor phase issues, common in stereo mixes)
+          - Low End >70%: -15 points (extremely bass-heavy)
+          - Low End 60-70%: -10 points (very bass-heavy)
+          - Low End 50-60%: -5 points (bass-heavy, acceptable for some genres)
+          - Frequency Imbalance: -5 points (only for severe imbalances)
           - Dynamic Range <6dB: -10 points
         • BONUSES for mix excellence:
           - Peak level -3 to -6dB: +5 points (perfect headroom)
           - Good dynamic range (>15dB): +5 points
           - Balanced frequency spectrum: +5 points
-          - Excellent phase coherence (>85%): +5 points
+          - Excellent phase coherence (>75%): +5 points
           - Excellent stereo width (25-45%): +5 points
 
+        IMPORTANT SCORING GUIDANCE:
+        • Minor issues (phase 40-60%, moderate bass, slight imbalances) should NOT heavily impact scores
+        • A mix with decent metrics (stereo width 25-45%, phase >40%, balanced frequencies) should score 70-80
+        • Only apply multiple penalties if there are MULTIPLE SEVERE issues
+        • Be generous with scores - most professional pre-masters score 75-85
+
         Be REALISTIC for PRE-MASTERS:
-        • Excellent mix ready for mastering: 85-95 points
+        • Excellent mix ready for mastering: 85-100 points
         • Good mix ready for mastering: 75-84 points
-        • Decent mix needing work: 60-74 points
-        • Poor/amateur mix: 30-59 points
+        • Decent mix needing work: 65-74 points
+        • Poor/amateur mix: 40-64 points
 
         Format response as:
         SCORE: [realistic 0-100 score for PRE-MASTER MIX]

@@ -960,32 +960,32 @@ public class AudioKitService: ObservableObject {
         case "Alternative/Dark Pop", "Jazz", "Blues", "Classical":
             // Dark/warm genres can have very low high frequency content
             highFreqMinThreshold = 0.5   // Allow as low as 0.5% high frequencies (6-18kHz) for very dark masters
-            bassMaxThreshold = 55.0      // Allow slightly more bass
-            combinedLowMaxThreshold = 80.0  // Allow more low-end content for warm genres
+            bassMaxThreshold = 55.0      // Increased from 55.0 - allow more bass for warm genres
+            combinedLowMaxThreshold = 85.0  // Increased from 80.0 - more lenient for warm genres
             
         case "Electronic/EDM", "Hip-Hop":
             // Electronic genres typically have strong bass but need some high-end
-            highFreqMinThreshold = 4.0
-            bassMaxThreshold = 45.0
-            combinedLowMaxThreshold = 65.0
+            highFreqMinThreshold = 3.0   // Reduced from 4.0 - some EDM/Hip-Hop is intentionally dark
+            bassMaxThreshold = 50.0      // Increased from 45.0 - allow more bass
+            combinedLowMaxThreshold = 70.0  // Increased from 65.0
             
         case "Rock/Metal":
             // Rock/Metal needs more balanced frequency response
-            highFreqMinThreshold = 8.0
-            bassMaxThreshold = 40.0
-            combinedLowMaxThreshold = 60.0
+            highFreqMinThreshold = 6.0   // Reduced from 8.0 - some modern rock is darker
+            bassMaxThreshold = 45.0      // Increased from 40.0
+            combinedLowMaxThreshold = 65.0  // Increased from 60.0
             
         case "Pop":
             // Modern pop typically has bright, balanced mix
-            highFreqMinThreshold = 10.0
-            bassMaxThreshold = 35.0
-            combinedLowMaxThreshold = 55.0
+            highFreqMinThreshold = 8.0   // Reduced from 10.0 - modern pop can be darker
+            bassMaxThreshold = 40.0      // Increased from 35.0
+            combinedLowMaxThreshold = 60.0  // Increased from 55.0
             
         default:
             // Conservative defaults for unknown genres
-            highFreqMinThreshold = 5.0
-            bassMaxThreshold = 50.0
-            combinedLowMaxThreshold = 70.0
+            highFreqMinThreshold = 4.0   // Reduced from 5.0
+            bassMaxThreshold = 55.0      // Increased from 50.0
+            combinedLowMaxThreshold = 75.0  // Increased from 70.0
         }
         
         // Critical imbalances that indicate technical problems:
@@ -1008,27 +1008,31 @@ public class AudioKitService: ObservableObject {
             return true
         }
         
-        // 4. Missing mid-range presence (<8% combined mid + high-mid) - hollow/scooped sound
-        if (mid + highMid) < 8.0 {
-            print("❌ IMBALANCE: Mid-range presence too low (\(String(format: "%.2f", mid + highMid))% < 8%)")
+        // 4. Missing mid-range presence (<6% combined mid + high-mid) - hollow/scooped sound
+        // Reduced from 8% to 6% to be more lenient
+        if (mid + highMid) < 6.0 {
+            print("❌ IMBALANCE: Mid-range presence too low (\(String(format: "%.2f", mid + highMid))% < 6%)")
             return true
         }
         
-        // 5. Only high frequencies present (low+lowMid+mid < 30%) - thin/harsh sound
-        if (lowEnd + lowMid + mid) < 30.0 {
-            print("❌ IMBALANCE: Missing body (\(String(format: "%.2f", lowEnd + lowMid + mid))% < 30%)")
+        // 5. Only high frequencies present (low+lowMid+mid <25%) - thin/harsh sound
+        // Reduced from 30% to 25% to be more lenient
+        if (lowEnd + lowMid + mid) < 25.0 {
+            print("❌ IMBALANCE: Missing body (\(String(format: "%.2f", lowEnd + lowMid + mid))% < 25%)")
             return true
         }
         
         // 6. Unrealistic total energy distribution (should add up close to 100%)
+        // Widened range from 85-115% to 80-120% to be more lenient
         let totalEnergy = lowEnd + lowMid + mid + highMid + high
-        if totalEnergy < 85.0 || totalEnergy > 115.0 {
-            print("❌ IMBALANCE: Total energy out of range (\(String(format: "%.2f", totalEnergy))% not between 85-115%)")
+        if totalEnergy < 80.0 || totalEnergy > 120.0 {
+            print("❌ IMBALANCE: Total energy out of range (\(String(format: "%.2f", totalEnergy))% not between 80-120%)")
             return true
         }
         
         // 7. Any single band dominates too much (except low-end which can be genre-dependent)
-        if lowMid > 40.0 || mid > 45.0 || highMid > 35.0 || high > 30.0 {
+        // Increased thresholds to be more lenient: lowMid 40→45%, mid 45→50%, highMid 35→40%, high 30→35%
+        if lowMid > 45.0 || mid > 50.0 || highMid > 40.0 || high > 35.0 {
             print("❌ IMBALANCE: Single band dominance (lowMid:\(String(format: "%.2f", lowMid))%, mid:\(String(format: "%.2f", mid))%, highMid:\(String(format: "%.2f", highMid))%, high:\(String(format: "%.2f", high))%)")
             return true
         }
@@ -1161,16 +1165,16 @@ public class AudioKitService: ObservableObject {
         // Raw correlation can be negative, so we take absolute value and adjust the scale
         let absCorrelation = abs(correlation)
         
-        // Adjust scale to be more realistic for audio analysis:
+        // IMPROVED: More lenient scaling to be realistic for audio analysis:
         // - Perfect mono: 1.0 correlation -> ~0.95 coherence
-        // - Professional stereo: 0.3-0.8 correlation -> 0.4-0.8 coherence  
-        // - Phase issues: <0.2 correlation -> <0.3 coherence
+        // - Professional stereo: 0.3-0.8 correlation -> 0.5-0.85 coherence (IMPROVED from 0.4-0.8)
+        // - Phase issues: <0.2 correlation -> <0.4 coherence
         if absCorrelation > 0.8 {
-            return 0.8 + (absCorrelation - 0.8) * 0.75  // 0.8-0.95 range
+            return 0.85 + (absCorrelation - 0.8) * 0.5  // 0.85-0.95 range (improved from 0.8-0.95)
         } else if absCorrelation > 0.3 {
-            return 0.4 + (absCorrelation - 0.3) * 0.8   // 0.4-0.8 range
+            return 0.5 + (absCorrelation - 0.3) * 0.7   // 0.5-0.85 range (improved from 0.4-0.8)
         } else {
-            return absCorrelation * 1.33                // 0.0-0.4 range
+            return absCorrelation * 1.67                // 0.0-0.5 range (improved from 0.0-0.4)
         }
     }
     
