@@ -76,7 +76,9 @@ public final class SubscriptionService {
                 isProUser = false
             }
             
+            print("✅ Updated customer info - Pro user: \(isProUser), In trial: \(isInTrialPeriod)")
         } catch {
+            print("❌ Failed to get customer info: \(error)")
         }
     }
     
@@ -85,6 +87,7 @@ public final class SubscriptionService {
     func fetchOfferings() async throws {
         let offerings = try await Purchases.shared.offerings()
         currentOffering = offerings.current
+        print("✅ Fetched offerings: \(offerings.current?.availablePackages.count ?? 0) packages")
     }
     
     // MARK: - Purchase
@@ -107,6 +110,7 @@ public final class SubscriptionService {
             isProUser = true // Paid subscribers get unlimited
         }
         
+        print("✅ Purchase successful - Pro user: \(isProUser), In trial: \(isInTrialPeriod)")
         return result.customerInfo
     }
     
@@ -130,6 +134,7 @@ public final class SubscriptionService {
             isProUser = true // Paid subscribers get unlimited
         }
         
+        print("✅ Restored purchases - Pro user: \(isProUser), In trial: \(isInTrialPeriod)")
     }
     
     // MARK: - Usage Tracking
@@ -140,6 +145,7 @@ public final class SubscriptionService {
         
         let currentCount = UserDefaults.standard.integer(forKey: analysisCountKey)
         UserDefaults.standard.set(currentCount + 1, forKey: analysisCountKey)
+        print("📊 Analysis count: \(currentCount + 1)/\(freeAnalysisLimit)")
     }
     
     func canPerformAnalysis() -> Bool {
@@ -172,6 +178,7 @@ public final class SubscriptionService {
     private func resetMonthlyCount() {
         UserDefaults.standard.set(0, forKey: analysisCountKey)
         UserDefaults.standard.set(Date(), forKey: monthlyResetKey)
+        print("🔄 Monthly analysis count reset")
     }
     
     // MARK: - Helper Methods

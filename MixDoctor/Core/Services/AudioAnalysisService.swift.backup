@@ -75,16 +75,25 @@ final class AudioAnalysisService {
                     actualURL = directory.appendingPathComponent(matchingFile)
                     fileExists = FileManager.default.fileExists(atPath: actualURL.path)
                     if fileExists {
+                        print("   ✅ Found file with decoded name: \(matchingFile)")
                     }
                 }
             }
         }
         
+        print("🔍 Pre-analysis file check:")
+        print("   File URL: \(fileURL)")
+        print("   File path: \(fileURL.path)")
+        print("   Actual URL: \(actualURL)")
+        print("   File exists: \(fileExists)")
         
         // If file doesn't exist, list directory contents for debugging
         if !fileExists {
             let directory = fileURL.deletingLastPathComponent()
+            print("❌ File not found. Directory: \(directory.path)")
             if let contents = try? FileManager.default.contentsOfDirectory(atPath: directory.path) {
+                print("   Files in directory: \(contents.count)")
+                contents.prefix(10).forEach { print("   - \($0)") }
             }
         }
         
@@ -137,6 +146,24 @@ final class AudioAnalysisService {
         let midEnergy: Float = (lowMids + mids) / 2.0  // 250-2000 Hz
         let highEnergy: Float = (highMids + highs) / 2.0  // 2000-20000 Hz
         
+        print("   📊 Extracted Features:")
+        print("      Peak Level: \(peakLevelDB) dBFS")
+        print("      RMS Level: \(rmsLevelDB) dBFS")
+        print("      Dynamic Range: \(loudnessFeatures.dynamicRange) dB")
+        print("      Stereo Width: \(stereoFeatures.stereoWidth)")
+        print("      Phase Coherence: \(stereoFeatures.correlation)")
+        print("      Frequency Bands:")
+        print("        Sub Bass (20-60): \(subBass)")
+        print("        Bass (60-250): \(bass)")
+        print("        Low Mids (250-500): \(lowMids)")
+        print("        Mids (500-2k): \(mids)")
+        print("        High Mids (2k-6k): \(highMids)")
+        print("        Highs (6k-20k): \(highs)")
+        print("      Combined:")
+        print("        Low: \(lowEnergy)")
+        print("        Mid: \(midEnergy)")
+        print("        High: \(highEnergy)")
+        print("      Spectral Centroid: \(frequencyFeatures.spectralCentroid) Hz")
         
         // ✅ KEEP: OpenAI integration for intelligent analysis
         // Analyze with OpenAI
@@ -146,6 +173,16 @@ final class AudioAnalysisService {
         let subscriptionService = await SubscriptionService.shared
         let isProUser = await subscriptionService.isProUser
         
+        print("   🤖 Analyzing with OpenAI \(isProUser ? "GPT-4o (Pro)" : "GPT-4o-mini (Free)")...")
+        print("   📤 Sending to OpenAI:")
+        print("      Peak Level: \(peakLevelDB) dBFS")
+        print("      RMS Level: \(rmsLevelDB) dBFS")
+        print("      Dynamic Range: \(loudnessFeatures.dynamicRange) dB")
+        print("      Stereo Width: \(stereoFeatures.stereoWidth * 100)%")
+        print("      Phase Coherence: \(stereoFeatures.correlation)")
+        print("      Low Energy: \(lowEnergy)")
+        print("      Mid Energy: \(midEnergy)")
+        print("      High Energy: \(highEnergy)")
         
         let aiResponse = try await OpenAIService.shared.analyzeAudioFeatures(
             peakLevel: peakLevelDB,
@@ -161,6 +198,11 @@ final class AudioAnalysisService {
             isProUser: isProUser
         )
         
+        print("   📥 OpenAI Response:")
+        print("      Score: \(aiResponse.overallQuality)")
+        print("      Stereo: \(aiResponse.stereoAnalysis)")
+        print("      Frequency: \(aiResponse.frequencyAnalysis)")
+        print("      Dynamics: \(aiResponse.dynamicsAnalysis)")
         
         // 🔄 REPLACE: Manual scoring calculations - AudioKit + AI can provide better metrics
         // Calculate a technical score based on objective metrics as a sanity check
@@ -212,38 +254,54 @@ final class AudioAnalysisService {
             let midPercent = Double(midEnergy / totalFreqEnergy * 100)
             let highPercent = Double(highEnergy / totalFreqEnergy * 100)
             
+            print("   📊 Checking frequency balance:")
+            print("      Low: \(String(format: "%.1f", lowPercent))%")
+            print("      Mid: \(String(format: "%.1f", midPercent))%")
+            print("      High: \(String(format: "%.1f", highPercent))%")
             
             // Ideal range: 25-45% per band (with some flexibility)
             // Severely imbalanced: >60% or <15% in any band
             if lowPercent > 60 {
                 technicalScore -= 30  // Extremely bass-heavy
+                print("      ❌ Extremely bass-heavy: -30 points")
             } else if lowPercent > 50 {
                 technicalScore -= 20  // Very bass-heavy
+                print("      ⚠️ Very bass-heavy: -20 points")
             } else if lowPercent < 15 {
                 technicalScore -= 20  // Lacking bass
+                print("      ⚠️ Lacking bass: -20 points")
             }
             
             if midPercent < 20 {
                 technicalScore -= 25  // Severely lacking mids (vocals, instruments)
+                print("      ❌ Severely lacking mids: -25 points")
             } else if midPercent < 25 {
                 technicalScore -= 15  // Lacking mids
+                print("      ⚠️ Lacking mids: -15 points")
             } else if midPercent > 60 {
                 technicalScore -= 20  // Too mid-heavy
+                print("      ⚠️ Too mid-heavy: -20 points")
             }
             
             if highPercent > 50 {
                 technicalScore -= 25  // Extremely harsh/bright
+                print("      ❌ Extremely harsh/bright: -25 points")
             } else if highPercent > 45 {
                 technicalScore -= 15  // Very bright
+                print("      ⚠️ Very bright: -15 points")
             } else if highPercent < 10 {
                 technicalScore -= 20  // Dull/muddy
+                print("      ⚠️ Dull/muddy mix: -20 points")
             }
         }
         
+        print("   🔬 Technical Score (objective): \(Int(technicalScore))")
+        print("   🤖 AI Score: \(Int(aiResponse.overallQuality))")
         
         // DISABLED: Use Claude's intelligent score instead of max()
         // let finalScore = max(technicalScore, aiResponse.overallQuality)
         let finalScore = aiResponse.overallQuality  // Use Claude's score directly
+        print("   ⭐ Final Score (using Claude): \(Int(finalScore))")
         
         // ✅ KEEP: Result creation and data mapping - this structure is good
         // Create analysis result
@@ -273,6 +331,10 @@ final class AudioAnalysisService {
             result.highBalance = 33.3
         }
         
+        print("   📊 Frequency Balance (normalized):")
+        print("      Low: \(result.lowEndBalance)%")
+        print("      Mid: \(result.midBalance)%")
+        print("      High: \(result.highBalance)%")
         
         // Apply OpenAI analysis (use our calculated final score instead of raw AI score)
         result.overallScore = finalScore
@@ -302,6 +364,13 @@ final class AudioAnalysisService {
         result.hasDynamicRangeIssues = (loudnessFeatures.dynamicRange < 4.0 || 
                                        loudnessFeatures.dynamicRange > 18.0)
         
+        print("   ✅ OpenAI Analysis Complete:")
+        print("      Overall Quality: \(aiResponse.overallQuality)/100")
+        print("      Stereo: \(aiResponse.stereoAnalysis)")
+        print("      Frequency: \(aiResponse.frequencyAnalysis)")
+        print("      Dynamics: \(aiResponse.dynamicsAnalysis)")
+        print("      Summary: \(aiResponse.detailedSummary)")
+        print("      Recommendations: \(aiResponse.recommendations.count)")
         
         analysisProgress = 1.0
         

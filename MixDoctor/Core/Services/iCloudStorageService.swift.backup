@@ -19,15 +19,23 @@ final class iCloudStorageService {
         // Try with nil (uses default container)
         if let url = fileManager.url(forUbiquityContainerIdentifier: nil) {
             let documentsURL = url.appendingPathComponent("Documents")
+            print("✅ iCloud container (nil): \(url.path)")
+            print("✅ Documents path: \(documentsURL.path)")
             return documentsURL
         }
         
         // Try with explicit container identifier
         if let url = fileManager.url(forUbiquityContainerIdentifier: "iCloud.com.yevgenylevin.animated.MixDoctor") {
             let documentsURL = url.appendingPathComponent("Documents")
+            print("✅ iCloud container (explicit): \(url.path)")
+            print("✅ Documents path: \(documentsURL.path)")
             return documentsURL
         }
         
+        print("❌ iCloud container not available")
+        print("   • Make sure iCloud Drive is enabled in device Settings")
+        print("   • Check that app is properly signed")
+        print("   • Verify iCloud capability is enabled in Xcode")
         return nil
     }
     
@@ -112,6 +120,7 @@ final class iCloudStorageService {
                 return status == .current
             }
         } catch {
+            print("Error checking download status: \(error)")
         }
         
         return false
@@ -167,6 +176,7 @@ final class iCloudStorageService {
                 }
             }
         } catch {
+            print("Error getting download progress: \(error)")
         }
         
         return nil
@@ -205,6 +215,7 @@ final class iCloudStorageService {
             // Move file to iCloud
             if !fileManager.fileExists(atPath: iCloudFile.path) {
                 try fileManager.moveItem(at: localFile, to: iCloudFile)
+                print("✅ Migrated \(fileName) to iCloud")
             }
         }
     }
@@ -242,6 +253,7 @@ final class iCloudStorageService {
             // Move file to local storage
             if !fileManager.fileExists(atPath: localFile.path) {
                 try fileManager.moveItem(at: iCloudFile, to: localFile)
+                print("✅ Migrated \(fileName) to local storage")
             }
         }
     }
@@ -310,63 +322,93 @@ final class iCloudStorageService {
         let allFiles = try getAllAudioFilesWithStatus()
         let iCloudFiles = allFiles.filter { $0.isICloudFile }
         
+        print("📥 Starting download of \(iCloudFiles.count) iCloud files...")
         
         for fileInfo in iCloudFiles {
             if fileInfo.isDownloaded {
                 alreadyLocal += 1
+                print("✅ Already downloaded: \(fileInfo.url.lastPathComponent)")
             } else {
                 do {
+                    print("⬇️ Downloading: \(fileInfo.url.lastPathComponent)")
                     try await ensureFileIsDownloaded(at: fileInfo.url)
                     downloaded += 1
+                    print("✅ Downloaded: \(fileInfo.url.lastPathComponent)")
                 } catch {
                     failed += 1
+                    print("❌ Failed to download: \(fileInfo.url.lastPathComponent) - \(error)")
                 }
             }
         }
         
+        print("📥 Download complete: \(downloaded) downloaded, \(alreadyLocal) already local, \(failed) failed")
         return (downloaded: downloaded, alreadyLocal: alreadyLocal, failed: failed)
     }
     
     /// Print comprehensive status of all files
     func printFileStatus() {
+        print("\n🔍 COMPREHENSIVE FILE STATUS CHECK")
+        print("================================")
         
         // Check iCloud availability
+        print("☁️ iCloud Status:")
         if let iCloudURL = iCloudContainerURL {
+            print("   ✅ iCloud available at: \(iCloudURL.path)")
         } else {
+            print("   ❌ iCloud not available")
         }
         
         // Get all files
         do {
             let allFiles = try getAllAudioFilesWithStatus()
             
+            print("\n📊 File Summary:")
+            print("   Total files: \(allFiles.count)")
             
             let iCloudFiles = allFiles.filter { $0.isICloudFile }
             let localFiles = allFiles.filter { !$0.isICloudFile }
             let downloadedICloudFiles = iCloudFiles.filter { $0.isDownloaded }
             let notDownloadedICloudFiles = iCloudFiles.filter { !$0.isDownloaded }
             
+            print("   iCloud files: \(iCloudFiles.count)")
+            print("   - Downloaded: \(downloadedICloudFiles.count)")
+            print("   - Not downloaded: \(notDownloadedICloudFiles.count)")
+            print("   Local files: \(localFiles.count)")
             
             // List all files with details
+            print("\n📁 Detailed File List:")
             
             if !iCloudFiles.isEmpty {
+                print("\n☁️ iCloud Files:")
                 for (index, file) in iCloudFiles.enumerated() {
                     let status = file.isDownloaded ? "✅ Downloaded" : "⏳ Not Downloaded"
                     let sizeStr = file.size.map { formatFileSize($0) } ?? "Unknown size"
+                    print("   \(index + 1). \(file.url.lastPathComponent)")
+                    print("      Status: \(status)")
+                    print("      Size: \(sizeStr)")
+                    print("      Path: \(file.url.path)")
                 }
             }
             
             if !localFiles.isEmpty {
+                print("\n💾 Local Files:")
                 for (index, file) in localFiles.enumerated() {
                     let sizeStr = file.size.map { formatFileSize($0) } ?? "Unknown size"
+                    print("   \(index + 1). \(file.url.lastPathComponent)")
+                    print("      Size: \(sizeStr)")
+                    print("      Path: \(file.url.path)")
                 }
             }
             
             if allFiles.isEmpty {
+                print("   No audio files found in storage")
             }
             
         } catch {
+            print("❌ Error checking files: \(error)")
         }
         
+        print("================================\n")
     }
     
     private func formatFileSize(_ bytes: Int64) -> String {

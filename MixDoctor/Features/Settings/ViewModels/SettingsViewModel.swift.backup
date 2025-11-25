@@ -14,6 +14,7 @@ final class SettingsViewModel {
             guard !isInitializing else { return }
             cloudStore.set(selectedTheme, forKey: "theme")
             cloudStore.synchronize()
+            print("☁️ Theme saved to iCloud: \(selectedTheme)")
             
             // Notify ContentView to update immediately
             NotificationCenter.default.post(name: NSNotification.Name("ThemeDidChange"), object: nil)
@@ -59,8 +60,10 @@ final class SettingsViewModel {
             if let localTheme = UserDefaults.standard.string(forKey: "theme") {
                 cloudStore.set(localTheme, forKey: "theme")
                 selectedTheme = localTheme
+                print("📦 Migrated theme to iCloud: \(localTheme)")
             } else {
                 cloudStore.set("system", forKey: "theme")
+                print("📦 Set default theme in iCloud: system")
             }
         }
         
@@ -75,6 +78,7 @@ final class SettingsViewModel {
                 let newTheme = self.cloudStore.string(forKey: "theme") ?? "system"
                 if self.selectedTheme != newTheme {
                     self.selectedTheme = newTheme
+                    print("☁️ Theme updated from iCloud: \(newTheme)")
                 }
             }
         }
@@ -100,7 +104,9 @@ final class SettingsViewModel {
                 // Clear cache
                 try FileManagementService.shared.clearCache()
                 
+                print("All data has been reset")
             } catch {
+                print("Failed to reset data: \(error)")
             }
         }
     }
@@ -113,6 +119,7 @@ final class SettingsViewModel {
                 preferences.autoAnalyze = autoAnalyze
                 try await DataPersistenceService.shared.updateUserPreferences(preferences)
             } catch {
+                print("Failed to update preferences: \(error)")
             }
         }
     }

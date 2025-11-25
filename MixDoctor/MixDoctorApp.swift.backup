@@ -38,6 +38,7 @@ struct MixDoctorApp: App {
                     try? FileManager.default.removeItem(at: storeURL)
                     UserDefaults.standard.removeObject(forKey: "hadMigrationFailure")
                     UserDefaults.standard.set(currentSchemaVersion, forKey: "lastSchemaVersion")
+                    print("🔄 Removed old database (schema v\(lastSchemaVersion) -> v\(currentSchemaVersion))")
                 }
             }
             
@@ -56,7 +57,9 @@ struct MixDoctorApp: App {
             // Save schema version on successful initialization
             UserDefaults.standard.set(currentSchemaVersion, forKey: "lastSchemaVersion")
             
+            print("✅ SwiftData initialized with CloudKit: \(iCloudEnabled ? "ENABLED" : "DISABLED")")
         } catch {
+            print("❌ Initial ModelContainer creation failed: \(error)")
             // Mark that we had a failure and try to delete and recreate
             UserDefaults.standard.set(true, forKey: "hadMigrationFailure")
             
@@ -76,6 +79,7 @@ struct MixDoctorApp: App {
                 
                 // Clear the failure flag since it worked
                 UserDefaults.standard.removeObject(forKey: "hadMigrationFailure")
+                print("⚠️ ModelContainer created in fallback mode (local only)")
             } catch {
                 fatalError("Could not create ModelContainer even after deleting store: \(error)")
             }

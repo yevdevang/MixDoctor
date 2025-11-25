@@ -241,25 +241,11 @@ struct AudioFileRow: View {
                 }
             }
             
-            // Analyze icon button
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color(red: 0.435, green: 0.173, blue: 0.871),
-                                Color(red: 0.6, green: 0.3, blue: 0.95)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 36, height: 36)
-                
-                Image(systemName: "waveform.badge.magnifyingglass")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.white)
-            }
+            // Chevron indicator
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .padding(.leading, 8)
         }
         .padding(.vertical, 4)
         .onAppear {
@@ -292,6 +278,7 @@ struct AudioFileRow: View {
                     
                     // If not downloaded, trigger download
                     if downloadStatus == .notDownloaded {
+                        print("📥 Triggering download for: \(audioFile.fileName)")
                         try? FileManager.default.startDownloadingUbiquitousItem(at: fileURL)
                         isDownloading = true
                         
@@ -305,6 +292,7 @@ struct AudioFileRow: View {
                     }
                 }
             } catch {
+                print("⚠️ Could not check iCloud status for \(audioFile.fileName): \(error)")
             }
         }
     }

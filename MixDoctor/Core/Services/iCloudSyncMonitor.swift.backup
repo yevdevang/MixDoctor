@@ -24,6 +24,7 @@ final class iCloudSyncMonitor: ObservableObject {
     
     func startMonitoring() {
         guard iCloudService.isICloudAvailable else {
+            print("⚠️ iCloud not available, cannot start monitoring")
             return
         }
         
@@ -50,6 +51,7 @@ final class iCloudSyncMonitor: ObservableObject {
         query.start()
         metadataQuery = query
         
+        print("✅ Started iCloud monitoring for: \(iCloudService.getAudioFilesDirectory().path)")
     }
     
     func stopMonitoring() {
@@ -57,6 +59,7 @@ final class iCloudSyncMonitor: ObservableObject {
         metadataQuery = nil
         
         NotificationCenter.default.removeObserver(self)
+        print("🛑 Stopped iCloud monitoring")
     }
     
     // MARK: - Query Notifications
@@ -66,6 +69,7 @@ final class iCloudSyncMonitor: ObservableObject {
         
         query.disableUpdates()
         
+        print("📊 iCloud query finished gathering: \(query.resultCount) items")
         
         // Download any files that aren't downloaded yet
         Task {
@@ -80,6 +84,7 @@ final class iCloudSyncMonitor: ObservableObject {
         
         query.disableUpdates()
         
+        print("🔄 iCloud query updated: \(query.resultCount) items")
         
         // Check for new files that need downloading
         Task {
@@ -116,6 +121,7 @@ final class iCloudSyncMonitor: ObservableObject {
         isSyncing = true
         syncProgress = 0.0
         
+        print("⬇️ Downloading \(filesToDownload.count) files from iCloud...")
         
         for (index, url) in filesToDownload.enumerated() {
             do {
@@ -126,12 +132,14 @@ final class iCloudSyncMonitor: ObservableObject {
                 
                 syncProgress = Double(index + 1) / Double(filesToDownload.count)
             } catch {
+                print("❌ Failed to download \(url.lastPathComponent): \(error)")
             }
         }
         
         isSyncing = false
         syncProgress = 1.0
         
+        print("✅ Finished downloading files from iCloud")
     }
     
     private func waitForDownload(url: URL, maxAttempts: Int = 30) async {
@@ -144,6 +152,7 @@ final class iCloudSyncMonitor: ObservableObject {
                     return
                 }
             } catch {
+                print("⚠️ Error checking download status: \(error)")
             }
             
             // Wait 1 second before checking again
@@ -154,6 +163,7 @@ final class iCloudSyncMonitor: ObservableObject {
     // MARK: - Manual Sync
     
     func syncNow() async {
+        print("🔄 Manual sync triggered")
         
         // First try direct file check (more reliable in simulator)
         await checkDirectoryForFiles()
@@ -162,6 +172,7 @@ final class iCloudSyncMonitor: ObservableObject {
         if let query = metadataQuery {
             await downloadPendingFiles(from: query)
         } else {
+            print("⚠️ Query not initialized, trying direct check only")
         }
     }
     
@@ -170,6 +181,8 @@ final class iCloudSyncMonitor: ObservableObject {
     private func checkDirectoryForFiles() async {
         let directory = iCloudService.getAudioFilesDirectory()
         
+        print("📂 Checking directory: \(directory.path)")
+        print("📂 iCloud available: \(iCloudService.isICloudAvailable)")
         
         do {
             // List all files in directory
@@ -179,24 +192,31 @@ final class iCloudSyncMonitor: ObservableObject {
                 options: [.skipsHiddenFiles]
             )
             
+            print("📂 Found \(files.count) files in directory")
             
             isSyncing = true
             syncProgress = 0.0
             
             for (index, fileURL) in files.enumerated() {
                 let fileName = fileURL.lastPathComponent
+                print("📄 Checking file: \(fileName)")
                 
                 // Check if file needs downloading
                 if let values = try? fileURL.resourceValues(forKeys: [URLResourceKey.ubiquitousItemDownloadingStatusKey]) {
                     let status = values.ubiquitousItemDownloadingStatus
+                    print("   Status: \(status?.rawValue ?? "unknown")")
                     
                     if status == .notDownloaded || !FileManager.default.fileExists(atPath: fileURL.path) {
+                        print("   ⬇️ Downloading: \(fileName)")
                         do {
                             try FileManager.default.startDownloadingUbiquitousItem(at: fileURL)
                             await waitForDownload(url: fileURL)
+                            print("   ✅ Downloaded: \(fileName)")
                         } catch {
+                            print("   ❌ Failed to download \(fileName): \(error)")
                         }
                     } else {
+                        print("   ✅ Already downloaded: \(fileName)")
                     }
                 }
                 
@@ -206,8 +226,10 @@ final class iCloudSyncMonitor: ObservableObject {
             isSyncing = false
             syncProgress = 1.0
             
+            print("✅ Directory check complete: \(files.count) files")
             
         } catch {
+            print("❌ Error checking directory: \(error)")
             isSyncing = false
         }
     }

@@ -67,6 +67,7 @@ struct ResultsView: View {
         .sheet(isPresented: $showPaywall, onDismiss: {
             // If paywall was dismissed without purchase, return to dashboard
             if !mockService.isProUser {
+                print("⚠️ Paywall dismissed without purchase, returning to dashboard")
                 dismiss()
             }
         }) {
@@ -82,15 +83,23 @@ struct ResultsView: View {
             Text(errorMessage)
         }
         .task {
+            print("📊 ResultsView appeared for: \(audioFile.fileName)")
+            print("   File ID: \(audioFile.id)")
+            print("   File URL: \(audioFile.fileURL)")
+            print("   Has existing result: \(audioFile.analysisResult != nil)")
             
             // Simply load the existing result since analysis should be done before navigation
             if let existingResult = audioFile.analysisResult {
+                print("   ✅ Loading existing result (score: \(existingResult.overallScore))")
                 analysisResult = existingResult
             } else {
+                print("   ⚠️ No analysis result found - this shouldn't happen with new flow")
                 // Fallback: check if we can perform analysis
                 if !mockService.canPerformAnalysis() {
+                    print("   🔒 Free limit reached, showing paywall")
                     showPaywall = true
                 } else {
+                    print("   🚀 Performing fallback analysis...")
                     await performAnalysis()
                 }
             }
@@ -1153,6 +1162,11 @@ struct ResultsView: View {
     }
 
     private func frequencyBalanceCard(result: AnalysisResult) -> some View {
+        let _ = print("🎨 Rendering Frequency Balance Card:")
+        let _ = print("   Low: \(result.lowEndBalance)%")
+        let _ = print("   Mid: \(result.midBalance)%")
+        let _ = print("   High: \(result.highBalance)%")
+        let _ = print("   Score: \(result.frequencyBalanceScore)%")
         
         // Use score-based logic: ≥80% = good (green), <80% = issue (red)
         let isBalanced = result.frequencyBalanceScore >= 80
@@ -1490,8 +1504,13 @@ struct ResultsView: View {
 
     private func performAnalysis() async {
         // Check if user can perform analysis
+        print("🔍 Checking analysis permission:")
+        print("   Is Pro User: \(mockService.isProUser)")
+        print("   Remaining analyses: \(mockService.remainingFreeAnalyses)")
+        print("   Can perform: \(mockService.canPerformAnalysis())")
         
         guard mockService.canPerformAnalysis() else {
+            print("⚠️ Free limit reached, showing paywall")
             showPaywall = true
             return
         }
@@ -1500,15 +1519,19 @@ struct ResultsView: View {
         defer { isAnalyzing = false }
 
         do {
+            print("🔍 Starting analysis for: \(audioFile.fileName)")
+            print("   File URL: \(audioFile.fileURL)")
             
             // Store existing result in history before overwriting (if re-analyzing)
             if let existingResult = audioFile.analysisResult {
+                print("   Found existing result, adding to history")
                 audioFile.analysisHistory.append(existingResult)
             }
             
             // Perform the analysis on the specific file
             let result = try await analysisService.getDetailedAnalysis(for: audioFile.fileURL)
             
+            print("   Analysis complete. Score: \(result.overallScore)")
             
             // Increment usage count for free users
             mockService.incrementAnalysisCount()
@@ -1526,23 +1549,30 @@ struct ResultsView: View {
             // Save to iCloud Drive as JSON for cross-device sync
             do {
                 try AnalysisResultPersistence.shared.saveAnalysisResult(result, forAudioFile: audioFile.fileName)
+                print("☁️ Saved analysis to iCloud Drive")
             } catch {
+                print("⚠️ Failed to save analysis to iCloud: \(error)")
             }
             
+            print("✅ Analysis completed and saved for: \(audioFile.fileName)")
         } catch {
+            print("❌ Analysis error for \(audioFile.fileName): \(error)")
             errorMessage = error.localizedDescription
             showError = true
         }
     }
     
     private func deleteFile() {
+        print("🗑️ Deleting audio file: \(audioFile.fileName)")
         
         // Delete the actual audio file from storage (iCloud or local)
         let fileURL = audioFile.fileURL
         if FileManager.default.fileExists(atPath: fileURL.path) {
             do {
                 try FileManager.default.removeItem(at: fileURL)
+                print("✅ Deleted audio file from storage: \(fileURL.lastPathComponent)")
             } catch {
+                print("❌ Failed to delete audio file: \(error)")
             }
         }
         
