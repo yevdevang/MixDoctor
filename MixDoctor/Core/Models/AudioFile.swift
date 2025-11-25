@@ -257,15 +257,16 @@ extension AnalysisResult {
             return 0.0
         }
         
-        // Calculate ideal balance (each band should have reasonable energy)
-        // Professional mixes typically have:
-        // Low End: 15-35%, Low Mid: 15-30%, Mid: 20-40%, High Mid: 15-30%, High: 10-25%
+        // IMPROVED: More lenient ideal ranges to accommodate different genres and mixing styles
+        // Professional mixes can vary widely based on genre and creative intent
+        // Low End: 10-40% (was 15-35%), Low Mid: 12-35% (was 15-30%), Mid: 18-45% (was 20-40%)
+        // High Mid: 10-35% (was 15-30%), High: 5-30% (was 10-25%)
         let idealRanges: [(min: Double, max: Double, weight: Double)] = [
-            (15, 35, 1.2),  // Low End - weighted higher (critical for foundation)
-            (15, 30, 1.0),  // Low Mid
-            (20, 40, 1.5),  // Mid - weighted highest (most important for clarity)
-            (15, 30, 1.0),  // High Mid
-            (10, 25, 0.8)   // High - slightly less critical
+            (10, 40, 1.2),  // Low End - WIDENED range (was 15-35)
+            (12, 35, 1.0),  // Low Mid - WIDENED range (was 15-30)
+            (18, 45, 1.5),  // Mid - WIDENED range (was 20-40)
+            (10, 35, 1.0),  // High Mid - WIDENED range (was 15-30)
+            (5, 30, 0.8)    // High - WIDENED range (was 10-25)
         ]
         
         var totalScore = 0.0
@@ -282,11 +283,11 @@ extension AnalysisResult {
             } else if value < minIdeal {
                 // Too low - score based on how far below minimum
                 let deficit = minIdeal - value
-                bandScore = max(0, 100 - (deficit * 3)) // Penalty of 3 points per % below
+                bandScore = max(0, 100 - (deficit * 2)) // REDUCED penalty: 3→2 points per % below
             } else {
                 // Too high - score based on how far above maximum
                 let excess = value - maxIdeal
-                bandScore = max(0, 100 - (excess * 2)) // Penalty of 2 points per % above
+                bandScore = max(0, 100 - (excess * 1.5)) // REDUCED penalty: 2→1.5 points per % above
             }
             
             totalScore += bandScore * weight
@@ -301,9 +302,10 @@ extension AnalysisResult {
         let minBand = bands.min() ?? 0
         let imbalanceRatio = maxBand > 0 ? (maxBand - minBand) / maxBand : 0
         
-        // If one band is more than 3x another, apply additional penalty
-        if imbalanceRatio > 0.66 {
-            let imbalancePenalty = (imbalanceRatio - 0.66) * 50 // Up to 17 point penalty
+        // IMPROVED: More lenient imbalance threshold (0.66→0.75)
+        // If one band is more than 4x another, apply additional penalty
+        if imbalanceRatio > 0.75 {
+            let imbalancePenalty = (imbalanceRatio - 0.75) * 40 // Reduced penalty: 50→40
             return max(0, balanceScore - imbalancePenalty)
         }
         

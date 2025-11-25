@@ -15,7 +15,7 @@ enum AppConstants {
     
     // Versioning
     static let appVersion = "1.0.0"
-    static let analysisVersion = "1.0"
+    static let analysisVersion = "3.4"  // Added critical mono override (<45%) + enhanced debug logging
     
     // Storage
     static let maxStorageGB: Int64 = 10

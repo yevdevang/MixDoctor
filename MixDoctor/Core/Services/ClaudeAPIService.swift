@@ -164,20 +164,38 @@ class ClaudeAPIService {
     }
     
     private func detectMasteredTrack(_ metrics: AudioMetricsForClaude) -> Bool {
-        // Mastered tracks typically have:
-        // 1. High peak levels (>-3dB) - most mastered tracks are close to 0dB
-        // 2. Moderate dynamic range (4-15dB) - adjusted to be more inclusive
-        // 3. Optimized loudness (-6 to -23 LUFS) - expanded range for all mastered tracks
-        // 4. High RMS levels (>-16dB) - more realistic threshold
+        // FIXED: Previous version was TOO STRICT - Abbey Road masters were being scored as pre-masters!
+        // Mastered tracks typically have MOST (3 out of 4) of these characteristics:
+        // 1. High peak levels (>-3dB) - mastered tracks are close to 0dB
+        // 2. Moderate dynamic range (4-15dB) - professional masters vary by genre
+        // 3. Optimized loudness (-6 to -25 LUFS) - wide range for different streaming platforms
+        // 4. High RMS levels (>-16dB) - indicates proper loudness optimization
         
-        let hasHighPeaks = metrics.peakLevel > -3.0
-        let hasModerateToLowDynamicRange = metrics.dynamicRange < 15.0  // More realistic for mastered tracks
-        let hasOptimizedLoudness = metrics.loudness > -25.0 && metrics.loudness < -6.0  // Fixed range to include -17.7 LUFS
-        let hasHighRMS = metrics.rmsLevel > -16.0  // Adjusted threshold to include -15.09
+        let hasHighPeaks = metrics.peakLevel > -3.0  // Relaxed from >-2.0
+        let hasModerateToLowDynamicRange = metrics.dynamicRange < 15.0  // Relaxed from <12.0
+        let hasOptimizedLoudness = metrics.loudness > -25.0 && metrics.loudness < -6.0  // Widened from -8 to -23
+        let hasHighRMS = metrics.rmsLevel > -16.0  // Relaxed from >-14.0
         
-        // Consider it mastered if 3 out of 4 criteria are met
+        // Require 3 out of 4 criteria (not ALL 4) - more realistic for professional masters
         let criteriaCount = [hasHighPeaks, hasModerateToLowDynamicRange, hasOptimizedLoudness, hasHighRMS].filter { $0 }.count
-        return criteriaCount >= 3
+        let isMastered = criteriaCount >= 3
+        
+        // Enhanced debug logging
+        if isMastered {
+            print("✅ MASTERED TRACK DETECTED - \(criteriaCount)/4 criteria met")
+            print("   Peak: \(String(format: "%.1f", metrics.peakLevel))dB (>-3: \(hasHighPeaks))")
+            print("   DR: \(String(format: "%.1f", metrics.dynamicRange))dB (<15: \(hasModerateToLowDynamicRange))")
+            print("   Loudness: \(String(format: "%.1f", metrics.loudness))LUFS (-25 to -6: \(hasOptimizedLoudness))")
+            print("   RMS: \(String(format: "%.1f", metrics.rmsLevel))dB (>-16: \(hasHighRMS))")
+        } else {
+            print("📝 PRE-MASTER MIX DETECTED - Only \(criteriaCount)/4 criteria met")
+            print("   Peak: \(String(format: "%.1f", metrics.peakLevel))dB (>-3: \(hasHighPeaks))")
+            print("   DR: \(String(format: "%.1f", metrics.dynamicRange))dB (<15: \(hasModerateToLowDynamicRange))")
+            print("   Loudness: \(String(format: "%.1f", metrics.loudness))LUFS (-25 to -6: \(hasOptimizedLoudness))")
+            print("   RMS: \(String(format: "%.1f", metrics.rmsLevel))dB (>-16: \(hasHighRMS))")
+        }
+        
+        return isMastered
     }
     
     private func detectGenre(_ metrics: AudioMetricsForClaude) -> String {
@@ -289,159 +307,123 @@ class ClaudeAPIService {
     
         private func createMasteredTrackPrompt(metrics: AudioMetricsForClaude, genre: String) -> String {
         return """
-        You are analyzing a MASTERED TRACK using professional mastering standards. This is NOT a pre-master mix.
+        You are analyzing a MASTERED TRACK using industry-standard professional mastering metrics.
 
-        🎯 MASTERED TRACK ANALYSIS - Use MASTERING STANDARDS:
+        🎯 CORE ANALYSIS METRICS (Industry Standards):
         
-        🎚️ MASTERED LEVELS & DYNAMICS:
-        • Peak Level: \(String(format: "%.1f", metrics.peakLevel)) dB (MASTERED TARGET: -0.1 to -1dB, GOOD: -0.3 to -3dB)
-        • RMS Level: \(String(format: "%.1f", metrics.rmsLevel)) dB (MASTERED TARGET: -6 to -12dB, GOOD: -8 to -16dB)
-        • Loudness: \(String(format: "%.1f", metrics.loudness)) LUFS (STREAMING: -14 LUFS, PROFESSIONAL: -8 to -20 LUFS, CONSERVATIVE: -16 to -23 LUFS)
-        • Dynamic Range: \(String(format: "%.1f", metrics.dynamicRange)) dB (MASTERED: 4-12dB Normal, 6-15dB Good, >15dB Excellent)
-        • True Peak: \(String(format: "%.1f", metrics.truePeakLevel)) dBFS (MASTERED: <-0.1dBFS Required, <-0.3dBFS Safe)
+        🎚️ STEREO WIDTH:
+        • Current: \(String(format: "%.1f", metrics.stereoWidth))%
+        • Calculation: width = 1 - correlation OR width = (L-R)/(L+R)
+        • Display: Percentage (0-100%) or visual meter
+        • Warning Thresholds: <20% (too narrow), >90% (unstable)
         
-        🎭 STEREO & PHASE (Same for mastered):
-        • Stereo Width: \(String(format: "%.1f", metrics.stereoWidth))% (Excellent: 25-45%, Good: 20-55%, Wide: 55-85%)
-        • Phase Coherence: \(String(format: "%.1f", metrics.phaseCoherence * 100))% (Excellent: >80%, Good: >60%, Poor: <50%)
-        • Mono Compatibility: \(String(format: "%.1f", metrics.monoCompatibility * 100))% (Good: >70%, Acceptable: >50%)
+        🎭 PHASE CORRELATION:
+        • Current: \(String(format: "%.1f", metrics.phaseCoherence * 100))%
+        • Calculation: correlation = Σ(L×R) / √(Σ(L²)×Σ(R²))
+        • Display: -1.0 to +1.0 scale + goniometer
+        • Warning Threshold: <0.5 (phase issues)
         
-        🎵 FREQUENCY BALANCE (MASTERED TRACK - Professional Standards):
+        🔊 MONO COMPATIBILITY:
+        • Current: \(String(format: "%.1f", metrics.monoCompatibility * 100))%
+        • Calculation: loss = 20×log₁₀(mono_rms/stereo_rms)
+        • Display: dB difference + pass/fail
+        • Warning Threshold: >3dB loss (fail)
+        
+        📊 PEAK LEVEL:
+        • Current: \(String(format: "%.1f", metrics.peakLevel)) dBFS
+        • Calculation: max(abs(samples))
+        • Display: dBFS
+        • Warning Threshold: >-0.1 dBFS (clipping risk)
+        
+        📈 RMS/LOUDNESS:
+        • Current: \(String(format: "%.1f", metrics.loudness)) LUFS
+        • Standard: LUFS (ITU-R BS.1770-4)
+        • Display: LUFS/dB
+        • Warning Thresholds: <-14 LUFS (streaming), >-6 LUFS (too loud)
+        
+        🎚️ DYNAMIC RANGE:
+        • Current: \(String(format: "%.1f", metrics.dynamicRange)) dB
+        • Calculation: DR = peak - RMS OR PLR
+        • Display: dB or DR units
+        • Warning Threshold: <6 DR (over-compressed)
+        
+        📉 CREST FACTOR:
+        • Current: \(String(format: "%.1f", metrics.truePeakLevel - metrics.rmsLevel)) dB
+        • Calculation: 20×log₁₀(peak/rms)
+        • Display: dB
+        • Warning Threshold: <6 dB (crushed dynamics)
+
+        🎵 FREQUENCY BALANCE:
         • Low End (20-200Hz): \(String(format: "%.1f", metrics.lowEnd))%
-          - EXCELLENT MASTER: 15-25% (controlled, punchy)
-          - GOOD MASTER: 12-30% (solid foundation)
-          - ACCEPTABLE: 10-35% (commercial ready)
-          - PROBLEMATIC: >38% (muddy master) or <8% (thin master)
-          
         • Low Mid (200-800Hz): \(String(format: "%.1f", metrics.lowMid))%
-          - EXCELLENT MASTER: 18-28% (warmth without box)
-          - GOOD MASTER: 15-32% (body and richness)
-          - ACCEPTABLE: 12-38% (sufficient warmth)
-          - PROBLEMATIC: >42% (boxy master) or <10% (hollow master)
-          
         • Mid (800Hz-3kHz): \(String(format: "%.1f", metrics.mid))%
-          - EXCELLENT MASTER: 20-32% (vocal clarity perfection)
-          - GOOD MASTER: 18-38% (presence and definition)
-          - ACCEPTABLE: 15-42% (commercial clarity)
-          - PROBLEMATIC: >45% (harsh master) or <12% (dull master)
-          
         • High Mid (3-8kHz): \(String(format: "%.1f", metrics.highMid))%
-          - EXCELLENT MASTER: 10-20% (presence without fatigue)
-          - GOOD MASTER: 8-25% (articulation and bite)
-          - ACCEPTABLE: 6-28% (adequate presence)
-          - PROBLEMATIC: >32% (fatiguing master) or <4% (dull master)
-          
         • High (8-20kHz): \(String(format: "%.1f", metrics.high))%
-          - EXCELLENT MASTER: 6-16% (air and sparkle)
-          - GOOD MASTER: 4-20% (brightness and detail)
-          - ACCEPTABLE: 1-24% (sufficient air) ✅ Dark/warm masters (1-3%) are a VALID CREATIVE CHOICE
-          - PROBLEMATIC: >28% (harsh/sibilant) ONLY - Low highs are NOT a problem
 
-        📊 MASTERED FREQUENCY STANDARDS BY GENRE:
-        - Pop/Rock Master: Low 15-25%, LowMid 20-28%, Mid 22-32%, HighMid 12-20%, High 6-16%
-        - Electronic Master: Low 18-35%, LowMid 16-26%, Mid 18-28%, HighMid 14-24%, High 8-18%
-        - Hip-Hop Master: Low 25-40%, LowMid 18-28%, Mid 20-30%, HighMid 8-18%, High 4-12%
-        - Dark/Alternative Master: Low 20-40%, LowMid 15-28%, Mid 22-35%, HighMid 6-16%, High 1-8% ✅ VALID STYLE
-        - Classical Master: Low 10-18%, LowMid 20-28%, Mid 28-40%, HighMid 8-16%, High 4-10%
-        - Jazz Master: Low 12-22%, LowMid 22-30%, Mid 25-35%, HighMid 10-18%, High 6-12%
+        🚨 DETECTED ISSUES:
+        • Clipping: \(metrics.hasClipping ? "❌ YES" : "✅ No")
+        • Phase Issues: \(metrics.hasPhaseIssues ? "❌ YES" : "✅ No")
+        • Stereo Issues: \(metrics.hasStereoIssues ? "❌ YES" : "✅ No")
+        • Frequency Imbalance: \(metrics.hasFrequencyImbalance ? "❌ YES" : "✅ No")
+        • Dynamic Range Issues: \(metrics.hasDynamicRangeIssues ? "❌ YES" : "✅ No")
 
-        🚨 MASTERED TRACK ISSUES:
-        • Clipping: \(metrics.hasClipping ? "❌ YES (Major penalty)" : "✅ No")
-        • Phase Issues: \(metrics.hasPhaseIssues ? "❌ YES (Major penalty)" : "✅ No")
-        • Stereo Issues: \(metrics.hasStereoIssues ? "❌ YES (Penalty)" : "✅ No")
-        • Frequency Imbalance: \(metrics.hasFrequencyImbalance ? "❌ YES (Penalty)" : "✅ No")
-        • Dynamic Range Issues: \(metrics.hasDynamicRangeIssues ? "❌ Only if <4dB (over-limited)" : "✅ No")
-
-        ⚠️ MASTERED TRACK SCORING ADJUSTMENTS:
-        • Peak Level -0.1 to -1dB = PERFECT (no penalty)
-        • Peak Level -1 to -3dB = GOOD (no penalty)  
-        • Peak Level >0dB = Digital clipping (Score -15)
-        • True Peak >-0.1dBFS = Clipping risk (Score -10)
-        • Dynamic Range 6-15dB = GOOD (no penalty)
-        • Dynamic Range 4-6dB = ACCEPTABLE (no penalty)
-        • Dynamic Range <4dB = Over-limited (Score -10)
-        • Loudness -8 to -23 LUFS = PROFESSIONAL RANGE (no penalty)
-        • Loudness <-23 LUFS = Too quiet (Score -5)
-        • Loudness >-8 LUFS = Too loud/aggressive (Score -5)
-
-        🎯 SCORING RULES - SIMPLE AND STABLE:
+        🎯 SCORING RULES (0-100 scale):
         
-        Calculate a score 0-100 based ONLY on technical quality:
+        Start with base score of 75 points (INCREASED from 70).
         
-        START: 65 points (realistic baseline)
+        APPLY THRESHOLDS (use the warning thresholds above):
         
-        ADD POINTS (Bonuses for professional quality):
-        • Peak Level -0.0 to -1.0dB: +15 points (perfectly mastered - loud without clipping)
-        • Peak Level -1.0 to -3.0dB: +10 points (well limited)
-        • Dynamic Range 8-12dB: +10 points (modern professional)
-        • Dynamic Range 6-8dB or 12-15dB: +5 points (acceptable)
-        • Integrated Loudness -10 to -14 LUFS: +10 points (streaming optimized)
-        • Integrated Loudness -8 to -10 LUFS or -14 to -16 LUFS: +5 points (competitive)
-        • Phase Coherence 40-100%: +0 points (NORMAL - professional stereo mixes are 40-80%)
-        • Mono Compatibility >70%: +10 points (excellent club/phone translation)
-        • Mono Compatibility 60-70%: +5 points (acceptable translation)
-        • No clipping detected: +5 points (clean peaks)
+        STEREO WIDTH:
+        • 20-90%: Good (no change)
+        • <20% OR >90%: Problem (-10 points)
         
-        SUBTRACT POINTS (Technical problems - ONLY apply if these conditions are TRUE):
-        • Peak ABOVE 0.0dB (positive values = actual clipping/distortion): -40 points
-        • True Peak ABOVE 0.0dBFS (positive values = will clip on conversion): -20 points
-        • Dynamic Range <6dB: -25 points (over-compressed)
-        • Dynamic Range >15dB: -10 points (lacks punch/consistency)
-        • Loudness <-20 LUFS: -15 points (too quiet)
-        • Loudness >-8 LUFS: -10 points (too loud/distorted)
-        • Phase Coherence <30%: -25 points (severe phase cancellation - OUT OF PHASE signals)
-        • Mono Compatibility <50%: -30 points (CRITICAL - severe phase issues, will sound terrible on mono)
-        • Mono Compatibility 50-60%: -15 points (poor club/phone/Bluetooth translation)
+        PHASE CORRELATION:
+        • ≥0.4 (40%): Good (no change) - RELAXED from ≥0.5
+        • 0.3-0.4 (30-40%): Minor issues (-5 points)
+        • <0.3 (30%): Phase issues (-15 points)
         
-        CRITICAL UNDERSTANDING:
-        • Peak -0.0dB = PERFECT (at maximum without clipping) = +15 BONUS
-        • Peak +0.5dB = CLIPPING (above zero, distorted) = -40 PENALTY
-        • True Peak -0.0dBFS = PERFECT (exactly at limit) = NO PENALTY
-        • True Peak +0.2dBFS = WILL CLIP (above zero) = -20 PENALTY
+        MONO COMPATIBILITY:
+        • ≤3dB loss: Good (no change)
+        • >3dB loss: Fail (-20 points)
         
-        IMPORTANT NOTES:
-        • Phase Coherence 40-80% is NORMAL for professional stereo mixes with width
-        • Mono Compatibility <60% indicates phase problems or excessive stereo processing
-        • IGNORE FREQUENCY BALANCE - artistic choice unless >80% in single band
+        PEAK LEVEL:
+        • ≤-0.1 dBFS: Good (+5 points)
+        • >-0.1 dBFS: Clipping risk (-25 points)
         
-        REALISTIC SCORING EXAMPLES:
-        • Perfect master (Peak -0.0dB, DR 10dB, -14 LUFS, Phase 42%, Mono 70%) = 65 +15 +10 +5 +10 +5 = 110 → 100/100
-        • Commercial master (Peak -0.2dB, DR 9dB, -12 LUFS, Phase 65%, Mono 75%) = 65 +15 +10 +10 +10 +5 = 115 → 100/100
-        • Good master (Peak -0.5dB, DR 10dB, -14 LUFS, Phase 55%, Mono 68%) = 65 +15 +10 +5 +5 +5 = 105 → 100/100
-        • Poor mono (Peak -1.5dB, DR 11dB, -15 LUFS, Phase 52%, Mono 41%) = 65 +10 +10 +5 -30 = 60/100
-        • Actual clipping (Peak +0.5dB, DR 8dB, -10 LUFS, Phase 60%, Mono 70%) = 65 -40 +10 +10 +10 = 55/100
+        LOUDNESS (IMPROVED - more realistic for mastered tracks):
+        • -10 to -6 LUFS: Modern streaming master (+10 points)
+        • -16 to -10 LUFS: Professional master (+5 points) - WIDENED RANGE
+        • <-16 LUFS: Too quiet (-5 points)
+        • >-6 LUFS: Too loud (-10 points)
         
-        YOUR TASK:
-        1. Calculate the score using ONLY the rules above
-        2. Provide 2-3 sentence summary of technical quality
-        3. Give 2-4 recommendations (only for actual problems, not preferences)
+        DYNAMIC RANGE:
+        • ≥6 DR: Good (+5 points)
+        • <6 DR: Over-compressed (-15 points)
         
-        📝 RESPONSE FORMAT - IMPORTANT:
-        • DO NOT use numbered lists (1. 2. 3.) - use bullet points (•) or natural paragraphs
-        • DO NOT use ## headers or markdown formatting
-        • Keep response concise and conversational
-        • Write in natural flowing paragraphs, not lists
+        CREST FACTOR:
+        • ≥6 dB: Good dynamics (+5 points)
+        • <6 dB: Crushed dynamics (-15 points)
         
-        Format response as:
-        YOUR TASK:
-        Calculate the score using ONLY the rules above, provide 2-3 sentence summary, and give 2-4 recommendations for actual problems.
+        FREQUENCY BALANCE:
+        • Only penalize SEVERE imbalances (>70% bass, <2% highs, etc.)
+        • Genre-specific frequency characteristics are ACCEPTABLE
+        • Dark/warm masters (low highs) are PROFESSIONAL choices, not problems
         
-        📝 RESPONSE FORMAT - CRITICAL:
-        • DO NOT use numbered lists (1. 2. 3.) anywhere in your response
-        • DO NOT use ## headers or markdown formatting
-        • Use bullet points (•) or write as natural flowing paragraphs
-        • Keep it conversational and concise
+        IMPORTANT: Mastered tracks with good metrics should score 85-100
+        • No clipping + good loudness + balanced frequencies = 85-95
+        • Professional masters from Abbey Road, etc. should score 90-100
         
-        Format response as:
-        SCORE: [0-100]
+        Calculate final score: Base 75 + bonuses - penalties (cap 0-100)
         
-        ANALYSIS: [Write 2-3 sentences as a natural paragraph - NO numbers, NO bullets]
+        📝 RESPONSE FORMAT:
         
-        RECOMMENDATIONS: [If needed, use bullet points (•) or flowing text - NEVER use 1. 2. 3. numbering]
+        SCORE: [0-100 based on thresholds above]
         
-        YOUR CALCULATION:
-        Base: 85
-        Adjustments: [list each bonus/penalty you're applying]
-        FINAL SCORE: [calculate total, cap at 100]
+        ANALYSIS: [2-3 sentences describing technical quality based on the core metrics]
+        
+        RECOMMENDATIONS: [List specific fixes for any threshold violations - use bullet points (•), NOT numbered lists]
+        
+        READY FOR MASTERING: [yes/no - based on whether all critical thresholds are met]
         """
     }
     
@@ -460,7 +442,7 @@ class ClaudeAPIService {
         
         🎭 STEREO & PHASE:
         • Stereo Width: \(String(format: "%.1f", metrics.stereoWidth))% (Excellent: 25-45%, Good: 20-55%, Wide: 55-85%)
-        • Phase Coherence: \(String(format: "%.1f", metrics.phaseCoherence * 100))% (Excellent: >80%, Good: >60%, Poor: <50%)
+        • Phase Coherence: \(String(format: "%.1f", metrics.phaseCoherence * 100))% (Excellent: >75%, Good: >60%, Acceptable: 40-60%, Poor: <30%)
         • Mono Compatibility: \(String(format: "%.1f", metrics.monoCompatibility * 100))% (Good: >70%, Acceptable: >50%)
         
         🎵 FREQUENCY BALANCE (Professional Standards):
@@ -508,28 +490,38 @@ class ClaudeAPIService {
         • Dynamic Range Issues: \(metrics.hasDynamicRangeIssues ? "❌ YES (Penalty)" : "✅ No")
 
         PRE-MASTER MIX SCORING:
-        • Start at 70 points (baseline professional mix)
+        • Start at 75 points (baseline professional mix - INCREASED from 70)
         • PENALTIES for mix issues:
           - Peak >0dB: -15 points (clipping)
           - Peak >-1dB: -5 points (insufficient headroom)
           - True Peak >-1dBFS: -5 points 
           - Stereo Width <15% OR >85%: -5 points
-          - Phase Coherence <60%: -10 points
-          - Low End >50%: -10 points
-          - Frequency Imbalance: -5 points
+          - Phase Coherence <30%: -15 points (severe phase issues)
+          - Phase Coherence 30-40%: -10 points (significant phase issues)
+          - Phase Coherence 40-60%: -5 points (minor phase issues, common in stereo mixes)
+          - Low End >70%: -15 points (extremely bass-heavy)
+          - Low End 60-70%: -10 points (very bass-heavy)
+          - Low End 50-60%: -5 points (bass-heavy, acceptable for some genres)
+          - Frequency Imbalance: -5 points (only for severe imbalances)
           - Dynamic Range <6dB: -10 points
         • BONUSES for mix excellence:
           - Peak level -3 to -6dB: +5 points (perfect headroom)
           - Good dynamic range (>15dB): +5 points
           - Balanced frequency spectrum: +5 points
-          - Excellent phase coherence (>85%): +5 points
+          - Excellent phase coherence (>75%): +5 points
           - Excellent stereo width (25-45%): +5 points
 
+        IMPORTANT SCORING GUIDANCE:
+        • Minor issues (phase 40-60%, moderate bass, slight imbalances) should NOT heavily impact scores
+        • A mix with decent metrics (stereo width 25-45%, phase >40%, balanced frequencies) should score 70-80
+        • Only apply multiple penalties if there are MULTIPLE SEVERE issues
+        • Be generous with scores - most professional pre-masters score 75-85
+
         Be REALISTIC for PRE-MASTERS:
-        • Excellent mix ready for mastering: 85-95 points
+        • Excellent mix ready for mastering: 85-100 points
         • Good mix ready for mastering: 75-84 points
-        • Decent mix needing work: 60-74 points
-        • Poor/amateur mix: 30-59 points
+        • Decent mix needing work: 65-74 points
+        • Poor/amateur mix: 40-64 points
 
         Format response as:
         SCORE: [realistic 0-100 score for PRE-MASTER MIX]
@@ -574,14 +566,20 @@ class ClaudeAPIService {
         // Parse the structured response
         let lines = textContent.components(separatedBy: .newlines)
         var score: Int?
-        // 🔍 COMMENTED OUT - parsing analysis and recommendations to show raw output
-        // var analysis = ""
-        // var recommendations: [String] = []
-        
-        // var currentSection = ""
+        var analysis = ""
+        var recommendations: [String] = []
+        var currentSection = ""
+        var skipCalculationSection = false
         
         for line in lines {
             let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            
+            // Skip "YOUR CALCULATION:" section entirely
+            if trimmedLine.hasPrefix("YOUR CALCULATION:") {
+                skipCalculationSection = true
+                currentSection = ""
+                continue
+            }
             
             // ✅ FIXED: Parse score from lines with "SCORE:" or "FINAL SCORE:" (with optional asterisks)
             let cleanedLine = trimmedLine.replacingOccurrences(of: "*", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -599,18 +597,39 @@ class ClaudeAPIService {
                 } else {
                     print("⚠️ Could not parse score from: '\(scoreText)'")
                 }
+                continue
             }
-            /* 🔍 COMMENTED OUT - summary and recommendations parsing
-            else if trimmedLine.hasPrefix("ANALYSIS:") {
+            
+            // Start of ANALYSIS section - exit calculation skip mode
+            if trimmedLine.hasPrefix("ANALYSIS:") || trimmedLine.hasPrefix("## ANALYSIS:") {
+                skipCalculationSection = false
                 currentSection = "analysis"
-                analysis = String(trimmedLine.dropFirst(9)).trimmingCharacters(in: .whitespacesAndNewlines)
-            } else if trimmedLine.hasPrefix("RECOMMENDATIONS:") {
+                // Remove "ANALYSIS:" or "## ANALYSIS:" prefix
+                let prefix = trimmedLine.hasPrefix("## ANALYSIS:") ? "## ANALYSIS:" : "ANALYSIS:"
+                analysis = String(trimmedLine.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+                continue
+            }
+            
+            // Start of RECOMMENDATIONS section
+            if trimmedLine.hasPrefix("RECOMMENDATIONS:") || trimmedLine.hasPrefix("## RECOMMENDATIONS:") {
+                skipCalculationSection = false
                 currentSection = "recommendations"
-                let recText = String(trimmedLine.dropFirst(16)).trimmingCharacters(in: .whitespacesAndNewlines)
+                // Remove "RECOMMENDATIONS:" or "## RECOMMENDATIONS:" prefix
+                let prefix = trimmedLine.hasPrefix("## RECOMMENDATIONS:") ? "## RECOMMENDATIONS:" : "RECOMMENDATIONS:"
+                let recText = String(trimmedLine.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
                 if !recText.isEmpty && !isPositiveRecommendation(recText) {
                     recommendations.append(recText)
                 }
-            } else if !trimmedLine.isEmpty {
+                continue
+            }
+            
+            // Skip lines if we're in the calculation section
+            if skipCalculationSection {
+                continue
+            }
+            
+            // Process content for current section
+            if !trimmedLine.isEmpty {
                 if currentSection == "analysis" {
                     analysis += " " + trimmedLine
                 } else if currentSection == "recommendations" {
@@ -624,27 +643,27 @@ class ClaudeAPIService {
                     }
                 }
             }
-            */
         }
         
         // 🔍 DEBUG: Print what we extracted
         print("\n🔍 CLAUDE RESPONSE PARSING:")
         print("   Extracted Score: \(score ?? -1)")
-        print("   Full Response Text Length: \(textContent.count) chars")
-        print("   Full Response Preview: \(String(textContent.prefix(500)))")
+        print("   Analysis length: \(analysis.count) characters")
+        print("   Analysis text: '\(analysis.prefix(100))...'")
+        print("   Recommendations Count: \(recommendations.count)")
+        if !recommendations.isEmpty {
+            print("   First recommendation: '\(recommendations[0])'")
+        }
         print("🔍 END PARSING\n")
         
-        // Clean up numbered lists from the response
-        let cleanedText = removeNumberedLists(from: textContent)
-        
         // Determine if ready for mastering: few or no recommendations AND good score
-        // let isReadyForMastering = recommendations.count <= 2 && (score ?? 0) >= 75  // 🔍 COMMENTED OUT - using simple score check instead
+        let isReadyForMastering = recommendations.count <= 2 && (score ?? 0) >= 75
         
         return ClaudeAnalysisResponse(
-            score: score ?? 50, // Default score if not found
-            summary: cleanedText.trimmingCharacters(in: .whitespacesAndNewlines), // 🔍 RAW CLAUDE OUTPUT - cleaned up
-            recommendations: [], // 🔍 COMMENTED OUT - showing raw output instead
-            isReadyForMastering: (score ?? 0) >= 75
+            score: score ?? 50,
+            summary: analysis.trimmingCharacters(in: .whitespacesAndNewlines),
+            recommendations: recommendations,
+            isReadyForMastering: isReadyForMastering
         )
     }
     

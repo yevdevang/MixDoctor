@@ -14,6 +14,7 @@ enum AudioImportError: LocalizedError, Equatable {
     case invalidAudioFile
     case sampleRateTooLow
     case accessDenied
+    case duplicateFile
     case unknownError(Error)
 
     var errorDescription: String? {
@@ -28,6 +29,8 @@ enum AudioImportError: LocalizedError, Equatable {
             return "Sample rate must be at least 44.1 kHz"
         case .accessDenied:
             return "Cannot access file. Please grant permission."
+        case .duplicateFile:
+            return "This file has already been imported"
         case let .unknownError(error):
             return "Import failed: \(error.localizedDescription)"
         }
@@ -52,7 +55,7 @@ final class AudioImportService {
 
     // MARK: - Public API
 
-    func importAudioFile(from url: URL) async throws -> AudioFile {
+    func importAudioFile(from url: URL, modelContext: ModelContext? = nil) async throws -> AudioFile {
         guard url.startAccessingSecurityScopedResource() else {
             throw AudioImportError.accessDenied
         }
@@ -61,6 +64,19 @@ final class AudioImportService {
         do {
             try validateAudioFile(url)
             let metadata = try await extractMetadata(from: url)
+            
+            // Check for duplicates BEFORE copying to iCloud
+            if let modelContext = modelContext {
+                let fileName = url.lastPathComponent
+                let fileSize = metadata.fileSize
+                let duration = metadata.duration
+                
+                if isDuplicate(fileName: fileName, fileSize: fileSize, duration: duration, modelContext: modelContext) {
+                    print("🚫 Duplicate detected BEFORE iCloud upload: \(fileName)")
+                    throw AudioImportError.duplicateFile
+                }
+            }
+            
             let destinationURL = try copyToDocuments(from: url)
 
             let audioFile = AudioFile(
@@ -81,24 +97,42 @@ final class AudioImportService {
         }
     }
 
-    func importMultipleFiles(_ urls: [URL]) async throws -> [AudioFile] {
+    func importMultipleFiles(_ urls: [URL], modelContext: ModelContext? = nil) async throws -> [AudioFile] {
         var importedFiles: [AudioFile] = []
-        var capturedError: Error?
+        var duplicateErrors: [Error] = []
+        var otherError: Error?
 
         for url in urls {
             do {
-                let audioFile = try await importAudioFile(from: url)
+                let audioFile = try await importAudioFile(from: url, modelContext: modelContext)
                 importedFiles.append(audioFile)
+            } catch let error as AudioImportError where error == .duplicateFile {
+                // Track duplicates separately - don't fail the whole operation
+                duplicateErrors.append(error)
+                print("   ℹ️ Skipping duplicate: \(url.lastPathComponent)")
             } catch {
-                capturedError = capturedError ?? error
+                // Track first non-duplicate error
+                otherError = otherError ?? error
             }
         }
 
-        if importedFiles.isEmpty, let capturedError {
-            throw capturedError
+        // If we have imported files, return them (even if some were duplicates)
+        if !importedFiles.isEmpty {
+            return importedFiles
         }
-
-        return importedFiles
+        
+        // If all files were duplicates, throw duplicate error
+        if !duplicateErrors.isEmpty {
+            throw AudioImportError.duplicateFile
+        }
+        
+        // If there was another error, throw it
+        if let otherError {
+            throw otherError
+        }
+        
+        // No files to import
+        return []
     }
 
     // MARK: - Validation
@@ -195,14 +229,15 @@ final class AudioImportService {
         print("   Extension: \(fileExtension)")
         print("   iCloud enabled: \(iCloudService.isICloudAvailable && (UserDefaults.standard.object(forKey: "iCloudSyncEnabled") as? Bool ?? true))")
         
-        var destinationURL = directoryURL.appendingPathComponent(originalFileName)
-        var counter = 1
-
-        while fileManager.fileExists(atPath: destinationURL.path) {
-            let candidateName = "\(baseName)_\(counter).\(fileExtension)"
-            destinationURL = directoryURL.appendingPathComponent(candidateName)
-            counter += 1
-            print("   File exists, trying: \(candidateName)")
+        let destinationURL = directoryURL.appendingPathComponent(originalFileName)
+        
+        // If file already exists at destination, it means:
+        // 1. It's an orphaned file being re-imported, OR
+        // 2. Previous import failed after copying but before database insert
+        // In both cases, we can reuse the existing file instead of creating duplicates
+        if fileManager.fileExists(atPath: destinationURL.path) {
+            print("   ✅ File already exists at destination, reusing: \(originalFileName)")
+            return destinationURL
         }
 
         do {
@@ -231,5 +266,35 @@ final class AudioImportService {
         let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
         let number = attributes[.size] as? NSNumber
         return number?.int64Value ?? 0
+    }
+    
+    // MARK: - Duplicate Detection
+    
+    /// Check if a file is a duplicate based on fileName, fileSize, and duration
+    private func isDuplicate(fileName: String, fileSize: Int64, duration: TimeInterval, modelContext: ModelContext) -> Bool {
+        let descriptor = FetchDescriptor<AudioFile>()
+        guard let allFiles = try? modelContext.fetch(descriptor) else {
+            print("⚠️ Could not fetch existing files for duplicate check")
+            return false
+        }
+        
+        print("🔍 Pre-upload duplicate check: \(fileName) (\(fileSize) bytes, \(String(format: "%.1f", duration))s)")
+        print("   Existing files in database: \(allFiles.count)")
+        
+        // Check for exact match on fileName and fileSize
+        // Duration check within 1 second tolerance (for encoding variations)
+        for existingFile in allFiles {
+            let sameFileName = existingFile.fileName == fileName
+            let sameFileSize = existingFile.fileSize == fileSize
+            let similarDuration = abs(existingFile.duration - duration) < 1.0
+            
+            if sameFileName && sameFileSize && similarDuration {
+                print("   ✅ DUPLICATE FOUND - preventing iCloud upload")
+                return true
+            }
+        }
+        
+        print("   ✅ Not a duplicate - proceeding with import")
+        return false
     }
 }

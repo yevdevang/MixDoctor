@@ -62,21 +62,7 @@ struct ResultsView: View {
         .navigationTitle("Analysis Results")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    Task {
-                        await performAnalysis()
-                    }
-                } label: {
-                    if isAnalyzing {
-                        ProgressView()
-                            .tint(Color(red: 0.435, green: 0.173, blue: 0.871))
-                    } else {
-                        Label("Re-analyze", systemImage: "arrow.triangle.2.circlepath")
-                    }
-                }
-                .disabled(isAnalyzing)
-            }
+
         }
         .sheet(isPresented: $showPaywall, onDismiss: {
             // If paywall was dismissed without purchase, return to dashboard
@@ -163,15 +149,8 @@ struct ResultsView: View {
             }
             .frame(maxWidth: .infinity, alignment: .center)
 
-            // Overall Score Card - ONLY show for professionally mixed audio
-            if result.isProfessionallyMixed {
-                overallScoreCard(result: result)
-            }
-            
-            // Unmixed Detection Warning - ONLY show for unmixed audio
-            if !result.isProfessionallyMixed, let unmixedDetection = result.unmixedDetection {
-                unmixedDetectionCard(detection: unmixedDetection)
-            }
+            // Overall Score Card - always show
+            overallScoreCard(result: result)
 
             // Individual Metrics
             VStack(spacing: 16) {
@@ -190,28 +169,13 @@ struct ResultsView: View {
             }
             
             // Analysis Section
-            if let aiSummary = result.aiSummary {
-                let analysisText = extractAnalysisText(from: aiSummary)
-                if !analysisText.isEmpty {
-                    modernAnalysisOnlySection(result: result)
-                }
+            if let aiSummary = result.aiSummary, !aiSummary.isEmpty {
+                modernAnalysisOnlySection(result: result)
             }
             
             // Recommendations Section
-            if !result.aiRecommendations.isEmpty || hasRecommendationsInSummary(result.aiSummary) {
-                let summaryRecs = extractRecommendationsFromSummary(result.aiSummary)
-                let allRecs = summaryRecs + result.aiRecommendations
-                if !allRecs.isEmpty {
-                    modernRecommendationsOnlySection(result: result)
-                }
-            }
-            
-            // Strengths Section
-            if hasStrengthsInSummary(result.aiSummary) {
-                let strengthTexts = extractStrengthsFromSummary(result.aiSummary)
-                if !strengthTexts.isEmpty {
-                    modernStrengthsSection(result: result)
-                }
+            if !result.aiRecommendations.isEmpty {
+                modernRecommendationsOnlySection(result: result)
             }
 
             // Action Buttons
@@ -224,14 +188,14 @@ struct ResultsView: View {
     
     private func unmixedDetectionCard(detection: UnmixedDetectionResult) -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            // Header with icon based on detection result
+            // Header with icon - always show as unmixed/warning
             HStack {
-                Image(systemName: detection.isLikelyUnmixed ? "exclamationmark.triangle.fill" : "checkmark.shield.fill")
-                    .foregroundStyle(detection.isLikelyUnmixed ? .orange : .green)
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
                     .font(.title2)
                 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(detection.isLikelyUnmixed ? "Unmixed Audio Detected" : "Professional Mix")
+                    Text("Unmixed Audio Detected")
                         .font(.headline)
                         .fontWeight(.semibold)
                     
@@ -259,8 +223,8 @@ struct ResultsView: View {
             }
             .frame(height: 8)
             
-            // Detection criteria that failed
-            if detection.isLikelyUnmixed && !detection.detectionCriteria.isEmpty {
+            // Detection criteria that failed - always show for unmixed audio
+            if !detection.detectionCriteria.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Detected Issues")
                         .font(.subheadline)
@@ -310,6 +274,30 @@ struct ResultsView: View {
         default:
             return .red
         }
+    }
+    
+    // Simple unmixed card for when detection data is missing
+    private func simpleUnmixedCard() -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .font(.title2)
+                
+                Text("Unmixed Audio Detected")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                
+                Spacer()
+            }
+            
+            Text("This audio appears to be unmixed or has significant technical issues. Apply professional mixing processing (compression, EQ, limiting) to improve quality.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .padding()
+        .background(Color.backgroundSecondary)
+        .cornerRadius(AppConstants.cornerRadius)
     }
 
     // MARK: - Modern Score Card
@@ -437,11 +425,14 @@ struct ResultsView: View {
         }
         
         // Frequency balance - use FFT data if available, otherwise use old values
-        let hasFFTData = result.frequencySpectrum != nil && !(result.frequencySpectrum?.isEmpty ?? true)
+        // Capture spectrum data once to avoid SwiftData detachment errors
+        let spectrum = result.frequencySpectrum
+        let sampleRate = result.spectrumSampleRate
+        let hasFFTData = spectrum != nil && !(spectrum?.isEmpty ?? true)
         
         if hasFFTData {
             // Use FFT-based calculation for accurate high frequency detection
-            let highFreqEnergy = calculateHighFrequencyEnergy(result: result)
+            let highFreqEnergy = calculateHighFrequencyEnergy(spectrum: spectrum, sampleRate: sampleRate)
             
             // Only flag if truly no high frequencies (both presence and air < 0.5%)
             if highFreqEnergy < 0.5 {
@@ -482,11 +473,11 @@ struct ResultsView: View {
     }
     
     // Helper to calculate high frequency energy from FFT spectrum
-    private func calculateHighFrequencyEnergy(result: AnalysisResult) -> Double {
-        guard let spectrum = result.frequencySpectrum,
-              let sampleRate = result.spectrumSampleRate,
+    private func calculateHighFrequencyEnergy(spectrum: [Float]?, sampleRate: Double?) -> Double {
+        guard let spectrum = spectrum,
+              let sampleRate = sampleRate,
               !spectrum.isEmpty else {
-            return result.highBalance
+            return 0.0 // Return 0 if no spectrum data (will use fallback in calling function)
         }
         
         let nyquist = sampleRate / 2.0
@@ -761,37 +752,19 @@ struct ResultsView: View {
 
             // Analysis Content
             if let aiSummary = result.aiSummary, !aiSummary.isEmpty {
-                let analysisText = extractAnalysisText(from: aiSummary)
-                if !analysisText.isEmpty {
-                    let analysisPoints = extractAnalysisPoints(from: analysisText)
-                    if !analysisPoints.isEmpty {
-                        LazyVStack(alignment: .leading, spacing: 8) {
-                            ForEach(Array(analysisPoints.enumerated()), id: \.offset) { index, point in
-                                HStack(alignment: .top, spacing: 12) {
-                                    Image(systemName: "info.circle.fill")
-                                        .foregroundStyle(.blue)
-                                        .font(.caption)
-                                        .frame(width: 16, height: 16)
-
-                                    Text("\(index + 1). \(cleanMarkdownText(point))")
-                                        .font(.subheadline)
-                                        .foregroundStyle(.primary)
-                                        .multilineTextAlignment(.leading)
-                                }
-                                .padding(.vertical, 4)
-                            }
-                        }
-                        .padding(16)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(Color.blue.opacity(0.05))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .stroke(Color.blue.opacity(0.2), lineWidth: 1)
-                                )
-                        )
-                    }
-                }
+                Text(cleanMarkdownText(aiSummary))
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+                    .multilineTextAlignment(.leading)
+                    .padding(16)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color.blue.opacity(0.05))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(Color.blue.opacity(0.2), lineWidth: 1)
+                            )
+                    )
             }
         }
         .padding(20)
@@ -825,9 +798,8 @@ struct ResultsView: View {
                 Spacer()
                 
                 // Recommendations count badge
-                let recommendationTexts = extractRecommendationsFromSummary(result.aiSummary) + result.aiRecommendations
                 HStack(spacing: 4) {
-                    Text("\(recommendationTexts.count)")
+                    Text("\(result.aiRecommendations.count)")
                         .font(.caption)
                         .fontWeight(.bold)
                     Image(systemName: "list.bullet")
@@ -847,10 +819,9 @@ struct ResultsView: View {
             }
 
             // Recommendations Content
-            let allRecommendations = extractRecommendationsFromSummary(result.aiSummary) + result.aiRecommendations
-            if !allRecommendations.isEmpty {
+            if !result.aiRecommendations.isEmpty {
                 LazyVStack(alignment: .leading, spacing: 8) {
-                    ForEach(Array(allRecommendations.enumerated()), id: \.offset) { index, recommendation in
+                    ForEach(Array(result.aiRecommendations.enumerated()), id: \.offset) { index, recommendation in
                         HStack(alignment: .top, spacing: 12) {
                             Image(systemName: "exclamationmark.circle.fill")
                                 .foregroundStyle(.orange)
@@ -1178,7 +1149,7 @@ struct ResultsView: View {
     
     private func monoCompatibilityCard(result: AnalysisResult) -> some View {
         let compatibilityPercent = result.monoCompatibility * 100
-        let status: MetricCard.Status = compatibilityPercent >= 80 ? .good : compatibilityPercent >= 60 ? .warning : .error
+        let status: MetricCard.Status = compatibilityPercent >= 60 ? .good : .error
         
         return MetricCard(
             title: "Mono Compatibility",
@@ -1197,6 +1168,9 @@ struct ResultsView: View {
         let _ = print("   High: \(result.highBalance)%")
         let _ = print("   Score: \(result.frequencyBalanceScore)%")
         
+        // Use score-based logic: ≥80% = good (green), <80% = issue (red)
+        let isBalanced = result.frequencyBalanceScore >= 80
+        
         return VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Image(systemName: "chart.bar.fill")
@@ -1207,8 +1181,8 @@ struct ResultsView: View {
 
                 Spacer()
 
-                Image(systemName: result.hasFrequencyImbalance ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
-                    .foregroundStyle(result.hasFrequencyImbalance ? .orange : .green)
+                Image(systemName: isBalanced ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(isBalanced ? .green : .red)
             }
 
             HStack(alignment: .firstTextBaseline, spacing: 4) {
@@ -1253,7 +1227,7 @@ struct ResultsView: View {
                 Spacer()
 
                 Image(systemName: result.hasDynamicRangeIssues ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
-                    .foregroundStyle(result.hasDynamicRangeIssues ? .orange : .green)
+                    .foregroundStyle(result.hasDynamicRangeIssues ? .red : .green)
             }
 
             // Overall Score
@@ -1278,7 +1252,7 @@ struct ResultsView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Label("Peak", systemImage: "waveform.path")
                         .font(.caption.bold())
-                        .foregroundStyle(result.hasClipping ? .red : result.peakLevel > -1.0 ? .orange : .green)
+                        .foregroundStyle(result.hasClipping ? .red : .green)
                     HStack(alignment: .firstTextBaseline, spacing: 4) {
                         Text(String(format: "%.1f", result.peakLevel))
                             .font(.system(size: 18, weight: .semibold))
@@ -1296,7 +1270,7 @@ struct ResultsView: View {
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 10)
-                        .stroke((result.hasClipping ? Color.red : result.peakLevel > -1.0 ? Color.orange : Color.green).opacity(0.25), lineWidth: 1)
+                        .stroke((result.hasClipping ? Color.red : Color.green).opacity(0.25), lineWidth: 1)
                 )
                 
                 // RMS
@@ -1465,32 +1439,6 @@ struct ResultsView: View {
 
     private func actionButtons(result: AnalysisResult) -> some View {
         VStack(spacing: 12) {
-            Button(action: { 
-                print("🔄 Re-analyze button tapped")
-                print("   Current remaining: \(mockService.remainingFreeAnalyses)")
-                print("   Can perform: \(mockService.canPerformAnalysis())")
-                
-                // Check immediately before starting task
-                if !mockService.canPerformAnalysis() {
-                    print("   ⚠️ Cannot perform analysis, showing paywall")
-                    showPaywall = true
-                    return
-                }
-                
-                Task { await performAnalysis() } 
-            }) {
-                HStack {
-                    if isAnalyzing {
-                        ProgressView()
-                            .scaleEffect(0.8)
-                    }
-                    Label("Re-analyze", systemImage: "arrow.clockwise")
-                }
-                .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(isAnalyzing)
-            
             Button(role: .destructive, action: { 
                 deleteFile()
             }) {

@@ -234,7 +234,7 @@ struct AudioFileRow: View {
                         .font(.title3)
                         .fontWeight(.bold)
                         .foregroundColor(Color.scoreColor(for: result.overallScore))
-
+                    
                     Text("score")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
