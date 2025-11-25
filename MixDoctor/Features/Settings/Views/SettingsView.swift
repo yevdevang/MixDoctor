@@ -10,6 +10,7 @@ struct SettingsView: View {
     @State private var isRefreshingSubscription = false
     @State private var isCancellingSubscription = false
     @State private var showCancelConfirmation = false
+    @AppStorage("muteLaunchSound") private var muteLaunchSound = false
     
     var body: some View {
         NavigationStack {
@@ -124,6 +125,8 @@ struct SettingsView: View {
                     }
                     
                     Toggle("Auto-Analyze New Files", isOn: $viewModel.autoAnalyze)
+                    
+                    Toggle("Mute Launch Sound", isOn: $muteLaunchSound)
                 } header: {
                     Text("Preferences")
                 } footer: {
