@@ -17,22 +17,56 @@ class ClaudeAPIService {
     private init() {}
     
     private func getClaudeAPIKey() -> String {
+        print("🔑 Checking Claude API Key configuration...")
         if let key = Bundle.main.infoDictionary?["CLAUDE_API_KEY"] as? String,
            !key.isEmpty,
            key != "YOUR_CLAUDE_API_KEY_HERE",
            key != "$(CLAUDE_API_KEY)" {
+            print("🔑 Claude API Key found: \(String(key.prefix(10)))...")
             return key
         } else {
+            print("""
+            ⚠️ Claude API Key not configured!
+            
+            Instructions:
+            1. Open Config.xcconfig file
+            2. Add your Claude API key to Config.xcconfig
+            3. CLAUDE_API_KEY = your_actual_api_key_here
+            """)
             return "missing-api-key"
         }
     }
     
     /// Send audio analysis metrics to Claude and get AI insights
     func analyzeAudioMetrics(_ metrics: AudioMetricsForClaude) async throws -> ClaudeAnalysisResponse {
+        print("🤖 ClaudeAPIService: Starting analysis...")
+        print("🤖 Is Pro User: \(metrics.isProUser)")
+        print("🤖 Model: \(determineModel(isProUser: metrics.isProUser))")
         
         // DEBUG: Print actual values being sent to Claude
+        print("\n🔍 ACTUAL VALUES BEING ANALYZED:")
+        print("   Peak Level: \(metrics.peakLevel) dB (should be -0.2 based on meters)")
+        print("   RMS Level: \(metrics.rmsLevel) dB")
+        print("   Loudness: \(metrics.loudness) LUFS") 
+        print("   Dynamic Range: \(metrics.dynamicRange) dB")
+        print("   True Peak: \(metrics.truePeakLevel) dBFS")
+        print("   Stereo Width: \(metrics.stereoWidth) (raw)")
+        print("   Phase Coherence: \(metrics.phaseCoherence) (raw)")
+        print("   Mono Compatibility: \(metrics.monoCompatibility) (raw)")
+        print("   Low End: \(metrics.lowEnd) (raw)")
+        print("   Low Mid: \(metrics.lowMid) (raw)")
+        print("   Mid: \(metrics.mid) (raw)")
+        print("   High Mid: \(metrics.highMid) (raw)")
+        print("   High: \(metrics.high) (raw)")
+        print("   Has Clipping: \(metrics.hasClipping)")
+        print("   Has Phase Issues: \(metrics.hasPhaseIssues)")
+        print("   Has Stereo Issues: \(metrics.hasStereoIssues)")
+        print("   Has Frequency Imbalance: \(metrics.hasFrequencyImbalance)")
+        print("   Has Dynamic Range Issues: \(metrics.hasDynamicRangeIssues)")
+        print("🔍 END VALUES\n")
         
         let prompt = createAnalysisPrompt(from: metrics)
+        print("🤖 Prompt length: \(prompt.count) characters")
         
         let requestBody: [String: Any] = [
             "model": determineModel(isProUser: metrics.isProUser),
@@ -46,6 +80,7 @@ class ClaudeAPIService {
         ]
         
         let jsonData = try JSONSerialization.data(withJSONObject: requestBody)
+        print("🤖 Request size: \(jsonData.count) bytes")
         
         var request = URLRequest(url: URL(string: apiURL)!)
         request.httpMethod = "POST"
@@ -54,26 +89,32 @@ class ClaudeAPIService {
         request.setValue(getClaudeAPIKey(), forHTTPHeaderField: "x-api-key")
         request.httpBody = jsonData
         
+        print("🤖 Making API request to: \(apiURL)")
         let (data, response) = try await URLSession.shared.data(for: request)
+        print("🤖 Received response: \(data.count) bytes")
         
         guard let httpResponse = response as? HTTPURLResponse else {
+            print("❌ Invalid response type")
             throw ClaudeAPIError.invalidResponse
         }
         
+        print("🤖 HTTP Status: \(httpResponse.statusCode)")
         
         guard httpResponse.statusCode == 200 else {
             let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
+            print("❌ Claude API Error (\(httpResponse.statusCode)): \(errorMessage)")
             
             // Specific error messages for common issues
             switch httpResponse.statusCode {
             case 401:
-                break
+                print("❌ AUTHENTICATION ERROR: Invalid API key or unauthorized")
             case 429:
-                break
+                print("❌ RATE LIMIT ERROR: Too many requests or insufficient credits")
+                print("💡 Check your Anthropic billing dashboard for credit balance")
             case 400:
-                break
+                print("❌ BAD REQUEST: Invalid request format")
             case 500, 502, 503:
-                break
+                print("❌ ANTHROPIC SERVER ERROR: Try again later")
             default:
                 break
             }
@@ -81,9 +122,13 @@ class ClaudeAPIService {
             throw ClaudeAPIError.apiError(httpResponse.statusCode, errorMessage)
         }
         
+        print("✅ Claude API request successful, parsing response...")
         
         // 🔍 DEBUG: Print the raw JSON response
         if let jsonString = String(data: data, encoding: .utf8) {
+            print("📦 RAW JSON RESPONSE:")
+            print(jsonString)
+            print("📦 END RAW JSON\n")
         }
         
         return try parseClaudeResponse(data)
@@ -103,6 +148,13 @@ class ClaudeAPIService {
         let detectedGenre = detectGenre(metrics)
         
         // Debug logging
+        print("🔍 MASTERED TRACK DETECTION:")
+        print("   Peak Level: \(String(format: "%.1f", metrics.peakLevel))dB (>-3.0: \(metrics.peakLevel > -3.0))")
+        print("   Dynamic Range: \(String(format: "%.1f", metrics.dynamicRange))dB (<15.0: \(metrics.dynamicRange < 15.0))")
+        print("   Loudness: \(String(format: "%.1f", metrics.loudness)) LUFS (-25 to -6: \(metrics.loudness > -25.0 && metrics.loudness < -6.0))")
+        print("   RMS Level: \(String(format: "%.1f", metrics.rmsLevel))dB (>-16.0: \(metrics.rmsLevel > -16.0))")
+        print("   🎯 DETECTED AS: \(isMasteredTrack ? "MASTERED TRACK" : "PRE-MASTER MIX")")
+        print("   🎸 DETECTED GENRE: \(detectedGenre)")
         
         if isMasteredTrack {
             return createMasteredTrackPrompt(metrics: metrics, genre: detectedGenre)
@@ -130,7 +182,17 @@ class ClaudeAPIService {
         
         // Enhanced debug logging
         if isMastered {
+            print("✅ MASTERED TRACK DETECTED - \(criteriaCount)/4 criteria met")
+            print("   Peak: \(String(format: "%.1f", metrics.peakLevel))dB (>-3: \(hasHighPeaks))")
+            print("   DR: \(String(format: "%.1f", metrics.dynamicRange))dB (<15: \(hasModerateToLowDynamicRange))")
+            print("   Loudness: \(String(format: "%.1f", metrics.loudness))LUFS (-25 to -6: \(hasOptimizedLoudness))")
+            print("   RMS: \(String(format: "%.1f", metrics.rmsLevel))dB (>-16: \(hasHighRMS))")
         } else {
+            print("📝 PRE-MASTER MIX DETECTED - Only \(criteriaCount)/4 criteria met")
+            print("   Peak: \(String(format: "%.1f", metrics.peakLevel))dB (>-3: \(hasHighPeaks))")
+            print("   DR: \(String(format: "%.1f", metrics.dynamicRange))dB (<15: \(hasModerateToLowDynamicRange))")
+            print("   Loudness: \(String(format: "%.1f", metrics.loudness))LUFS (-25 to -6: \(hasOptimizedLoudness))")
+            print("   RMS: \(String(format: "%.1f", metrics.rmsLevel))dB (>-16: \(hasHighRMS))")
         }
         
         return isMastered
@@ -497,6 +559,9 @@ class ClaudeAPIService {
         }
         
         // DEBUG: Print Claude's raw response
+        print("🤖 Claude's raw response:")
+        print(textContent)
+        print("🤖 End raw response\n")
         
         // Parse the structured response
         let lines = textContent.components(separatedBy: .newlines)
@@ -522,12 +587,15 @@ class ClaudeAPIService {
                 // Remove everything before "SCORE:" to handle "FINAL SCORE:", "**SCORE:**", etc.
                 let scoreText = cleanedLine.components(separatedBy: "SCORE:").last?
                     .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                print("🔍 Found SCORE line: '\(scoreText)'")
                 
                 // Extract the first number from the score line (handle "100", "100/100", "85 points", etc.)
                 let numbers = scoreText.components(separatedBy: CharacterSet.decimalDigits.inverted).filter { !$0.isEmpty }
                 if let firstNumber = numbers.first, let parsedScore = Int(firstNumber) {
                     score = parsedScore
+                    print("🔍 Extracted score: \(score!)")
                 } else {
+                    print("⚠️ Could not parse score from: '\(scoreText)'")
                 }
                 continue
             }
@@ -578,8 +646,15 @@ class ClaudeAPIService {
         }
         
         // 🔍 DEBUG: Print what we extracted
+        print("\n🔍 CLAUDE RESPONSE PARSING:")
+        print("   Extracted Score: \(score ?? -1)")
+        print("   Analysis length: \(analysis.count) characters")
+        print("   Analysis text: '\(analysis.prefix(100))...'")
+        print("   Recommendations Count: \(recommendations.count)")
         if !recommendations.isEmpty {
+            print("   First recommendation: '\(recommendations[0])'")
         }
+        print("🔍 END PARSING\n")
         
         // Determine if ready for mastering: few or no recommendations AND good score
         let isReadyForMastering = recommendations.count <= 2 && (score ?? 0) >= 75

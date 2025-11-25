@@ -62,6 +62,14 @@ public final class AudioFeatureExtractor {
         // Mid-side ratio
         let midSideRatio = midEnergy / (sideEnergy + 0.0001)
         
+        print("   📊 Stereo Features:")
+        print("      Correlation: \(correlation)")
+        print("      Mid Energy: \(midEnergy)")
+        print("      Side Energy: \(sideEnergy)")
+        print("      Raw Side Ratio: \(rawSideRatio) (\(Int(rawSideRatio * 100))%)")
+        print("      Stereo Width (Professional): \(stereoWidth) (\(Int(stereoWidth * 100))%)")
+        print("      L/R Balance: \(leftRightBalance)")
+        print("      Mid/Side Ratio: \(midSideRatio)")
         
         return StereoFeatures(
             stereoWidth: stereoWidth,

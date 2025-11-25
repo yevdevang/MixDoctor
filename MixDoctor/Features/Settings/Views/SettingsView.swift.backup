@@ -206,16 +206,14 @@ struct SettingsView: View {
                     }
                     .tint(Color.accentColor)
                     
-                    // Cloud Storage Info - Pro users only
-                    if mockService.isProUser {
-                        NavigationLink {
-                            iCloudDebugView()
-                        } label: {
-                            HStack {
-                                Image(systemName: "info.circle")
-                                    .foregroundStyle(.secondary)
-                                Text("Cloud Storage Info")
-                            }
+                    // Debug view
+                    NavigationLink {
+                        iCloudDebugView()
+                    } label: {
+                        HStack {
+                            Image(systemName: "wrench.and.screwdriver")
+                                .foregroundStyle(.secondary)
+                            Text("iCloud Debug Info")
                         }
                     }
                 } header: {
@@ -287,6 +285,7 @@ struct SettingsView: View {
         do {
             storageInfo = try FileManagementService.shared.calculateStorageUsage()
         } catch {
+            print("Failed to load storage info: \(error)")
         }
         isLoadingStorage = false
     }
@@ -297,6 +296,7 @@ struct SettingsView: View {
                 try FileManagementService.shared.clearCache()
                 await loadStorageInfo()
             } catch {
+                print("Failed to clear cache: \(error)")
             }
         }
     }
@@ -313,8 +313,10 @@ struct SettingsView: View {
         isCancellingSubscription = false
         
         if success {
+            print("✅ Subscription cancelled successfully")
             // Status will update automatically via iCloud sync
         } else {
+            print("❌ Failed to cancel subscription")
         }
     }
     
@@ -333,7 +335,8 @@ struct SettingsView: View {
     
     private func appVersion() -> String {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
-        return version
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+        return "\(version) (\(build))"
     }
 }
 

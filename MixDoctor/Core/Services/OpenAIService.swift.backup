@@ -37,7 +37,9 @@ public final class OpenAIService {
         isProUser: Bool = false
     ) async throws -> OpenAIAnalysisResponse {
         
+        print("🚀🚀🚀 OPENAI ANALYSIS SERVICE CALLED 🚀🚀🚀")
         let modelToUse = isProUser ? Model.gpt4_o : Model.gpt4_o_mini
+        print("📡 Using OpenAI model: \(isProUser ? "GPT-4o (Pro)" : "GPT-4o-mini (Free)")")
         
         // Adjust recommendations count based on user tier
         let maxRecommendations = isProUser ? 5 : 3
@@ -100,17 +102,22 @@ public final class OpenAIService {
             responseFormat: .jsonObject
         )
         
+        print("📤 Sending request to OpenAI API with \(isProUser ? "GPT-4o" : "GPT-4o-mini")...")
         
         do {
             let result = try await openAI.chats(query: query)
+            print("📥 Received response from OpenAI")
             
             guard let content = result.choices.first?.message.content else {
                 throw OpenAIError.noContent
             }
             
+            print("📝 OpenAI Analysis Response: \(content)")
+            print("✅✅✅ OPENAI ANALYSIS RECEIVED SUCCESSFULLY ✅✅✅")
             
             return try parseAnalysisResponse(content)
         } catch {
+            print("❌ OpenAI API Error: \(error.localizedDescription)")
             throw OpenAIError.apiError(statusCode: 0, message: error.localizedDescription)
         }
     }

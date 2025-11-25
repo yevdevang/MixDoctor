@@ -81,6 +81,12 @@ struct iCloudDebugView: View {
                     .foregroundColor(iCloudStatus.contains("Available") ? .green : .red)
             }
             
+            Section("Container Path") {
+                Text(containerPath)
+                    .font(.caption)
+                    .textSelection(.enabled)
+            }
+            
             Section("Files in iCloud") {
                 if filesInContainer.isEmpty {
                     Text("No files found")
@@ -181,6 +187,7 @@ struct iCloudDebugView: View {
         isRefreshing = true
         defer { isRefreshing = false }
         
+        print("🔍 Scanning iCloud Drive for audio files...")
         
         let service = iCloudStorageService.shared
         let audioDir = service.getAudioFilesDirectory()
@@ -192,11 +199,13 @@ struct iCloudDebugView: View {
                 options: [.skipsHiddenFiles]
             )
             
+            print("📂 Found \(files.count) files in iCloud directory")
             
             // Filter audio files
             let audioExtensions = ["mp3", "wav", "m4a", "aac", "aif", "aiff"]
             let audioFiles = files.filter { audioExtensions.contains($0.pathExtension.lowercased()) }
             
+            print("🎵 Found \(audioFiles.count) audio files")
             
             var imported = 0
             var skipped = 0
@@ -210,6 +219,7 @@ struct iCloudDebugView: View {
                 )
                 
                 if let existing = try? modelContext.fetch(descriptor), !existing.isEmpty {
+                    print("⏭️ Skipping already imported: \(fileName)")
                     skipped += 1
                     continue
                 }
@@ -218,11 +228,13 @@ struct iCloudDebugView: View {
                 do {
                     let values = try fileURL.resourceValues(forKeys: [.ubiquitousItemDownloadingStatusKey])
                     if values.ubiquitousItemDownloadingStatus == .notDownloaded {
+                        print("⬇️ Downloading: \(fileName)")
                         try FileManager.default.startDownloadingUbiquitousItem(at: fileURL)
                         // Wait for download
                         try? await Task.sleep(nanoseconds: 3_000_000_000)
                     }
                 } catch {
+                    print("⚠️ Download check error: \(error)")
                 }
                 
                 // Import the file
@@ -263,6 +275,7 @@ struct iCloudDebugView: View {
                     
                     // Try to load analysis result from iCloud Drive
                     if let analysisResult = AnalysisResultPersistence.shared.loadAnalysisResult(forAudioFile: fileName) {
+                        print("☁️ Found analysis result for: \(fileName)")
                         analysisResult.audioFile = audioFile
                         audioFile.analysisResult = analysisResult
                         audioFile.dateAnalyzed = analysisResult.dateAnalyzed
@@ -270,12 +283,15 @@ struct iCloudDebugView: View {
                     
                     try modelContext.save()
                     
+                    print("✅ Imported: \(fileName)")
                     imported += 1
                 } catch {
+                    print("❌ Failed to import \(fileName): \(error)")
                     errors += 1
                 }
             }
             
+            print("📊 Import complete: \(imported) imported, \(skipped) skipped, \(errors) errors")
             
             // Refresh UI
             checkStatus()
@@ -286,6 +302,7 @@ struct iCloudDebugView: View {
             }
             
         } catch {
+            print("❌ Error scanning directory: \(error)")
             await MainActor.run {
                 deleteMessage = "Error scanning iCloud Drive: \(error.localizedDescription)"
             }
@@ -295,6 +312,7 @@ struct iCloudDebugView: View {
     private func forceDownloadAll() async {
         isRefreshing = true
         
+        print("🔄 Force downloading all iCloud files...")
         
         let service = iCloudStorageService.shared
         let audioDir = service.getAudioFilesDirectory()
@@ -307,28 +325,36 @@ struct iCloudDebugView: View {
                 options: []
             )
             
+            print("📂 Found \(files.count) total items in iCloud directory")
             
             for fileURL in files {
+                print("📄 File: \(fileURL.lastPathComponent)")
                 
                 // Check if it's an iCloud item
                 if let values = try? fileURL.resourceValues(forKeys: [URLResourceKey.isUbiquitousItemKey, URLResourceKey.ubiquitousItemDownloadingStatusKey]) {
+                    print("   Is ubiquitous: \(values.isUbiquitousItem ?? false)")
+                    print("   Download status: \(values.ubiquitousItemDownloadingStatus?.rawValue ?? "unknown")")
                     
                     // Try to start download
                     do {
                         try FileManager.default.startDownloadingUbiquitousItem(at: fileURL)
+                        print("   ⬇️ Started download")
                         
                         // Wait a bit for download
                         try? await Task.sleep(nanoseconds: 2_000_000_000)
                     } catch {
+                        print("   ❌ Download error: \(error)")
                     }
                 }
             }
             
+            print("✅ Force download complete")
             
             // Refresh status
             checkStatus()
             
         } catch {
+            print("❌ Error listing files: \(error)")
         }
         
         isRefreshing = false
@@ -376,15 +402,25 @@ struct iCloudDebugView: View {
         isRefreshing = false
         
         // Print detailed debug info to console
+        print("=== iCloud Debug Info ===")
+        print("Signed into iCloud: \(signedInToiCloud)")
+        print("Ubiquity Token: \(FileManager.default.ubiquityIdentityToken != nil ? "Present" : "Nil")")
+        print("iCloud Available: \(service.isICloudAvailable)")
+        print("Container Path: \(containerPath)")
+        print("Files found: \(filesInContainer.count)")
+        print("========================")
     }
     
     private func checkDatabase() {
         // Force a manual check of the database
         let descriptor = FetchDescriptor<AudioFile>()
         if let allFiles = try? modelContext.fetch(descriptor) {
+            print("📊 Manual database check: Found \(allFiles.count) AudioFile records")
             for (index, file) in allFiles.enumerated() {
+                print("  \(index + 1). \(file.fileName) - Size: \(file.fileSize) bytes")
             }
         } else {
+            print("❌ Failed to fetch AudioFile records from database")
         }
     }
     
@@ -392,6 +428,7 @@ struct iCloudDebugView: View {
         isRefreshing = true
         defer { isRefreshing = false }
         
+        print("🗑️ Starting deletion of all files from iCloud...")
         
         var deletedFilesCount = 0
         var deletedRecordsCount = 0
@@ -408,35 +445,43 @@ struct iCloudDebugView: View {
                 options: []
             )
             
+            print("📂 Found \(files.count) files to delete")
             
             for fileURL in files {
                 do {
                     try FileManager.default.removeItem(at: fileURL)
                     deletedFilesCount += 1
+                    print("✅ Deleted file: \(fileURL.lastPathComponent)")
                 } catch {
                     let errorMsg = "Failed to delete \(fileURL.lastPathComponent): \(error.localizedDescription)"
                     errors.append(errorMsg)
+                    print("❌ \(errorMsg)")
                 }
             }
         } catch {
             let errorMsg = "Failed to read directory: \(error.localizedDescription)"
             errors.append(errorMsg)
+            print("❌ \(errorMsg)")
         }
         
         // Step 2: Delete all AudioFile records from SwiftData
         let descriptor = FetchDescriptor<AudioFile>()
         if let allFiles = try? modelContext.fetch(descriptor) {
+            print("📊 Found \(allFiles.count) AudioFile records to delete")
             
             for file in allFiles {
                 modelContext.delete(file)
                 deletedRecordsCount += 1
+                print("✅ Deleted record: \(file.fileName)")
             }
             
             do {
                 try modelContext.save()
+                print("💾 Saved changes to database")
             } catch {
                 let errorMsg = "Failed to save database changes: \(error.localizedDescription)"
                 errors.append(errorMsg)
+                print("❌ \(errorMsg)")
             }
         }
         
@@ -450,11 +495,15 @@ struct iCloudDebugView: View {
             deleteMessage = "Deleted \(deletedFilesCount) file\(deletedFilesCount == 1 ? "" : "s") and \(deletedRecordsCount) record\(deletedRecordsCount == 1 ? "" : "s"), but encountered \(errors.count) error\(errors.count == 1 ? "" : "s")."
         }
         
+        print("✅ Deletion complete: \(deletedFilesCount) files, \(deletedRecordsCount) records")
+        print("========================")
     }
     
     // MARK: - New Comprehensive File Status Functions
     
     private func checkComprehensiveFileStatus() {
+        print("\n🔍 COMPREHENSIVE ICLOUD FILE STATUS CHECK")
+        print("==========================================")
         
         // Use the new iCloudStorageService functions
         let service = iCloudStorageService.shared
@@ -464,39 +513,57 @@ struct iCloudDebugView: View {
         do {
             let allFiles = try service.getAllAudioFilesWithStatus()
             
+            print("📊 SUMMARY FROM NEW SERVICE:")
+            print("Total files found: \(allFiles.count)")
             
             let iCloudFiles = allFiles.filter { $0.isICloudFile }
             let localFiles = allFiles.filter { !$0.isICloudFile }
             let downloadedICloudFiles = iCloudFiles.filter { $0.isDownloaded }
             let notDownloadedICloudFiles = iCloudFiles.filter { !$0.isDownloaded }
             
+            print("☁️ iCloud files: \(iCloudFiles.count)")
+            print("   - Downloaded: \(downloadedICloudFiles.count)")
+            print("   - Not downloaded: \(notDownloadedICloudFiles.count)")
+            print("💾 Local only files: \(localFiles.count)")
             
             if !notDownloadedICloudFiles.isEmpty {
+                print("\n⚠️ Files not downloaded from iCloud:")
                 for file in notDownloadedICloudFiles {
+                    print("   - \(file.url.lastPathComponent)")
                 }
             }
             
         } catch {
+            print("❌ Error getting comprehensive file status: \(error)")
         }
         
+        print("==========================================\n")
     }
     
     private func downloadAllWithNewService() async {
         isRefreshing = true
         defer { isRefreshing = false }
         
+        print("\n⬇️ DOWNLOADING ALL ICLOUD FILES")
+        print("==============================")
         
         let service = iCloudStorageService.shared
         
         do {
             let result = try await service.downloadAllICloudFiles()
             
+            print("✅ Download Results:")
+            print("   Downloaded: \(result.downloaded)")
+            print("   Already Local: \(result.alreadyLocal)")
+            print("   Failed: \(result.failed)")
             
             // Refresh the view
             checkStatus()
             
         } catch {
+            print("❌ Download failed: \(error)")
         }
         
+        print("==============================\n")
     }
 }

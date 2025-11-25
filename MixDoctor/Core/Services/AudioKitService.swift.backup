@@ -28,12 +28,14 @@ public class AudioKitService: ObservableObject {
     // MARK: - Setup
     private func setupAudioEngine() {
         // AudioKit setup for analysis
+        print("🎵 AudioKitService initialized with AudioKit engine")
     }
     
     // MARK: - File-Based Audio Analysis
     
     /// Analyze audio file and return comprehensive analysis for display
     public func getDetailedAnalysis(for url: URL) async throws -> AnalysisResult {
+        print("🔍 AudioKit analyzing: \(url.lastPathComponent)")
         
         // Check if analysis already exists in iCloud Drive to avoid re-analyzing
         let fileName = url.lastPathComponent
@@ -42,13 +44,16 @@ public class AudioKitService: ObservableObject {
         if let existingResult = AnalysisResultPersistence.shared.loadAnalysisResult(forAudioFile: fileName) {
             // Check if cached version matches current version
             if existingResult.analysisVersion == currentVersion {
+                print("✅ Found valid cached analysis (v\(existingResult.analysisVersion)) for: \(fileName)")
                 return existingResult
             } else {
+                print("⚠️ Cached analysis version mismatch (\(existingResult.analysisVersion) vs \(currentVersion)) - re-analyzing")
                 // Delete old cached result to avoid confusion
                 AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: fileName)
             }
         }
         
+        print("📊 Performing new analysis for: \(fileName)")
         
         isAnalyzing = true
         defer { isAnalyzing = false }
@@ -58,7 +63,9 @@ public class AudioKitService: ObservableObject {
         // Save to iCloud Drive for future use
         do {
             try AnalysisResultPersistence.shared.saveAnalysisResult(result, forAudioFile: fileName)
+            print("☁️ Saved analysis to iCloud Drive for: \(fileName)")
         } catch {
+            print("⚠️ Failed to save analysis to iCloud: \(error)")
         }
         
         return result
@@ -74,6 +81,8 @@ public class AudioKitService: ObservableObject {
         // Calculate duration from AudioKit/AVFoundation
         let duration = Double(audioFile.length) / audioFile.processingFormat.sampleRate
         let actualSampleRate = audioFile.processingFormat.sampleRate
+        print("🔍 MAIN ANALYSIS DEBUG:")
+        print("   Detected sample rate: \(actualSampleRate) Hz")
         
         // Read audio data into buffer for AudioKit processing
         let frameCount = AVAudioFrameCount(audioFile.length)
@@ -134,25 +143,63 @@ public class AudioKitService: ObservableObject {
         
         result.recommendations = analysisResult.recommendations
         
+        print("🎯 AudioKit analysis completed for: \(url.lastPathComponent)")
         
         // File quality diagnostics
+        print("📁 FILE DIAGNOSTICS:")
+        print("   File extension: \(url.pathExtension.uppercased())")
+        print("   Sample rate: \(audioFile.processingFormat.sampleRate) Hz")
+        print("   Channel count: \(audioFile.processingFormat.channelCount)")
+        print("   Bit depth: \(audioFile.processingFormat.settings[AVLinearPCMBitDepthKey] ?? "Unknown")")
         
         // Frequency analysis quality check
+        print("📊 FREQUENCY ANALYSIS QUALITY:")
+        print("   Spectral Centroid: \(String(format: "%.2f", result.spectralCentroid)) Hz")
         if result.spectralCentroid < 1000 {
+            print("   ⚠️  Very low spectral centroid - possible low-pass filtering")
         }
         if result.highBalance < 1.0 {
+            print("   ⚠️  Critically low high frequencies - possible conversion artifacts")
         }
         if result.highBalance + result.highMidBalance < 5.0 {
+            print("   ⚠️  Missing high-frequency content - check source file quality")
         }
         
+        print("🎛️ FREQUENCY BALANCE:")
+        print("Stereo Width : \(String(format: "%.1f", result.stereoWidthScore)) %")
+        print("Phase Coherence : \(String(format: "%.2f", result.phaseCoherence * 100)) %")
+        print("Mono Compatibility : \(String(format: "%.2f", result.monoCompatibility * 100)) %")
+        print("Spectral Centroid : \(String(format: "%.2f", result.spectralCentroid)) Hz")
+        print("Has Clipping : \(result.hasClipping ? "Yes" : "No")")
 
+        print("Low End Balance : \(String(format: "%.2f", result.lowEndBalance)) %")
+        print("Low Mid Balance : \(String(format: "%.2f", result.lowMidBalance)) %")
+        print("Mid Balance : \(String(format: "%.2f", result.midBalance)) %")
+        print("High Mid Balance : \(String(format: "%.2f", result.highMidBalance)) %")
+        print("High Balance : \(String(format: "%.2f", result.highBalance)) %")
 
+        print("Dynamic Range : \(String(format: "%.2f", result.dynamicRange)) dB")
+        print("Loudness (LUFS) : \(String(format: "%.2f", result.loudnessLUFS)) LUFS")
+        print("RMS Level : \(String(format: "%.2f", result.rmsLevel)) dB")
+        print("Peak Level : \(String(format: "%.2f", result.peakLevel)) dB")
 
+        print("hasPhaseIssues : \(result.hasPhaseIssues ? "Yes" : "No")")
+        print("hasStereoIssues : \(result.hasStereoIssues ? "Yes" : "No")")
+        print("hasFrequencyImbalance : \(result.hasFrequencyImbalance ? "Yes" : "No")")
+        print("hasDynamicRangeIssues : \(result.hasDynamicRangeIssues ? "Yes" : "No")")
+        print("hasInstrumentBalanceIssues : \(result.hasInstrumentBalanceIssues ? "Yes" : "No")")
+        print("instrumentBalanceScore : \(String(format: "%.2f", result.instrumentBalanceScore)) %")
+        print("kickEnergy : \(String(format: "%.2f", result.kickEnergy)) %")
+        print("bassEnergy : \(String(format: "%.2f", result.bassEnergy)) %")
+        print("vocalEnergy : \(String(format: "%.2f", result.vocalEnergy)) %")
+        print("guitarEnergy : \(String(format: "%.2f", result.guitarEnergy)) %")
+        print("cymbalEnergy : \(String(format: "%.2f", result.cymbalEnergy)) %")
 
         
 
         // Add Claude AI analysis
         do {
+            print("🤖 Sending metrics to Claude API for AI analysis...")
             
             // Get subscription status
             let mockService = MockSubscriptionService.shared
@@ -226,6 +273,7 @@ public class AudioKitService: ObservableObject {
             
             // UNMIXED DETECTION DISABLED - always show score
             // Simple arrangements shouldn't be penalized
+            print("✅ Using Claude score directly: \(claudeResponse.score)")
             
             result.isProfessionallyMixed = true
             result.aiSummary = claudeResponse.summary
@@ -234,10 +282,22 @@ public class AudioKitService: ObservableObject {
             result.claudeScore = claudeResponse.score
             result.overallScore = Double(claudeResponse.score)
             
+            print("✅ Claude analysis completed successfully")
+            print("🎯 Final overallScore: \(result.overallScore)")
+            print("🤖 Ready for mastering: \(result.isReadyForMastering)")
             
         } catch {
+            print("❌ ========================================")
+            print("❌ CLAUDE API CALL FAILED!")
+            print("❌ ========================================")
+            print("❌ Error type: \(type(of: error))")
+            print("❌ Error description: \(error.localizedDescription)")
             if let claudeError = error as? URLError {
+                print("❌ URLError code: \(claudeError.code)")
+                print("❌ URLError domain: \(claudeError.errorUserInfo)")
             }
+            print("❌ Full error: \(error)")
+            print("❌ ========================================")
             
             // API failed - show error message, still mark as professional
             result.isProfessionallyMixed = true
@@ -246,7 +306,9 @@ public class AudioKitService: ObservableObject {
             result.isReadyForMastering = false
             result.overallScore = 0.0  // Hide score
             result.claudeScore = nil
+            print("❌ Professional mix - hiding score during API failure")
             
+            print("❌ User will see: '\(result.aiSummary?.prefix(50) ?? "Error")'...")
         }
         
         return result
@@ -256,6 +318,9 @@ public class AudioKitService: ObservableObject {
     
     private func performAudioKitBufferAnalysis(_ buffer: AVAudioPCMBuffer, duration: TimeInterval, sampleRate: Double) async -> AudioKitAnalysisResult {
         // AudioKit-based buffer analysis
+        print("🎯 BUFFER ANALYSIS DEBUG:")
+        print("   Received sample rate: \(sampleRate) Hz")
+        print("   Buffer format sample rate: \(buffer.format.sampleRate) Hz")
         
         guard let leftData = buffer.floatChannelData?[0] else {
             return AudioKitAnalysisResult()
@@ -340,6 +405,7 @@ public class AudioKitService: ObservableObject {
         // 🧪 TEST MODE: Generate test signal instead of using real audio
         _ = Array(UnsafeBufferPointer(start: data, count: frameCount))
         
+        print("\n🧪 GENERATING TEST SIGNAL")
         let frequencies: [Double] = [100, 200, 300, 500, 800, 1200, 2400, 4800, 9600]
         let amplitudes: [Float] = [1.0, 0.7, 0.5, 0.6, 0.4, 0.3, 0.25, 0.15, 0.08]
         let actualFFTSize = 4096
@@ -352,10 +418,15 @@ public class AudioKitService: ObservableObject {
             }
             samples[i] = sample / Float(frequencies.count)
         }
+        print("🧪 Peaks at: \(frequencies.map { "\(Int($0))Hz" }.joined(separator: ", "))")
         
         // Use the test signal samples directly (already actualFFTSize = 4096)
         let actualSamples = samples
         
+        print("📊 TEST SIGNAL FFT ANALYSIS:")
+        print("   Frame count: \(frameCount)")
+        print("   FFT size: \(actualFFTSize)")
+        print("   Frequency resolution: \(String(format: "%.2f", sampleRate / Double(actualFFTSize))) Hz per bin")
         
         // Enhanced FFT analysis with professional smoothing
         let magnitudes = performFFTAnalysis(actualSamples)
@@ -367,11 +438,22 @@ public class AudioKitService: ObservableObject {
         let totalMagnitude = smoothedMagnitudes.reduce(0.0) { sum, mag in sum + Double(mag) }
         let maxMagnitude = smoothedMagnitudes.max() ?? 0.0
         let nonZeroCount = smoothedMagnitudes.filter { $0 > 0.0001 }.count
+        print("📊 FFT SPECTRUM DEBUG (SMOOTHED):")
+        print("   Total magnitude: \(totalMagnitude)")
+        print("   Max magnitude: \(maxMagnitude)")
+        print("   Non-zero bins: \(nonZeroCount)/\(smoothedMagnitudes.count)")
+        print("   First 10 magnitudes: \(Array(smoothedMagnitudes.prefix(10)))")
+        print("   Last 10 magnitudes: \(Array(smoothedMagnitudes.suffix(10)))")
         
         // Define frequency bands (using actual sample rate)
         let nyquist = sampleRate / 2.0
         let binWidth = nyquist / Double(smoothedMagnitudes.count / 2)
         
+        print("🔬 FFT ANALYSIS DEBUG:")
+        print("   Using sample rate: \(sampleRate) Hz")
+        print("   Nyquist frequency: \(nyquist) Hz") 
+        print("   Bin width: \(String(format: "%.2f", binWidth)) Hz")
+        print("   FFT size: \(smoothedMagnitudes.count)")
         
         // Ensure we only use the meaningful half of the spectrum
         let usefulBins = smoothedMagnitudes.count / 2
@@ -408,6 +490,15 @@ public class AudioKitService: ObservableObject {
         let airRange = airStart..<airEnd   // 12kHz - 20kHz (air)
         
         // Debug: Show frequency band ranges
+        print("🎯 FREQUENCY BAND RANGES:")
+        print("   Sub-Bass: bins \(subBassRange.lowerBound)-\(subBassRange.upperBound-1) (\(Double(subBassRange.lowerBound)*binWidth)Hz - \(Double(subBassRange.upperBound-1)*binWidth)Hz)")
+        print("   Bass: bins \(bassRange.lowerBound)-\(bassRange.upperBound-1) (\(Double(bassRange.lowerBound)*binWidth)Hz - \(Double(bassRange.upperBound-1)*binWidth)Hz)")
+        print("   Low-Mid: bins \(lowMidRange.lowerBound)-\(lowMidRange.upperBound-1) (\(Double(lowMidRange.lowerBound)*binWidth)Hz - \(Double(lowMidRange.upperBound-1)*binWidth)Hz)")
+        print("   Mid: bins \(midRange.lowerBound)-\(midRange.upperBound-1) (\(Double(midRange.lowerBound)*binWidth)Hz - \(Double(midRange.upperBound-1)*binWidth)Hz)")
+        print("   High-Mid: bins \(highMidRange.lowerBound)-\(highMidRange.upperBound-1) (\(Double(highMidRange.lowerBound)*binWidth)Hz - \(Double(highMidRange.upperBound-1)*binWidth)Hz)")
+        print("   Presence: bins \(presenceRange.lowerBound)-\(presenceRange.upperBound-1) (\(Double(presenceRange.lowerBound)*binWidth)Hz - \(Double(presenceRange.upperBound-1)*binWidth)Hz)")
+        print("   Air: bins \(airRange.lowerBound)-\(airRange.upperBound-1) (\(Double(airRange.lowerBound)*binWidth)Hz - \(Double(airRange.upperBound-1)*binWidth)Hz)")
+        print("   Total useful bins: \(usefulBins)")
         
         // Calculate energy in each frequency band with proper professional weighting
         let subBass = calculateBandEnergy(smoothedMagnitudes, range: subBassRange, sampleRate: sampleRate)
@@ -419,6 +510,15 @@ public class AudioKitService: ObservableObject {
         let air = calculateBandEnergy(smoothedMagnitudes, range: airRange, sampleRate: sampleRate)
         
         // Debug: Show frequency band energies 
+        print("🎵 FREQUENCY BAND ENERGIES:")
+        print("   Sub-Bass (20-80Hz): \(String(format: "%.2f", subBass))%")
+        print("   Bass (80-250Hz): \(String(format: "%.2f", bass))%")
+        print("   Low-Mid (250-500Hz): \(String(format: "%.2f", lowMid))%")
+        print("   Mid (500Hz-2kHz): \(String(format: "%.2f", mid))%")
+        print("   High-Mid (2-6kHz): \(String(format: "%.2f", highMid))%")
+        print("   Presence (6-12kHz): \(String(format: "%.2f", presence))%")
+        print("   Air (12-20kHz): \(String(format: "%.2f", air))%")
+        print("   Total: \(String(format: "%.2f", subBass + bass + lowMid + mid + highMid + presence + air))%")
         
         // Calculate spectral centroid with smoothed data
         let spectralCentroid = calculateSpectralCentroid(smoothedMagnitudes, binWidth: binWidth)
@@ -433,9 +533,12 @@ public class AudioKitService: ObservableObject {
         
         // Detect genre for frequency balance assessment
         let detectedGenre = detectGenreFromFrequencies(combinedLowEnd, combinedLowMid, combinedMid, combinedHighMid, combinedHigh)
+        print("🎭 GENRE DETECTION:")
+        print("   Detected genre: \(detectedGenre)")
         
         // Check for frequency imbalance
         let hasImbalance = checkFrequencyImbalance(combinedLowEnd, combinedLowMid, combinedMid, combinedHighMid, combinedHigh, genre: detectedGenre)
+        print("   Has frequency imbalance: \(hasImbalance)")
         
         // For spectrum visualization, use RAW unsmoothed magnitudes to show all frequency detail
         // Professional analyzers show the actual measured spectrum, not overly smoothed data
@@ -459,6 +562,7 @@ public class AudioKitService: ObservableObject {
         let peakAmplitude = samples.map { abs($0) }.max() ?? 0.0
         
         // DEBUG: Print peak calculation
+        print("🔍 Peak calculation: raw amplitude = \(peakAmplitude), should be ~0.977 for -0.2dB")
         
         // Calculate RMS (Root Mean Square) for average loudness
         let sumOfSquares = samples.reduce(0.0) { sum, sample in
@@ -503,6 +607,7 @@ public class AudioKitService: ObservableObject {
         let peakLevelDB = peakAmplitude > 0 ? 20 * log10(Double(peakAmplitude)) : -100.0
         
         // DEBUG: Print dB conversion
+        print("🔍 Peak dB conversion: \(peakAmplitude) -> \(peakLevelDB) dB")
         
         return AudioKitAmplitudeResult(
             peak: peakLevelDB,  // Now in dB, not raw amplitude
@@ -730,6 +835,7 @@ public class AudioKitService: ObservableObject {
     
     private func calculateBandEnergy(_ magnitudes: [Float], range: Range<Int>, sampleRate: Double = 44100.0) -> Double {
         guard !range.isEmpty && range.upperBound <= magnitudes.count && range.lowerBound >= 0 else { 
+            print("⚠️ Invalid range: \(range) for magnitudes count: \(magnitudes.count)")
             return -80.0  // Return dB floor instead of 0
         }
 
@@ -773,6 +879,7 @@ public class AudioKitService: ObservableObject {
         if range.lowerBound % 50 == 0 {
             let startFreq = Double(range.lowerBound) * binWidth
             let endFreq = Double(range.upperBound - 1) * binWidth
+            print("🔊 Band \(Int(startFreq))-\(Int(endFreq))Hz: RMS=\(String(format: "%.6f", rmsLevel)), dB=\(String(format: "%.1f", dBLevel)), Display=\(String(format: "%.1f", displayValue))%")
         }
         
         return displayValue
@@ -835,6 +942,7 @@ public class AudioKitService: ObservableObject {
         
         // Only print weight for debug purposes occasionally
         if binIndex % 200 == 0 { // Print every 200th bin to avoid spam
+            print("🔊 \(String(format: "%.1f", frequency))Hz: A-weight=\(String(format: "%.2f", aWeightingDB))dB, linear=\(String(format: "%.3f", clampedWeight))")
         }
         
         return clampedWeight
@@ -884,28 +992,33 @@ public class AudioKitService: ObservableObject {
         
         // 1. Extremely bass-heavy (genre-dependent) - indicates serious mix issues
         if lowEnd > bassMaxThreshold {
+            print("❌ IMBALANCE: Bass too heavy (\(String(format: "%.2f", lowEnd))% > \(bassMaxThreshold)%)")
             return true
         }
         
         // 2. Combined bass + low-mid domination (genre-dependent) - overly bottom-heavy
         if (lowEnd + lowMid) > combinedLowMaxThreshold {
+            print("❌ IMBALANCE: Combined low-end too heavy (\(String(format: "%.2f", lowEnd + lowMid))% > \(combinedLowMaxThreshold)%)")
             return true
         }
         
         // 3. Missing high frequencies (genre-dependent threshold)
         if high < highFreqMinThreshold {
+            print("❌ IMBALANCE: High frequencies too low (\(String(format: "%.2f", high))% < \(highFreqMinThreshold)%)")
             return true
         }
         
         // 4. Missing mid-range presence (<6% combined mid + high-mid) - hollow/scooped sound
         // Reduced from 8% to 6% to be more lenient
         if (mid + highMid) < 6.0 {
+            print("❌ IMBALANCE: Mid-range presence too low (\(String(format: "%.2f", mid + highMid))% < 6%)")
             return true
         }
         
         // 5. Only high frequencies present (low+lowMid+mid <25%) - thin/harsh sound
         // Reduced from 30% to 25% to be more lenient
         if (lowEnd + lowMid + mid) < 25.0 {
+            print("❌ IMBALANCE: Missing body (\(String(format: "%.2f", lowEnd + lowMid + mid))% < 25%)")
             return true
         }
         
@@ -913,15 +1026,18 @@ public class AudioKitService: ObservableObject {
         // Widened range from 85-115% to 80-120% to be more lenient
         let totalEnergy = lowEnd + lowMid + mid + highMid + high
         if totalEnergy < 80.0 || totalEnergy > 120.0 {
+            print("❌ IMBALANCE: Total energy out of range (\(String(format: "%.2f", totalEnergy))% not between 80-120%)")
             return true
         }
         
         // 7. Any single band dominates too much (except low-end which can be genre-dependent)
         // Increased thresholds to be more lenient: lowMid 40→45%, mid 45→50%, highMid 35→40%, high 30→35%
         if lowMid > 45.0 || mid > 50.0 || highMid > 40.0 || high > 35.0 {
+            print("❌ IMBALANCE: Single band dominance (lowMid:\(String(format: "%.2f", lowMid))%, mid:\(String(format: "%.2f", mid))%, highMid:\(String(format: "%.2f", highMid))%, high:\(String(format: "%.2f", high))%)")
             return true
         }
         
+        print("✅ BALANCE: All frequency balance checks passed for \(genre)")
         return false
     }
     
@@ -1150,6 +1266,11 @@ public class AudioKitService: ObservableObject {
             stereoWidth = 0.65 + (Double(rawSideRatio) - 0.40) * 0.583
         }
         
+        print("🔍 Stereo Width Debug:")
+        print("   Mid Energy: \(midEnergy)")
+        print("   Side Energy: \(sideEnergy)")
+        print("   Raw Side Ratio: \(rawSideRatio) (\(Int(rawSideRatio * 100))%)")
+        print("   Professional Width: \(stereoWidth) (\(Int(stereoWidth * 100))%)")
         
         return max(0.0, min(1.0, stereoWidth))
     }
@@ -1947,6 +2068,7 @@ enum AudioKitError: Error {
         // Stereo width should be calculated using Mid/Side analysis, not balance
         // Balance indicates left/right positioning, not stereo width
         // This is kept for backward compatibility but returns a neutral width
+        print("⚠️ Warning: Using deprecated balance-based stereo width calculation")
         return 0.5  // Return neutral width since balance ≠ stereo width
     }
     
@@ -2253,6 +2375,7 @@ enum AudioKitError: Error {
         let windowSize = 4096
         
         // Use real audio data - find the loudest section for best frequency representation
+        print("\n📊 ANALYZING REAL AUDIO FILE")
         
         // Find the loudest window in the audio for best frequency analysis
         var maxEnergy: Float = 0
@@ -2271,6 +2394,7 @@ enum AudioKitError: Error {
         }
         
         let windowSamples = Array(samples[bestWindowStart..<min(bestWindowStart + windowSize, frameCount)])
+        print("📊 Using loudest window at sample \(bestWindowStart) (energy: \(maxEnergy))")
         
         // Get FFT from real audio
         let magnitudes = performFFTAnalysis(windowSamples)
@@ -2353,6 +2477,7 @@ enum AudioKitError: Error {
         let halfSpectrum = magnitudes.count / 2
         let spectrumForDisplay = Array(magnitudes[0..<min(halfSpectrum, 2048)])
         
+        print("📊 SPECTRUM FOR DISPLAY: \(spectrumForDisplay.count) bins (RAW FFT)")
         
         return SpectralBalanceResult(
             subBassEnergy: subBassEnergy,
@@ -2411,6 +2536,7 @@ enum AudioKitError: Error {
             stereoWidth = 0.65 + (rawSideRatio - 0.40) * 0.583
         }
         
+        print("🔍 Professional Stereo Width: \(Int(stereoWidth * 100))% (raw side ratio: \(Int(rawSideRatio * 100))%)")
         
         // Side chain energy (for stereo imaging)
         let sidechainEnergy = totalEnergy > 0 ? Double(sideEnergy / totalEnergy) : 0.3
@@ -2860,7 +2986,24 @@ enum AudioKitError: Error {
             recommendations.insert("⚡ Mix quality could be improved (\(String(format: "%.0f", mixingQualityScore))% score)", at: 0)
         }
         
+        print("\n🔍 UNMIXED DETECTION ANALYSIS:")
+        print("   Failed points: \(failedTests)/\(Int(maxPoints))")
+        print("   Confidence: \(String(format: "%.0f", confidenceScore))%")
+        print("   Is Unmixed: \(isLikelyUnmixed) \(criticalMonoFailure ? "(CRITICAL MONO OVERRIDE)" : "")")
+        print("   Mixing Quality: \(String(format: "%.0f", mixingQualityScore))%")
+        print("\n   📊 RAW METRICS:")
+        print("      Mono Compatibility: \(String(format: "%.1f", monoCompatibility * 100))%")
+        print("      Dynamic Range: \(String(format: "%.1f", dynamicRange))dB")
+        print("      Crest Factor: \(String(format: "%.1f", crestFactor))dB")
+        print("      Loudness: \(String(format: "%.1f", loudness))LUFS")
+        print("      Peak Level: \(String(format: "%.1f", peakLevel))dBFS")
+        print("      Stereo Width: \(String(format: "%.0f", stereoWidth * 100))%")
+        print("      Stereo Balance: \(String(format: "%.1f", stereoBalance * 100))%")
+        print("      Phase Coherence: \(String(format: "%.1f", phaseCoherence * 100))%")
+        print("      Loudness Range: \(String(format: "%.1f", loudnessRange))LU")
+        print("\n   ✓ FAILED TESTS:")
         for (key, value) in detectionCriteria.sorted(by: { $0.key < $1.key }) where value {
+            print("      • \(key)")
         }
         
         return UnmixedDetectionResult(
@@ -3110,6 +3253,7 @@ extension AudioKitService {
             signal[i] = sample / Float(frequencies.count)
         }
         
+        print("🧪 Generated test signal with peaks at: \(frequencies.map { "\(Int($0))Hz" }.joined(separator: ", "))")
         
         return signal
     }

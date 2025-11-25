@@ -68,6 +68,7 @@ final class AnalysisResultPersistence {
         // Write to file
         try jsonData.write(to: jsonURL, options: .atomic)
         
+        print("✅ Saved analysis result to: \(jsonFileName)")
     }
     
     // MARK: - Load Analysis Result
@@ -82,13 +83,18 @@ final class AnalysisResultPersistence {
         let jsonFileName = analysisFileName(for: audioFileName)
         let jsonURL = audioDir.appendingPathComponent(jsonFileName)
         
+        print("🔍 Looking for analysis JSON: \(jsonFileName)")
+        print("   Path: \(jsonURL.path)")
         
         // Check if file exists
         guard FileManager.default.fileExists(atPath: jsonURL.path) else {
+            print("❌ No analysis JSON found for: \(audioFileName)")
             
             // List what files ARE in the directory
             if let files = try? FileManager.default.contentsOfDirectory(at: audioDir, includingPropertiesForKeys: nil) {
+                print("   Files in directory:")
                 for file in files {
+                    print("   - \(file.lastPathComponent)")
                 }
             }
             return nil
@@ -98,6 +104,7 @@ final class AnalysisResultPersistence {
             // Read JSON data
             let jsonData = try Data(contentsOf: jsonURL)
             guard let data = try JSONSerialization.jsonObject(with: jsonData) as? [String: Any] else {
+                print("❌ Invalid JSON format in analysis file")
                 return nil
             }
             
@@ -144,11 +151,14 @@ final class AnalysisResultPersistence {
             result.spectrumSampleRate = data["spectrumSampleRate"] as? Double
             result.rmsLevel = data["rmsLevel"] as? Double ?? 0
             
+            print("✅ Loaded analysis result for: \(audioFileName)")
             if result.frequencySpectrum != nil {
+                print("   📊 FFT spectrum data loaded: \(result.frequencySpectrum?.count ?? 0) bins")
             }
             return result
             
         } catch {
+            print("❌ Failed to load analysis result: \(error)")
             return nil
         }
     }
@@ -167,7 +177,9 @@ final class AnalysisResultPersistence {
         if FileManager.default.fileExists(atPath: jsonURL.path) {
             do {
                 try FileManager.default.removeItem(at: jsonURL)
+                print("✅ Deleted analysis result: \(jsonFileName)")
             } catch {
+                print("❌ Failed to delete analysis result: \(error)")
             }
         }
     }

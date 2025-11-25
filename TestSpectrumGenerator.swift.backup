@@ -96,10 +96,14 @@ class TestSpectrumGenerator {
         let frequencies = (0..<magnitudes.count).map { Double($0) * binWidth }
         
         // Print results
+        print("\n🎵 TEST SIGNAL FFT ANALYSIS:")
+        print("Expected peaks at: 100Hz, 200Hz, 300Hz, 500Hz, 800Hz, 1200Hz, 2400Hz, 4800Hz, 9600Hz")
+        print("\nFFT Results (showing bins with magnitude > 0.01):")
         
         for (i, mag) in magnitudes.enumerated() where mag > 0.01 {
             let freq = frequencies[i]
             let dB = 20.0 * log10(max(Double(mag), 1e-12))
+            print(sprintf("  Bin %3d: %7.1f Hz = %.4f = %6.1f dB", i, freq, mag, dB))
         }
         
         return (frequencies, magnitudes)

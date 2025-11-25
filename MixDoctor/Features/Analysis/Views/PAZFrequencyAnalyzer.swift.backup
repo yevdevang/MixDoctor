@@ -424,6 +424,9 @@ struct FrequencyChart: View {
         var dataPoints: [(frequency: Double, magnitude: Double)] = []
         
         // Debug: show ONLY the bins in audible range
+        print("🔍 FFT DATA in AUDIBLE RANGE (20Hz - 20kHz):")
+        print("📊 Sample rate: \(sampleRate)Hz, Nyquist: \(nyquist)Hz, Bin width: \(String(format: "%.2f", binWidth))Hz")
+        print("📊 Total FFT bins: \(fftData.count)")
         
         var debugCount = 0
         for (index, mag) in fftData.enumerated() {
@@ -433,6 +436,7 @@ struct FrequencyChart: View {
             // Debug first 50 audible bins
             if debugCount < 50 {
                 let dB = 20.0 * log10(max(Double(mag), 1e-12))
+                print("  Bin \(index): \(String(format: "%.1f", frequency))Hz = \(String(format: "%.4f", mag)) = \(String(format: "%.1f", dB))dB")
                 debugCount += 1
             }
             
@@ -442,6 +446,8 @@ struct FrequencyChart: View {
             dataPoints.append((frequency: frequency, magnitude: clampedDB))
         }
         
+        print("📊 Created \(dataPoints.count) data points for visualization")
+        print("📊 Magnitude variation: min=\(String(format: "%.1f", dataPoints.map { $0.magnitude }.min() ?? 0))dB, max=\(String(format: "%.1f", dataPoints.map { $0.magnitude }.max() ?? 0))dB")
         
         return dataPoints
     }
@@ -625,10 +631,13 @@ struct SpectrumCurve: View {
         
         var dataPoints: [SpectrumDataPoint] = []
         
+        print("📊 FFT Analysis: \(fftData.count) bins, sample rate: \(sampleRate)Hz, bin width: \(String(format: "%.2f", binWidth))Hz")
         
         // Debug: Print some raw FFT values to see if there's variation
+        print("📊 RAW FFT magnitudes sample (first 20 bins):")
         for i in 0..<min(20, fftData.count) {
             let freq = Double(i) * binWidth
+            print("   Bin \(i) (\(String(format: "%.1f", freq))Hz): \(fftData[i])")
         }
         
         // Professional spectrum analyzer processing like Waves PAZ
@@ -659,6 +668,8 @@ struct SpectrumCurve: View {
             ))
         }
         
+        print("📊 FFT Data Points: \(dataPoints.count) bins from \(String(format: "%.0f", dataPoints.first?.frequency ?? 0))Hz to \(String(format: "%.0f", dataPoints.last?.frequency ?? 0))Hz")
+        print("📊 Magnitude range: \(String(format: "%.3f", dataPoints.map { $0.magnitude }.min() ?? 0)) to \(String(format: "%.3f", dataPoints.map { $0.magnitude }.max() ?? 0))")
         
         return dataPoints
     }

@@ -40,6 +40,7 @@ final class DataPersistenceService {
             
             modelContext = modelContainer?.mainContext
         } catch {
+            print("Failed to create ModelContainer: \(error)")
         }
     }
     

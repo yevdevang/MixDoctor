@@ -8,6 +8,7 @@
 import SwiftUI
 
 struct LaunchScreenView: View {
+    @Environment(\.colorScheme) var colorScheme
     @State private var isAnimating = false
     @State private var pulseAnimation = false
     @State private var fadeOut = false
@@ -15,9 +16,14 @@ struct LaunchScreenView: View {
     
     var body: some View {
         ZStack {
-            // Background color matching paywall
-            Color(red: 0xef/255, green: 0xe8/255, blue: 0xfd/255)
-                .ignoresSafeArea()
+            // Background color adapting to theme
+            if colorScheme == .dark {
+                Color(red: 0.08, green: 0.09, blue: 0.12)
+                    .ignoresSafeArea()
+            } else {
+                Color(red: 0xef/255, green: 0xe8/255, blue: 0xfd/255)
+                    .ignoresSafeArea()
+            }
             
             VStack(spacing: 20) {
                 // App Icon with animations
@@ -45,11 +51,8 @@ struct LaunchScreenView: View {
                     )
                     .opacity(isAnimating ? 1.0 : 0.0)
                 
-                // Tagline
-                Text("Professional Audio Analysis")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .opacity(showTagline ? 1.0 : 0.0)
+                // Tagline with falling letter animation
+                AnimatedTaglineView(colorScheme: colorScheme, showTagline: showTagline)
             }
             .opacity(fadeOut ? 0.0 : 1.0)
         }
@@ -74,8 +77,79 @@ struct LaunchScreenView: View {
             }
         }
     }
-}
-
-#Preview {
-    LaunchScreenView()
+    
+    // MARK: - Animated Tagline View
+    
+    struct AnimatedTaglineView: View {
+        let colorScheme: ColorScheme
+        let showTagline: Bool
+        let text = "Intelligent Audio Analysis"
+        
+        @State private var letterOffsets: [CGFloat] = []
+        @State private var letterOpacities: [Double] = []
+        
+        var body: some View {
+            HStack(spacing: 0) {
+                ForEach(Array(text.enumerated()), id: \.offset) { index, character in
+                    Text(String(character))
+                        .font(.system(size: 17, weight: .medium))
+                        .foregroundStyle(gradientForIndex(index))
+                        .offset(y: letterOffsets.indices.contains(index) ? letterOffsets[index] : -50)
+                        .opacity(letterOpacities.indices.contains(index) ? letterOpacities[index] : 0)
+                }
+            }
+            .onAppear {
+                // Initialize arrays
+                letterOffsets = Array(repeating: -50, count: text.count)
+                letterOpacities = Array(repeating: 0, count: text.count)
+            }
+            .onChange(of: showTagline) { oldValue, newValue in
+                if newValue {
+                    animateLetters()
+                }
+            }
+        }
+        
+        private func animateLetters() {
+            for index in 0..<text.count {
+                let delay = Double(index) * 0.05 // Stagger each letter by 50ms (slower)
+                
+                // Animate the falling motion with spring
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                    withAnimation(.spring(response: 0.8, dampingFraction: 0.65)) {
+                        letterOffsets[index] = 0
+                    }
+                }
+                
+                // Animate the fade-in separately with a smoother easing
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                    withAnimation(.easeIn(duration: 0.6)) {
+                        letterOpacities[index] = 1.0
+                    }
+                }
+            }
+        }
+        
+        private func gradientForIndex(_ index: Int) -> LinearGradient {
+            let colors = colorScheme == .dark ? [
+                Color(red: 0.4, green: 0.8, blue: 1.0),   // Bright cyan
+                Color(red: 0.7, green: 0.5, blue: 0.95),  // Purple
+                Color(red: 1.0, green: 0.4, blue: 0.7)    // Pink
+            ] : [
+                Color(red: 0.5, green: 0.2, blue: 0.9),   // Deep purple
+                Color(red: 0.9, green: 0.3, blue: 0.6),   // Magenta
+                Color(red: 1.0, green: 0.5, blue: 0.3)    // Orange
+            ]
+            
+            return LinearGradient(
+                colors: colors,
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+        }
+    }
+    
+    //#Preview {
+    //    LaunchScreenView()
+    //}
 }

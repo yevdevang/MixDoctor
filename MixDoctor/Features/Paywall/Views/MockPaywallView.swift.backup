@@ -193,6 +193,7 @@ struct MockPaywallView: View {
                 isPurchasing = false
                 
                 if success {
+                    print("✅ Skip trial purchase successful, calling completion")
                     onPurchaseComplete()
                     dismiss()
                 } else {
@@ -317,14 +318,20 @@ struct MockPaywallView: View {
     private func purchase() async {
         isPurchasing = true
         
+        print("🛒 Mock purchase starting for package: \(selectedPackageId)")
         let success = await mockService.mockPurchase(packageId: selectedPackageId)
         
         isPurchasing = false
         
         if success {
+            print("✅ Mock purchase successful")
+            print("   Is in trial: \(mockService.isInTrialPeriod)")
+            print("   Is pro user: \(mockService.isProUser)")
+            print("   Remaining analyses: \(mockService.remainingFreeAnalyses)")
             onPurchaseComplete()
             dismiss()
         } else {
+            print("❌ Mock purchase failed")
             errorMessage = "Purchase failed. Please try again."
             showError = true
         }
@@ -429,5 +436,6 @@ private struct MockPackageCard: View {
 
 #Preview {
     MockPaywallView {
+        print("Purchase completed!")
     }
 }

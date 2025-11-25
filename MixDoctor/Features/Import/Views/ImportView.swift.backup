@@ -76,7 +76,9 @@ struct ImportView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .audioFileDeleted)) { _ in
             // Reload files when a file is deleted from Dashboard
+            print("📥 Import view received audioFileDeleted notification")
             viewModel.loadImports()
+            print("✅ Import view reloaded files. Count: \(viewModel.importedFiles.count)")
         }
     }
 

@@ -80,6 +80,7 @@ struct ContentView: View {
                 queue: .main
             ) { _ in
                 theme = NSUbiquitousKeyValueStore.default.string(forKey: "theme") ?? "system"
+                print("☁️ Theme updated from iCloud (external): \(theme)")
             }
             
             // Listen for local theme changes within this app
@@ -89,6 +90,7 @@ struct ContentView: View {
                 queue: .main
             ) { _ in
                 theme = NSUbiquitousKeyValueStore.default.string(forKey: "theme") ?? "system"
+                print("🎨 Theme updated locally: \(theme)")
             }
         }
     }

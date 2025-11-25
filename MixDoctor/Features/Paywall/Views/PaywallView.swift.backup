@@ -251,17 +251,25 @@ struct PaywallView: View {
         defer { isPurchasing = false }
         
         do {
+            print("🛒 Starting purchase for package: \(package.identifier)")
             let customerInfo = try await subscriptionService.purchase(package: package)
+            print("✅ Purchase completed successfully")
+            print("   Has pro entitlement: \(customerInfo.entitlements["pro"]?.isActive == true)")
+            print("   Is in trial: \(subscriptionService.isInTrialPeriod)")
+            print("   Is pro user: \(subscriptionService.isProUser)")
             
             // Verify purchase was successful
             if customerInfo.entitlements["pro"]?.isActive == true {
+                print("✅ Pro entitlement is active, calling completion")
                 onPurchaseComplete()
                 dismiss()
             } else {
+                print("⚠️ Purchase succeeded but no active entitlement")
                 errorMessage = "Purchase completed but subscription not activated. Please try restoring purchases."
                 showError = true
             }
         } catch {
+            print("❌ Purchase failed: \(error.localizedDescription)")
             errorMessage = "Purchase failed: \(error.localizedDescription)"
             showError = true
         }

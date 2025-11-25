@@ -58,6 +58,7 @@ final class MockSubscriptionService {
     }
     
     @objc private func cloudStoreDidChange(_ notification: Notification) {
+        print("☁️ Subscription state changed in iCloud - syncing...")
         loadState()
     }
     
@@ -68,8 +69,10 @@ final class MockSubscriptionService {
         let daysSinceStart = Calendar.current.dateComponents([.day], from: startDate, to: Date()).day ?? 0
         
         if daysSinceStart >= trialDurationDays {
+            print("⏰ Trial period expired after \(daysSinceStart) days - converting to paid")
             mockConvertTrialToPaid()
         } else {
+            print("📅 Trial day \(daysSinceStart + 1) of \(trialDurationDays)")
         }
     }
     
@@ -88,12 +91,17 @@ final class MockSubscriptionService {
         // Only increment for non-paid users (free tier and trial users)
         guard !isProUser else { return }
         
+        print("📊 Incrementing analysis count:")
+        print("   Before: \(remainingFreeAnalyses)")
         
         if remainingFreeAnalyses > 0 {
             remainingFreeAnalyses -= 1
             hasReachedFreeLimit = remainingFreeAnalyses <= 0
             saveState()
+            print("   After: \(remainingFreeAnalyses)")
+            print("   Has reached limit: \(hasReachedFreeLimit)")
         } else {
+            print("   ⚠️ Already at 0, not decrementing")
         }
     }
     
@@ -112,6 +120,12 @@ final class MockSubscriptionService {
             remainingFreeAnalyses = freeAnalysisLimit // Reset to 3 analyses for trial
             trialStartDate = Date() // Track when trial started
             saveState()
+            print("✅ Mock trial started successfully")
+            print("   Package: \(packageId)")
+            print("   Trial status: \(isInTrialPeriod)")
+            print("   Pro status: \(isProUser)")
+            print("   Analyses available: \(remainingFreeAnalyses)")
+            print("   Trial will expire in \(trialDurationDays) days")
         }
         
         return success
@@ -131,6 +145,11 @@ final class MockSubscriptionService {
             remainingFreeAnalyses = 0 // Not used for Pro users
             trialStartDate = nil
             saveState()
+            print("✅ Mock paid subscription activated (skipped trial)")
+            print("   Package: \(packageId)")
+            print("   Trial status: \(isInTrialPeriod)")
+            print("   Pro status: \(isProUser)")
+            print("   Analyses: UNLIMITED")
         }
         
         return success
@@ -142,6 +161,7 @@ final class MockSubscriptionService {
         isProUser = true // Now they get unlimited
         hasReachedFreeLimit = false
         saveState()
+        print("✅ Mock trial converted to paid subscription - unlimited analyses")
     }
     
     func mockRestore() async -> Bool {
@@ -173,12 +193,14 @@ final class MockSubscriptionService {
         // Re-set initialization flag
         cloudStore.set(true, forKey: "mock_hasBeenInitialized")
         cloudStore.synchronize()
+        print("🔄 Reset to free user: \(freeAnalysisLimit) analyses available")
     }
     
     func mockCancelSubscription() async -> Bool {
         // Simulate network delay for cancellation
         try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
         
+        print("🚫 Cancelling subscription...")
         
         // In real world, cancellation always succeeds
         // Subscription remains active until end of billing period
@@ -190,6 +212,8 @@ final class MockSubscriptionService {
         trialStartDate = nil // Clear trial start date
         saveState()
         
+        print("✅ Subscription cancelled - returned to free tier with \(freeAnalysisLimit) analyses")
+        print("   Status synced to iCloud for all devices")
         
         return true
     }
@@ -197,6 +221,7 @@ final class MockSubscriptionService {
     // MARK: - Helper Methods
     
     func refreshSubscriptionStatus() {
+        print("🔄 Manually refreshing subscription from iCloud...")
         cloudStore.synchronize()
         loadState()
     }
@@ -226,6 +251,8 @@ final class MockSubscriptionService {
         // Force sync to iCloud
         cloudStore.synchronize()
         
+        print("💾 Saved subscription state to iCloud")
+        print("   Pro: \(isProUser), Trial: \(isInTrialPeriod), Analyses: \(remainingFreeAnalyses)")
     }
     
     private func loadState() {
@@ -238,6 +265,7 @@ final class MockSubscriptionService {
         
         if !hasBeenInitialized {
             // First launch - set to full limit
+            print("🆕 First launch detected - initializing with \(freeAnalysisLimit) analyses")
             remainingFreeAnalyses = freeAnalysisLimit
             cloudStore.set(true, forKey: "mock_hasBeenInitialized")
             saveState()
@@ -249,15 +277,20 @@ final class MockSubscriptionService {
             // Handle edge cases
             if remainingFreeAnalyses == 0 && !isProUser {
                 // User used all analyses - keep at 0
+                print("⚠️ User has used all \(freeAnalysisLimit) free analyses")
             } else if remainingFreeAnalyses > freeAnalysisLimit {
                 // Cap at current limit if migrating from higher limit (e.g., 5 -> 3)
+                print("📊 Capping analyses from \(remainingFreeAnalyses) to \(freeAnalysisLimit)")
                 remainingFreeAnalyses = freeAnalysisLimit
                 saveState()
             } else {
+                print("📊 Loaded saved state from iCloud: \(remainingFreeAnalyses)/\(freeAnalysisLimit) analyses remaining")
             }
         }
         
         hasReachedFreeLimit = cloudStore.bool(forKey: "mock_hasReachedLimit")
         
+        print("☁️ Loaded subscription from iCloud")
+        print("   Pro: \(isProUser), Trial: \(isInTrialPeriod), Analyses: \(remainingFreeAnalyses)")
     }
 }
