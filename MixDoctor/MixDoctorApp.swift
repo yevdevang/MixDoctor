@@ -126,7 +126,8 @@ struct MixDoctorApp: App {
             }
             .onAppear {
                 // Hide launch screen after animation
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                // Hide launch screen after animation (matched to audio length: 3 bars @ 120bpm = 6s + delay)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 6.5) {
                     withAnimation(.easeOut(duration: 0.5)) {
                         showLaunchScreen = false
                     }
