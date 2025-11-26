@@ -21,14 +21,19 @@ class ClaudeAPIService {
            !key.isEmpty,
            key != "YOUR_CLAUDE_API_KEY_HERE",
            key != "$(CLAUDE_API_KEY)" {
-            return key
+            let trimmedKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            print("Claude API key loaded: \(trimmedKey.prefix(20))...")
+            print("Claude API key length: \(trimmedKey.count)")
+            return trimmedKey
         } else {
+            print("Claude API key NOT loaded properly - using fallback")
             return "missing-api-key"
         }
     }
     
     /// Send audio analysis metrics to Claude and get AI insights
     func analyzeAudioMetrics(_ metrics: AudioMetricsForClaude) async throws -> ClaudeAnalysisResponse {
+        print("Claude API request ..")
         
         // DEBUG: Print actual values being sent to Claude
         
@@ -57,12 +62,14 @@ class ClaudeAPIService {
         let (data, response) = try await URLSession.shared.data(for: request)
         
         guard let httpResponse = response as? HTTPURLResponse else {
+            print("Claude API error: Invalid response")
             throw ClaudeAPIError.invalidResponse
         }
         
         
         guard httpResponse.statusCode == 200 else {
             let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
+            print("Claude API error (\(httpResponse.statusCode)): \(errorMessage)")
             
             // Specific error messages for common issues
             switch httpResponse.statusCode {
@@ -81,6 +88,8 @@ class ClaudeAPIService {
             throw ClaudeAPIError.apiError(httpResponse.statusCode, errorMessage)
         }
         
+        
+        print("Claude API response: Success (\(httpResponse.statusCode))")
         
         // 🔍 DEBUG: Print the raw JSON response
         if let jsonString = String(data: data, encoding: .utf8) {

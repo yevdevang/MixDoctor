@@ -72,21 +72,21 @@
 			<key>CFBundleTypeExtensions</key>
 			<array>
 				<string>wav</string>
-				<string>aiff</string>
-				<string>aif</string>
 				<string>mp3</string>
-				<string>m4a</string>
-				<string>flac</string>
 			</array>
 			<key>CFBundleTypeName</key>
 			<string>Audio File</string>
 			<key>CFBundleTypeRole</key>
 			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
 			<key>LSItemContentTypes</key>
 			<array>
 				<string>com.mixdoctor.audio</string>
 			</array>
 		</dict>
 	</array>
+	<key>UISupportsDocumentBrowser</key>
+	<true/>
 </dict>
 </plist>

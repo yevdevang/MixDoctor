@@ -194,7 +194,7 @@ struct iCloudDebugView: View {
             
             
             // Filter audio files
-            let audioExtensions = ["mp3", "wav", "m4a", "aac", "aif", "aiff"]
+            let audioExtensions = ["mp3", "wav"]
             let audioFiles = files.filter { audioExtensions.contains($0.pathExtension.lowercased()) }
             
             

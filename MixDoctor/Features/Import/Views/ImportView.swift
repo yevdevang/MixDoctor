@@ -92,7 +92,7 @@ struct ImportView: View {
                 Text("Import Audio Files")
                     .font(.title2.weight(.semibold))
 
-                Text("Drag and drop files here or tap Browse Files to begin.")
+                Text("T3ew465tap Browse Files to begin.")
                     .font(.subheadline)
                     .foregroundStyle(Color.secondaryText)
                     .multilineTextAlignment(.center)
@@ -109,19 +109,19 @@ struct ImportView: View {
                 .controlSize(.large)
                 
                 // Sync button to recover orphaned files
-                if let viewModel {
-                    Button {
-                        Task {
-                            await viewModel.scanForOrphanedFiles()
-                        }
-                    } label: {
-                        Image(systemName: "arrow.clockwise.icloud")
-                            .font(.title3)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
-                    .disabled(viewModel.isImporting)
-                }
+//                if let viewModel {
+//                    Button {
+//                        Task {
+//                            await viewModel.scanForOrphanedFiles()
+//                        }
+//                    } label: {
+//                        Image(systemName: "arrow.clockwise.icloud")
+//                            .font(.title3)
+//                    }
+//                    .buttonStyle(.bordered)
+//                    .controlSize(.large)
+//                    .disabled(viewModel.isImporting)
+//                }
             }
 
             supportedFormatsView

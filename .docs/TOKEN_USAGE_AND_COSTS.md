@@ -1,8 +1,10 @@
-# OpenAI Token Usage and Cost Analysis
+# Claude API Token Usage and Cost Analysis
 
 ## Overview
 
-This document provides detailed information about token usage and associated costs for the MixDoctor audio analysis feature powered by OpenAI's GPT models.
+This document provides detailed information about token usage and associated costs for the MixDoctor audio analysis feature powered by Anthropic's Claude models.
+
+⚠️ **IMPORTANT:** This app uses **Claude API**, not OpenAI. Previous versions of this document incorrectly referenced OpenAI pricing.
 
 ---
 
@@ -11,12 +13,14 @@ This document provides detailed information about token usage and associated cos
 ### Input Tokens (Sent to OpenAI)
 
 **System Message:** ~250 tokens
+
 ```
 You are an expert audio engineer and mixing specialist...
 [Full system prompt with all instructions and analysis guidelines]
 ```
 
 **User Message:** ~150-200 tokens (varies based on audio metrics)
+
 ```json
 {
   "stereoWidth": 65.2,
@@ -42,15 +46,17 @@ You are an expert audio engineer and mixing specialist...
 ### Output Tokens (Received from OpenAI)
 
 The response structure contains:
+
 ```json
 {
   "overallScore": 85,
-  "summary": "Your mix demonstrates...",  // ~50-100 tokens
-  "stereoAnalysis": "...",                 // ~80-120 tokens
-  "frequencyAnalysis": "...",              // ~80-120 tokens
-  "dynamicsAnalysis": "...",               // ~80-120 tokens
-  "effectsAnalysis": "...",                // ~80-120 tokens
-  "recommendations": [                     // ~200-300 tokens (3-5 items)
+  "summary": "Your mix demonstrates...", // ~50-100 tokens
+  "stereoAnalysis": "...", // ~80-120 tokens
+  "frequencyAnalysis": "...", // ~80-120 tokens
+  "dynamicsAnalysis": "...", // ~80-120 tokens
+  "effectsAnalysis": "...", // ~80-120 tokens
+  "recommendations": [
+    // ~200-300 tokens (3-5 items)
     "Recommendation 1...",
     "Recommendation 2...",
     "Recommendation 3...",
@@ -68,38 +74,50 @@ The response structure contains:
 
 ## Cost Analysis
 
-### GPT-4o Pricing (Pro Users & Trial)
+### Claude Sonnet 4.5 Pricing (Pro Users & Trial)
 
-- **Input:** $2.50 per 1M tokens
-- **Output:** $10.00 per 1M tokens
+- **Input:** $3.00 per 1M tokens
+- **Output:** $15.00 per 1M tokens
+- **Prompt Caching (Write):** $3.75 per 1M tokens
+- **Prompt Caching (Read):** $0.30 per 1M tokens
 
-**Per analysis cost:**
-- Input: 450 tokens × $2.50 / 1,000,000 = **$0.001125**
-- Output: 800 tokens × $10.00 / 1,000,000 = **$0.008**
+**Per analysis cost (without caching):**
+
+- Input: 1,000 tokens × $3.00 / 1,000,000 = **$0.003**
+- Output: 400 tokens × $15.00 / 1,000,000 = **$0.006**
 - **Total: ~$0.009 per analysis** (less than 1 cent)
 
-### GPT-4o-mini Pricing (Free Users)
+**Per analysis cost (with prompt caching after first request):**
 
-- **Input:** $0.15 per 1M tokens
-- **Output:** $0.60 per 1M tokens
+- Cached Input: 1,000 tokens × $0.30 / 1,000,000 = **$0.0003**
+- Output: 400 tokens × $15.00 / 1,000,000 = **$0.006**
+- **Total: ~$0.0063 per analysis** (30% savings)
 
-**Per analysis cost:**
-- Input: 450 tokens × $0.15 / 1,000,000 = **$0.0000675**
-- Output: 800 tokens × $0.60 / 1,000,000 = **$0.00048**
-- **Total: ~$0.00055 per analysis** (negligible)
+### Claude Haiku 4.5 Pricing (Free Users)
+
+- **Input:** $1.00 per 1M tokens
+- **Output:** $5.00 per 1M tokens
+- **Prompt Caching (Write):** $1.25 per 1M tokens
+- **Prompt Caching (Read):** $0.10 per 1M tokens
+
+**Per analysis cost (without caching):**
+
+- Input: 1,000 tokens × $1.00 / 1,000,000 = **$0.001**
+- Output: 400 tokens × $5.00 / 1,000,000 = **$0.002**
+- **Total: ~$0.003 per analysis** (negligible)
 
 ---
 
 ## Monthly Cost Projections
 
-| User Type | Analyses/Month | Model | Cost/User/Month |
-|-----------|----------------|-------|-----------------|
-| **Free User** | 3 | GPT-4o-mini | $0.0016 |
-| **Trial User** | 3 | GPT-4o | $0.027 |
-| **Pro (Light Usage)** | 20 | GPT-4o | $0.18 |
-| **Pro (Moderate)** | 50 | GPT-4o | $0.45 |
-| **Pro (Heavy)** | 100 | GPT-4o | $0.90 |
-| **Pro (Power User)** | 500 | GPT-4o | $4.50 |
+| User Type             | Analyses/Month | Model             | Cost/User/Month |
+| --------------------- | -------------- | ----------------- | --------------- |
+| **Free User**         | 3              | Claude Haiku 4.5  | $0.009          |
+| **Trial User**        | 3              | Claude Sonnet 4.5 | $0.027          |
+| **Pro (Light Usage)** | 20             | Claude Sonnet 4.5 | $0.18           |
+| **Pro (Moderate)**    | 50             | Claude Sonnet 4.5 | $0.45           |
+| **Pro (Heavy)**       | 100            | Claude Sonnet 4.5 | $0.90           |
+| **Pro (Power User)**  | 500            | Claude Sonnet 4.5 | $4.50           |
 
 ---
 
@@ -108,22 +126,22 @@ The response structure contains:
 ### Monthly Subscription ($5.99/month)
 
 | Usage Level | Analyses | API Cost | **Profit** | Break-even Point |
-|-------------|----------|----------|------------|------------------|
-| Light | 20 | $0.18 | **$5.81** | 665 analyses |
-| Moderate | 50 | $0.45 | **$5.54** | - |
-| Heavy | 100 | $0.90 | **$5.09** | - |
-| Power | 200 | $1.80 | **$4.19** | - |
-| Extreme | 500 | $4.50 | **$1.49** | - |
+| ----------- | -------- | -------- | ---------- | ---------------- |
+| Light       | 20       | $0.18    | **$5.81**  | 665 analyses     |
+| Moderate    | 50       | $0.45    | **$5.54**  | -                |
+| Heavy       | 100      | $0.90    | **$5.09**  | -                |
+| Power       | 200      | $1.80    | **$4.19**  | -                |
+| Extreme     | 500      | $4.50    | **$1.49**  | -                |
 
 ### Annual Subscription ($47.88/year = $3.99/month)
 
 | Usage Level | Analyses | API Cost | **Profit/Month** | Break-even Point |
-|-------------|----------|----------|------------------|------------------|
-| Light | 20 | $0.18 | **$3.81** | 443 analyses |
-| Moderate | 50 | $0.45 | **$3.54** | - |
-| Heavy | 100 | $0.90 | **$3.09** | - |
-| Power | 200 | $1.80 | **$2.19** | - |
-| Extreme | 500 | $4.50 | **-$0.51** ⚠️ | - |
+| ----------- | -------- | -------- | ---------------- | ---------------- |
+| Light       | 20       | $0.18    | **$3.81**        | 443 analyses     |
+| Moderate    | 50       | $0.45    | **$3.54**        | -                |
+| Heavy       | 100      | $0.90    | **$3.09**        | -                |
+| Power       | 200      | $1.80    | **$2.19**        | -                |
+| Extreme     | 500      | $4.50    | **-$0.51** ⚠️    | -                |
 
 ---
 
@@ -131,14 +149,15 @@ The response structure contains:
 
 ### ✅ Healthy Margins
 
-- **Free tier cost is negligible:** $0.0016/user/month (3 analyses with GPT-4o-mini)
-- **Trial period cost is minimal:** $0.027/user for 3 analyses with GPT-4o
+- **Free tier cost is negligible:** $0.009/user/month (3 analyses with Claude Haiku 4.5)
+- **Trial period cost is minimal:** $0.027/user for 3 analyses with Claude Sonnet 4.5
 - **Pro users are profitable:** Even heavy users (100+ analyses) remain highly profitable
 - **Break-even point is very high:** Users would need to perform 443-665 analyses/month to exceed subscription revenue
 
 ### ✅ Sustainable Pricing
 
 Your current pricing structure ($5.99/month or $47.88/year) provides:
+
 - **Strong profit margins** for typical users (20-50 analyses/month)
 - **Sustainable costs** even for power users (200-500 analyses/month)
 - **Low financial risk** from the free tier and trial period
@@ -152,29 +171,38 @@ Your current pricing structure ($5.99/month or $47.88/year) provides:
 
 ## Cost Optimization Opportunities
 
-1. **Prompt Optimization:** Reducing system prompt verbosity could save ~50-100 input tokens per request
-2. **Response Format:** Limiting recommendation count to 3 (instead of 5) could save ~50-100 output tokens
-3. **Caching:** OpenAI's prompt caching could reduce input token costs by 50% for repeated system messages
-4. **Model Selection:** Continue using GPT-4o-mini for free tier to minimize costs
+1. **Prompt Caching (HIGH PRIORITY):** Implement Claude's prompt caching to save 90% on input tokens (~$0.0027 per cached request)
+2. **Prompt Optimization:** Reducing system prompt from ~1,000 to ~700 tokens could save ~30% on input costs
+3. **Response Format:** Limiting recommendation count to 3 (instead of 5) could save ~100 output tokens
+4. **Model Selection:** Continue using Claude Haiku 4.5 for free tier to minimize costs
+5. **Batch Processing:** For non-urgent analyses, use Claude's batch API for 50% cost savings
 
 ---
 
 ## Implementation Details
 
-- **Service:** `OpenAIService.swift`
-- **Free tier model:** `gpt-4o-mini`
-- **Pro/Trial model:** `gpt-4o`
-- **API endpoint:** `https://api.openai.com/v1/chat/completions`
-- **Temperature:** 0.7 (balanced creativity/consistency)
+- **Service:** `ClaudeAPIService.swift`
+- **Free tier model:** `claude-haiku-4-5-20251001`
+- **Pro/Trial model:** `claude-sonnet-4-5-20250929`
+- **API endpoint:** `https://api.anthropic.com/v1/messages`
+- **API version:** `2023-06-01`
 - **Max tokens:** 1000 (output limit)
+- **Prompt caching:** Not yet implemented (recommended)
 
 ---
 
 ## Last Updated
 
-October 28, 2025
+November 26, 2025
 
 ## Pricing Source
 
-OpenAI API pricing as of October 2025:
-- https://openai.com/api/pricing/
+Claude API pricing as of November 2025:
+
+- https://www.anthropic.com/pricing
+- https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching
+
+## Related Documents
+
+- **Comprehensive Analysis:** `.docs/CLAUDE_API_COST_ANALYSIS.md`
+- **Implementation:** `MixDoctor/Core/Services/ClaudeAPIService.swift`
