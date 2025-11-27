@@ -1,0 +1,95 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -scheme MixDoctor -destination "generic/platform=iOS Simulator" build
+
+Resolve Package Graph
+
+
+Resolved source packages:
+  AudioKit: https://github.com/AudioKit/AudioKit @ 5.6.5
+  swift-http-types: https://github.com/apple/swift-http-types @ 1.5.0
+  swift-openapi-runtime: https://github.com/apple/swift-openapi-runtime @ 1.8.3
+  OpenAI: https://github.com/MacPaw/OpenAI.git @ 0.4.6
+  RevenueCat: https://github.com/RevenueCat/purchases-ios-spm @ 5.44.1
+
+ComputePackagePrebuildTargetDependencyGraph
+
+Prepare packages
+
+CreateBuildRequest
+
+SendProjectDescription
+
+CreateBuildOperation
+
+ComputeTargetDependencyGraph
+note: Building targets in dependency order
+note: Target dependency graph (18 targets)
+    Target 'MixDoctor' in project 'MixDoctor'
+        ➜ Explicit dependency on target 'RevenueCatUI' in project 'RevenueCat'
+        ➜ Explicit dependency on target 'ReceiptParser' in project 'RevenueCat'
+        ➜ Explicit dependency on target 'AudioKit' in project 'AudioKit'
+        ➜ Explicit dependency on target 'OpenAI' in project 'OpenAI'
+        ➜ Explicit dependency on target 'RevenueCat' in project 'RevenueCat'
+    Target 'RevenueCat' in project 'RevenueCat'
+        ➜ Explicit dependency on target 'RevenueCat' in project 'RevenueCat'
+        ➜ Explicit dependency on target 'RevenueCat_RevenueCat' in project 'RevenueCat'
+    Target 'OpenAI' in project 'OpenAI'
+        ➜ Explicit dependency on target 'OpenAI' in project 'OpenAI'
+        ➜ Explicit dependency on target 'OpenAPIRuntime' in project 'swift-openapi-runtime'
+    Target 'OpenAI' in project 'OpenAI'
+        ➜ Explicit dependency on target 'OpenAPIRuntime' in project 'swift-openapi-runtime'
+    Target 'OpenAPIRuntime' in project 'swift-openapi-runtime'
+        ➜ Explicit dependency on target 'OpenAPIRuntime' in project 'swift-openapi-runtime'
+        ➜ Explicit dependency on target 'HTTPTypes' in project 'swift-http-types'
+    Target 'OpenAPIRuntime' in project 'swift-openapi-runtime'
+        ➜ Explicit dependency on target 'HTTPTypes' in project 'swift-http-types'
+    Target 'HTTPTypes' in project 'swift-http-types'
+        ➜ Explicit dependency on target 'HTTPTypes' in project 'swift-http-types'
+    Target 'HTTPTypes' in project 'swift-http-types' (no dependencies)
+    Target 'AudioKit' in project 'AudioKit'
+        ➜ Explicit dependency on target 'AudioKit' in project 'AudioKit'
+        ➜ Explicit dependency on target 'AudioKit_AudioKit' in project 'AudioKit'
+    Target 'AudioKit' in project 'AudioKit'
+        ➜ Explicit dependency on target 'AudioKit_AudioKit' in project 'AudioKit'
+    Target 'AudioKit_AudioKit' in project 'AudioKit' (no dependencies)
+    Target 'ReceiptParser' in project 'RevenueCat'
+        ➜ Explicit dependency on target 'ReceiptParser' in project 'RevenueCat'
+    Target 'ReceiptParser' in project 'RevenueCat' (no dependencies)
+    Target 'RevenueCatUI' in project 'RevenueCat'
+        ➜ Explicit dependency on target 'RevenueCatUI' in project 'RevenueCat'
+        ➜ Explicit dependency on target 'RevenueCat_RevenueCatUI' in project 'RevenueCat'
+        ➜ Explicit dependency on target 'RevenueCat' in project 'RevenueCat'
+    Target 'RevenueCatUI' in project 'RevenueCat'
+        ➜ Explicit dependency on target 'RevenueCat_RevenueCatUI' in project 'RevenueCat'
+        ➜ Explicit dependency on target 'RevenueCat' in project 'RevenueCat'
+    Target 'RevenueCat' in project 'RevenueCat'
+        ➜ Explicit dependency on target 'RevenueCat_RevenueCat' in project 'RevenueCat'
+    Target 'RevenueCat_RevenueCat' in project 'RevenueCat' (no dependencies)
+    Target 'RevenueCat_RevenueCatUI' in project 'RevenueCat' (no dependencies)
+
+GatherProvisioningInputs
+
+CreateBuildDescription
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc --version
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/usr/bin/actool --version --output-format xml1
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.1.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/usr/bin/actool --print-asset-tag-combinations --output-format xml1 /Users/yevgenylevin/Documents/Develop/iOS/MixDoctor/MixDoctor/Assets.xcassets
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld -version_details
+
+ReadFileContents /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/share/docc/features.json
+
+Build description signature: a36cd2e9126752fbbabb5a4bb7395044
+Build description path: /Users/yevgenylevin/Library/Developer/Xcode/DerivedData/MixDoctor-higjvhjuivutlaauaodrfomvsrzg/Build/Intermediates.noindex/XCBuildData/a36cd2e9126752fbbabb5a4bb7395044.xcbuilddata
+error: unable to attach DB: error: accessing build database "/Users/yevgenylevin/Library/Developer/Xcode/DerivedData/MixDoctor-higjvhjuivutlaauaodrfomvsrzg/Build/Intermediates.noindex/XCBuildData/build.db": database is locked Possibly there are two concurrent builds running in the same filesystem location.
+/Users/yevgenylevin/Documents/Develop/iOS/MixDoctor/MixDoctor.xcodeproj: warning: The Copy Bundle Resources build phase contains this target's Info.plist file '/Users/yevgenylevin/Documents/Develop/iOS/MixDoctor/MixDoctor/MixDoctor-Info.plist'. (in target 'MixDoctor' from project 'MixDoctor')
+** BUILD FAILED **
+
+
+The following build commands failed:
+	Building project MixDoctor with scheme MixDoctor
+(1 failure)

@@ -155,8 +155,8 @@ public class AudioKitService: ObservableObject {
         do {
             
             // Get subscription status
-            let mockService = MockSubscriptionService.shared
-            let isProUser = mockService.isProUser
+            let subscriptionService = SubscriptionService.shared
+            let isProUser = subscriptionService.isProUser
             
             // Prepare comprehensive professional metrics for Claude
             let metrics = AudioMetricsForClaude(

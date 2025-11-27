@@ -16,6 +16,8 @@ struct PaywallView: View {
     @State private var isRestoring = false
     @State private var showError = false
     @State private var errorMessage = ""
+    @State private var showTerms = false
+    @State private var showPrivacy = false
     
     let onPurchaseComplete: () -> Void
     
@@ -44,6 +46,9 @@ struct PaywallView: View {
                         
                         // Purchase button
                         purchaseButton
+                        
+                        // Skip trial button
+                        skipTrialButton
                         
                         // Restore button
                         restoreButton
@@ -75,6 +80,12 @@ struct PaywallView: View {
             .task {
                 await loadOfferings()
             }
+            .sheet(isPresented: $showTerms) {
+                TermsView()
+            }
+            .sheet(isPresented: $showPrivacy) {
+                PrivacyView()
+            }
         }
     }
     
@@ -90,10 +101,11 @@ struct PaywallView: View {
             
             Text("Unlock Pro Features")
                 .font(.title.bold())
+                .foregroundColor(.black)
             
-            Text("Get unlimited audio analyses and access to all premium features")
+            Text("Get 50 audio analyses and access to all premium features")
                 .font(.body)
-                .foregroundStyle(.secondary)
+                .foregroundColor(.gray)
                 .multilineTextAlignment(.center)
         }
         .padding(.top)
@@ -108,15 +120,15 @@ struct PaywallView: View {
                 .foregroundColor(.primary)
             
             PaywallFeatureRow(
-                icon: "waveform.badge.checkmark",
-                title: "Unlimited Analysis",
-                description: "Analyze as many tracks as you need"
+                icon: "infinity",
+                title: "50 Analyses per Month",
+                description: "Pro subscribers get 50 analyses monthly"
             )
             
             PaywallFeatureRow(
                 icon: "sparkles",
-                title: "Advanced AI",
-                description: "Powered by OpenAI's latest models"
+                title: "Advanced AI Analysis",
+                description: "Powered by Claude Sonnet 4.5"
             )
             
             PaywallFeatureRow(
@@ -189,6 +201,34 @@ struct PaywallView: View {
         .opacity(selectedPackage == nil ? 0.6 : 1.0)
     }
     
+    // MARK: - Skip Trial Button
+    
+    private var skipTrialButton: some View {
+        Button {
+            Task {
+                await purchase()
+            }
+        } label: {
+            HStack {
+                if isPurchasing {
+                    ProgressView()
+                        .tint(.white)
+                } else {
+                    Image(systemName: "bolt.fill")
+                    Text("Skip Trial - Subscribe Now")
+                }
+            }
+            .font(.headline)
+            .frame(maxWidth: .infinity)
+            .padding()
+            .background(Color.purple)
+            .foregroundColor(.white)
+            .cornerRadius(12)
+        }
+        .disabled(selectedPackage == nil || isPurchasing)
+        .opacity(selectedPackage == nil ? 0.6 : 1.0)
+    }
+    
     // MARK: - Restore Button
     
     private var restoreButton: some View {
@@ -213,16 +253,24 @@ struct PaywallView: View {
     
     private var footerSection: some View {
         VStack(spacing: 8) {
-            // Updated footer text to reflect trial behavior
-            Text("7-day free trial with 3 analyses, then $5.99/month or $47.88/year ($3.99/month). After trial, you'll get 3 free analyses per month. Subscribe anytime for unlimited analyses with Pro AI features.")
+            if let package = selectedPackage {
+                Text("7-day free trial with 3 analyses, then \(package.localizedPriceString)")
+                    .font(.caption2.bold())
+                    .foregroundColor(.black)
+            }
+            
+            Text("Test Pro features during trial. Continue with 3 analyses/month free or subscribe for 50 analyses/month.")
                 .font(.caption2)
                 .foregroundColor(.gray)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal)
             
-            HStack(spacing: 16) {
-                Button("Terms of Service") { }
-                Button("Privacy Policy") { }
+            HStack(spacing: 12) {
+                Button("Terms") {
+                    showTerms = true
+                }
+                Button("Privacy") {
+                    showPrivacy = true
+                }
             }
             .font(.caption2)
             .foregroundColor(Color(red: 0.435, green: 0.173, blue: 0.871))
@@ -304,9 +352,10 @@ private struct PaywallFeatureRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.black)
                 Text(description)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundColor(.gray)
             }
             
             Spacer()
@@ -343,6 +392,7 @@ private struct PackageCard: View {
                     HStack {
                         Text(package.storeProduct.localizedTitle)
                             .font(.headline)
+                            .foregroundColor(.black)
                         
                         if isAnnual {
                             Text("SAVE 33%")
@@ -358,15 +408,17 @@ private struct PackageCard: View {
                     if isAnnual {
                         Text("\(pricePerMonth)/month")
                             .font(.title2.bold())
+                            .foregroundColor(.black)
                         Text("Billed annually as \(package.localizedPriceString)")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundColor(.gray)
                     } else {
                         Text(package.localizedPriceString)
                             .font(.title2.bold())
+                            .foregroundColor(.black)
                         Text("per month")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundColor(.gray)
                     }
                 }
                 
@@ -377,7 +429,7 @@ private struct PackageCard: View {
                     .foregroundStyle(isSelected ? Color(red: 0.435, green: 0.173, blue: 0.871) : .secondary)
             }
             .padding()
-            .background(isSelected ? Color(red: 0.435, green: 0.173, blue: 0.871).opacity(0.1) : Color(.systemBackground))
+            .background(isSelected ? Color(red: 0.435, green: 0.173, blue: 0.871).opacity(0.1) : Color.white)
             .cornerRadius(12)
             .overlay(
                 RoundedRectangle(cornerRadius: 12)

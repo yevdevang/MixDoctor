@@ -23,7 +23,12 @@ final class MockSubscriptionService {
     var hasReachedFreeLimit: Bool = false
     var trialStartDate: Date?
     
+    // Pro user monthly analysis tracking
+    var remainingProAnalyses: Int = 50
+    var proAnalysisResetDate: Date?
+    
     private let freeAnalysisLimit = 3
+    private let proMonthlyLimit = 50
     private let trialDurationDays = 7
     
     // Mock packages for UI
@@ -55,6 +60,7 @@ final class MockSubscriptionService {
         
         loadState()
         checkTrialExpiration()
+        checkProAnalysisReset()
     }
     
     @objc private func cloudStoreDidChange(_ notification: Notification) {
@@ -73,22 +79,49 @@ final class MockSubscriptionService {
         }
     }
     
+    private func checkProAnalysisReset() {
+        guard isProUser else { return }
+        
+        // Check if we need to reset monthly analysis count
+        if let resetDate = proAnalysisResetDate {
+            if Date() >= resetDate {
+                // Reset for new month
+                remainingProAnalyses = proMonthlyLimit
+                proAnalysisResetDate = Calendar.current.date(byAdding: .month, value: 1, to: Date())
+                saveState()
+            }
+        } else {
+            // First time - set reset date to next month
+            proAnalysisResetDate = Calendar.current.date(byAdding: .month, value: 1, to: Date())
+            remainingProAnalyses = proMonthlyLimit
+            saveState()
+        }
+    }
+    
     // MARK: - Public Methods
     
     func canPerformAnalysis() -> Bool {
-        // Paid subscribers get unlimited
+        // Check monthly reset for Pro users
         if isProUser {
-            return true
+            checkProAnalysisReset()
+            return remainingProAnalyses > 0
         }
         // Trial users and free users have 3 analyses limit
         return remainingFreeAnalyses > 0
     }
     
     func incrementAnalysisCount() {
-        // Only increment for non-paid users (free tier and trial users)
-        guard !isProUser else { return }
+        // Pro users have monthly limit of 20
+        if isProUser {
+            checkProAnalysisReset()
+            if remainingProAnalyses > 0 {
+                remainingProAnalyses -= 1
+                saveState()
+            }
+            return
+        }
         
-        
+        // Free tier and trial users have 3 analyses limit
         if remainingFreeAnalyses > 0 {
             remainingFreeAnalyses -= 1
             hasReachedFreeLimit = remainingFreeAnalyses <= 0
@@ -126,9 +159,11 @@ final class MockSubscriptionService {
         if success {
             // Skip trial, go straight to paid subscription
             isInTrialPeriod = false
-            isProUser = true // Paid subscriber gets unlimited
+            isProUser = true // Paid subscriber gets 20 per month
             hasReachedFreeLimit = false
             remainingFreeAnalyses = 0 // Not used for Pro users
+            remainingProAnalyses = proMonthlyLimit
+            proAnalysisResetDate = Calendar.current.date(byAdding: .month, value: 1, to: Date())
             trialStartDate = nil
             saveState()
         }
@@ -139,8 +174,10 @@ final class MockSubscriptionService {
     func mockConvertTrialToPaid() {
         // Simulate trial period ending and converting to paid subscription
         isInTrialPeriod = false
-        isProUser = true // Now they get unlimited
+        isProUser = true // Now they get 50 analyses per month
         hasReachedFreeLimit = false
+        remainingProAnalyses = proMonthlyLimit
+        proAnalysisResetDate = Calendar.current.date(byAdding: .month, value: 1, to: Date())
         saveState()
     }
     
@@ -156,6 +193,8 @@ final class MockSubscriptionService {
             isInTrialPeriod = false
             isProUser = true
             hasReachedFreeLimit = false
+            remainingProAnalyses = proMonthlyLimit
+            proAnalysisResetDate = Calendar.current.date(byAdding: .month, value: 1, to: Date())
             saveState()
         }
         
@@ -203,7 +242,7 @@ final class MockSubscriptionService {
     
     var subscriptionStatus: String {
         if isProUser {
-            return "Pro (Unlimited)"
+            return "Pro (\(remainingProAnalyses)/\(proMonthlyLimit) analyses this month)"
         } else if isInTrialPeriod {
             return "Trial (\(remainingFreeAnalyses)/\(freeAnalysisLimit) analyses)"
         } else {
@@ -219,8 +258,12 @@ final class MockSubscriptionService {
         cloudStore.set(isInTrialPeriod, forKey: "mock_isInTrial")
         cloudStore.set(Int64(remainingFreeAnalyses), forKey: "mock_remainingAnalyses")
         cloudStore.set(hasReachedFreeLimit, forKey: "mock_hasReachedLimit")
+        cloudStore.set(Int64(remainingProAnalyses), forKey: "mock_remainingProAnalyses")
         if let trialStartDate = trialStartDate {
             cloudStore.set(trialStartDate, forKey: "mock_trialStartDate")
+        }
+        if let proAnalysisResetDate = proAnalysisResetDate {
+            cloudStore.set(proAnalysisResetDate, forKey: "mock_proAnalysisResetDate")
         }
         
         // Force sync to iCloud
@@ -232,6 +275,7 @@ final class MockSubscriptionService {
         isProUser = cloudStore.bool(forKey: "mock_isProUser")
         isInTrialPeriod = cloudStore.bool(forKey: "mock_isInTrial")
         trialStartDate = cloudStore.object(forKey: "mock_trialStartDate") as? Date
+        proAnalysisResetDate = cloudStore.object(forKey: "mock_proAnalysisResetDate") as? Date
         
         // Check if this is first launch (never saved before)
         let hasBeenInitialized = cloudStore.bool(forKey: "mock_hasBeenInitialized")
@@ -245,6 +289,10 @@ final class MockSubscriptionService {
             // Load saved value from iCloud
             let savedValue = cloudStore.longLong(forKey: "mock_remainingAnalyses")
             remainingFreeAnalyses = Int(savedValue)
+            
+            // Load Pro analyses count
+            let savedProValue = cloudStore.longLong(forKey: "mock_remainingProAnalyses")
+            remainingProAnalyses = Int(savedProValue)
             
             // Handle edge cases
             if remainingFreeAnalyses == 0 && !isProUser {

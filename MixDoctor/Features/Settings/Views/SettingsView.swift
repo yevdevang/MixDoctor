@@ -2,7 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @State private var viewModel = SettingsViewModel()
-    @State private var mockService = MockSubscriptionService.shared
+    @State private var subscriptionService = SubscriptionService.shared
     @State private var storageInfo: StorageInfo?
     @State private var isLoadingStorage = false
     @State private var showClearCacheAlert = false
@@ -21,14 +21,14 @@ struct SettingsView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Subscription Status")
                                 .font(.headline)
-                            Text(mockService.subscriptionStatus)
+                            Text(subscriptionService.subscriptionStatus)
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
                         
                         Spacer()
                         
-                        if mockService.isProUser {
+                        if subscriptionService.isProUser {
                             Image(systemName: "checkmark.seal.fill")
                                 .foregroundStyle(Color(red: 0.435, green: 0.173, blue: 0.871))
                                 .font(.title2)
@@ -39,9 +39,9 @@ struct SettingsView: View {
                     // Refresh subscription button
                     Button {
                         isRefreshingSubscription = true
-                        mockService.refreshSubscriptionStatus()
-                        // Small delay for visual feedback
                         Task {
+                            await subscriptionService.updateCustomerInfo()
+                            // Small delay for visual feedback
                             try? await Task.sleep(nanoseconds: 500_000_000)
                             isRefreshingSubscription = false
                         }
@@ -59,7 +59,7 @@ struct SettingsView: View {
                     }
                     .disabled(isRefreshingSubscription)
                     
-                    if !mockService.isProUser {
+                    if !subscriptionService.isProUser {
                         Button {
                             showPaywall = true
                         } label: {
@@ -210,7 +210,7 @@ struct SettingsView: View {
                     .tint(Color.accentColor)
                     
                     // Cloud Storage Info - Pro users only
-                    if mockService.isProUser {
+                    if subscriptionService.isProUser {
                         NavigationLink {
                             iCloudDebugView()
                         } label: {
@@ -224,7 +224,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Cloud Storage")
                 } footer: {
-                    Text("When enabled, your audio file metadata and analysis results will be synced across all your devices using CloudKit. Audio files remain stored locally on each device. You'll need to restart the app for changes to take effect.")
+                    Text("When enabled, your audio file metadata and analysis results will be synced across all your devices. Audio files remain stored locally on each device. You'll need to restart the app for changes to take effect.")
                 }
                 
                 // MARK: - About Section
@@ -272,13 +272,13 @@ struct SettingsView: View {
                 AboutView()
             }
             .sheet(isPresented: $showPaywall) {
-                MockPaywallView(onPurchaseComplete: {
+                PaywallView(onPurchaseComplete: {
                     // Subscription service updates automatically via RevenueCat listener
                 })
             }
             .task {
                 // Refresh subscription status when view appears
-                mockService.refreshSubscriptionStatus()
+                await subscriptionService.updateCustomerInfo()
             }
         }
     }
@@ -307,18 +307,14 @@ struct SettingsView: View {
     private func cancelSubscription() async {
         isCancellingSubscription = true
         
-        // Call the mock service to cancel subscription
-        let success = await mockService.mockCancelSubscription()
+        // Note: RevenueCat doesn't provide API to cancel subscriptions
+        // Users must cancel through App Store settings
+        // This is just for UI demonstration
         
         // Small delay for visual feedback
         try? await Task.sleep(nanoseconds: 500_000_000)
         
         isCancellingSubscription = false
-        
-        if success {
-            // Status will update automatically via iCloud sync
-        } else {
-        }
     }
     
     private func storageBarColor(for percentage: Double) -> Color {
