@@ -104,9 +104,9 @@ struct MockPaywallView: View {
                 .font(.headline)
             
             MockFeatureRow(
-                icon: "waveform.badge.checkmark",
-                title: "Unlimited Analysis",
-                description: "Analyze as many tracks as you need"
+                icon: "infinity",
+                title: "50 Analyses per Month",
+                description: "Pro subscribers get 50 analyses monthly"
             )
             
             MockFeatureRow(
@@ -298,7 +298,7 @@ struct MockPaywallView: View {
                 .font(.caption2.bold())
                 .foregroundStyle(.primary)
             
-            Text("Test Pro features during trial. Continue with 3 analyses/month free or subscribe for unlimited.")
+            Text("Test Pro features during trial. Continue with 3 analyses/month free or subscribe for 50 analyses/month.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

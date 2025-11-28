@@ -25,6 +25,15 @@ public final class SubscriptionService {
     private let monthlyResetKey = "lastMonthlyReset"
     private let analysisCountKey = "analysisCount"
     
+    // Pro tier limits (50 analyses per month)
+    private let proMonthlyLimit = 50
+    private let proAnalysisCountKey = "proAnalysisCount"
+    private let proResetDateKey = "proAnalysisResetDate"
+    private let cloudStore = NSUbiquitousKeyValueStore.default
+    
+    var remainingProAnalyses: Int = 50
+    var proAnalysisResetDate: Date?
+    
     var remainingFreeAnalyses: Int {
         let count = UserDefaults.standard.integer(forKey: analysisCountKey)
         return max(0, freeAnalysisLimit - count)
@@ -37,8 +46,10 @@ public final class SubscriptionService {
     // MARK: - Initialization
     
     private init() {
+        loadProAnalysisState()
         configureRevenueCat()
         checkMonthlyReset()
+        checkProAnalysisReset()
     }
     
     private func configureRevenueCat() {
@@ -65,18 +76,22 @@ public final class SubscriptionService {
             // Check if currently in trial period
             if let proEntitlement = info.entitlements["pro"],
                proEntitlement.isActive,
-               proEntitlement.periodType == .trial {
-                isInTrialPeriod = true
-                isProUser = false // Treat trial users as free tier for analysis limits
-            } else if hasProEntitlement {
-                isInTrialPeriod = false
-                isProUser = true // Paid subscribers get unlimited
-            } else {
-                isInTrialPeriod = false
-                isProUser = false
+           proEntitlement.periodType == .trial {
+            isInTrialPeriod = true
+            isProUser = false // Treat trial users as free tier for analysis limits
+        } else if hasProEntitlement {
+            isInTrialPeriod = false
+            isProUser = true // Paid subscribers get monthly limit
+            // Initialize Pro analysis limit if becoming Pro for first time
+            if remainingProAnalyses == 0 && proAnalysisResetDate == nil {
+                remainingProAnalyses = proMonthlyLimit
+                proAnalysisResetDate = Calendar.current.date(byAdding: .month, value: 1, to: Date())
+                saveProAnalysisState()
             }
-            
-        } catch {
+        } else {
+            isInTrialPeriod = false
+            isProUser = false
+        }        } catch {
         }
     }
     
@@ -104,7 +119,11 @@ public final class SubscriptionService {
             isProUser = false // Treat trial users as free tier for analysis limits
         } else if hasProEntitlement {
             isInTrialPeriod = false
-            isProUser = true // Paid subscribers get unlimited
+            isProUser = true // Paid subscribers get monthly limit
+            // Initialize Pro analysis limit for new purchase
+            remainingProAnalyses = proMonthlyLimit
+            proAnalysisResetDate = Calendar.current.date(byAdding: .month, value: 1, to: Date())
+            saveProAnalysisState()
         }
         
         return result.customerInfo
@@ -127,25 +146,39 @@ public final class SubscriptionService {
             isProUser = false // Treat trial users as free tier for analysis limits
         } else if hasProEntitlement {
             isInTrialPeriod = false
-            isProUser = true // Paid subscribers get unlimited
+            isProUser = true // Paid subscribers get monthly limit
+            // Initialize Pro analysis limit when restoring
+            if remainingProAnalyses == 0 && proAnalysisResetDate == nil {
+                remainingProAnalyses = proMonthlyLimit
+                proAnalysisResetDate = Calendar.current.date(byAdding: .month, value: 1, to: Date())
+                saveProAnalysisState()
+            }
+        } else {
+            // No active subscription found
+            isInTrialPeriod = false
+            isProUser = false
         }
-        
     }
     
     // MARK: - Usage Tracking
     
     func incrementAnalysisCount() {
-        // Only increment for non-paid users (free tier and trial users)
-        guard !isProUser else { return }
-        
-        let currentCount = UserDefaults.standard.integer(forKey: analysisCountKey)
-        UserDefaults.standard.set(currentCount + 1, forKey: analysisCountKey)
+        if isProUser {
+            // Decrement Pro monthly limit
+            remainingProAnalyses = max(0, remainingProAnalyses - 1)
+            saveProAnalysisState()
+        } else {
+            // Increment free tier count
+            let currentCount = UserDefaults.standard.integer(forKey: analysisCountKey)
+            UserDefaults.standard.set(currentCount + 1, forKey: analysisCountKey)
+        }
     }
     
     func canPerformAnalysis() -> Bool {
-        // Paid subscribers get unlimited
         if isProUser {
-            return true
+            // Check Pro monthly limit with automatic reset
+            checkProAnalysisReset()
+            return remainingProAnalyses > 0
         }
         // Trial users and free users have 3 analyses limit
         return remainingFreeAnalyses > 0
@@ -174,11 +207,40 @@ public final class SubscriptionService {
         UserDefaults.standard.set(Date(), forKey: monthlyResetKey)
     }
     
+    // MARK: - Pro Analysis Tracking
+    
+    private func checkProAnalysisReset() {
+        guard isProUser, let resetDate = proAnalysisResetDate else { return }
+        
+        let now = Date()
+        if now >= resetDate {
+            // Reset to full monthly limit
+            remainingProAnalyses = proMonthlyLimit
+            // Set next reset date (1 month from now)
+            proAnalysisResetDate = Calendar.current.date(byAdding: .month, value: 1, to: now)
+            saveProAnalysisState()
+        }
+    }
+    
+    private func saveProAnalysisState() {
+        cloudStore.set(Int64(remainingProAnalyses), forKey: proAnalysisCountKey)
+        if let resetDate = proAnalysisResetDate {
+            cloudStore.set(resetDate, forKey: proResetDateKey)
+        }
+        cloudStore.synchronize()
+    }
+    
+    private func loadProAnalysisState() {
+        let savedCount = cloudStore.longLong(forKey: proAnalysisCountKey)
+        remainingProAnalyses = savedCount > 0 ? Int(savedCount) : proMonthlyLimit
+        proAnalysisResetDate = cloudStore.object(forKey: proResetDateKey) as? Date
+    }
+    
     // MARK: - Helper Methods
     
     var subscriptionStatus: String {
         if isProUser {
-            return "Pro (Unlimited)"
+            return "Pro (\(remainingProAnalyses)/\(proMonthlyLimit) analyses this month)"
         } else if isInTrialPeriod {
             return "Trial (\(remainingFreeAnalyses)/\(freeAnalysisLimit) analyses)"
         } else {

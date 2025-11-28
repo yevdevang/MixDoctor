@@ -16,8 +16,8 @@ struct ResultsView: View {
     @State private var showError = false
     @State private var errorMessage = ""
     @State private var showPaywall = false
-    // MARK: - Mock Testing - Access shared instance directly
-    private var mockService: MockSubscriptionService { MockSubscriptionService.shared }
+    // MARK: - Production - Access shared instance directly
+    private var subscriptionService: SubscriptionService { SubscriptionService.shared }
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
@@ -66,11 +66,11 @@ struct ResultsView: View {
         }
         .sheet(isPresented: $showPaywall, onDismiss: {
             // If paywall was dismissed without purchase, return to dashboard
-            if !mockService.isProUser {
+            if !subscriptionService.isProUser {
                 dismiss()
             }
         }) {
-            MockPaywallView(onPurchaseComplete: {
+            PaywallView(onPurchaseComplete: {
                 Task {
                     await performAnalysis()
                 }
@@ -88,7 +88,7 @@ struct ResultsView: View {
                 analysisResult = existingResult
             } else {
                 // Fallback: check if we can perform analysis
-                if !mockService.canPerformAnalysis() {
+                if !subscriptionService.canPerformAnalysis() {
                     showPaywall = true
                 } else {
                     await performAnalysis()
@@ -1491,7 +1491,7 @@ struct ResultsView: View {
     private func performAnalysis() async {
         // Check if user can perform analysis
         
-        guard mockService.canPerformAnalysis() else {
+        guard subscriptionService.canPerformAnalysis() else {
             showPaywall = true
             return
         }
@@ -1511,7 +1511,7 @@ struct ResultsView: View {
             
             
             // Increment usage count for free users
-            mockService.incrementAnalysisCount()
+            subscriptionService.incrementAnalysisCount()
             
             // Update the local state
             analysisResult = result

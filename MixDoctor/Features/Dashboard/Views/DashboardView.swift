@@ -18,7 +18,7 @@ struct DashboardView: View {
     
     @StateObject private var iCloudMonitor = iCloudSyncMonitor.shared
     private let analysisService = AudioKitService.shared
-    private let mockService = MockSubscriptionService.shared
+    private let subscriptionService = SubscriptionService.shared
 
     @State private var searchText = ""
     @State private var filterOption: FilterOption = .all
@@ -378,7 +378,7 @@ struct DashboardView: View {
             }
             
             // Check if user can perform analysis
-            guard mockService.canPerformAnalysis() else {
+            guard subscriptionService.canPerformAnalysis() else {
                 // Show paywall or error
                 // For now, navigate to results view which will handle the paywall
                 navigateToFile = file
@@ -396,7 +396,7 @@ struct DashboardView: View {
                 
                 
                 // Increment usage count for free users
-                mockService.incrementAnalysisCount()
+                subscriptionService.incrementAnalysisCount()
                 
                 // Save to the AudioFile model
                 file.analysisResult = result
