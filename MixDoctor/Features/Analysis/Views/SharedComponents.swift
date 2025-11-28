@@ -213,7 +213,7 @@ struct AudioFileRow: View {
 
                 HStack(spacing: 8) {
                     Label(formatDuration(audioFile.duration), systemImage: "clock")
-                    Label("\(Int(audioFile.sampleRate / 1000))kHz", systemImage: "waveform")
+                    Text("\(Int(audioFile.sampleRate / 1000))kHz")
                     
                     // Show download status
                     if !fileExists {

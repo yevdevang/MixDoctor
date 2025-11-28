@@ -164,10 +164,8 @@ struct LaunchScreenView: View {
                 audioPlayer?.volume = 0.5
                 audioPlayer?.play()
             } catch {
-                print("Error playing launch sound: \(error.localizedDescription)")
             }
         } else {
-            print("Could not find sound asset: MixDoctor_sound")
         }
     }
     

@@ -171,15 +171,15 @@ public class AudioKitService: ObservableObject {
                 phaseCoherence: result.phaseCoherence,
                 monoCompatibility: result.monoCompatibility,
                 
-                // ✅ FIXED: Use actual FFT-based spectral balance instead of old 0.0 values
-                // Combined bands to match Claude's 5-band analysis
-                lowEnd: analysisResult.spectralBalance.subBassEnergy + analysisResult.spectralBalance.bassEnergy,  // Sub Bass + Bass
-                lowMid: analysisResult.spectralBalance.lowMidEnergy,     // Low Mid
-                mid: analysisResult.spectralBalance.midEnergy,           // Mid
-                highMid: analysisResult.spectralBalance.highMidEnergy,   // High Mid
-                high: analysisResult.spectralBalance.presenceEnergy + analysisResult.spectralBalance.airEnergy,  // Presence + Air
+                // ✅ FIXED: Use FFT analysis for accurate frequency percentages (already stored in result)
+                // The FFT analysis calculates percentages correctly across the full audio
+                lowEnd: result.lowEndBalance,      // Bass percentage from FFT
+                lowMid: result.lowMidBalance,      // Low-mid percentage from FFT
+                mid: result.midBalance,            // Mid percentage from FFT
+                highMid: result.highMidBalance,    // High-mid percentage from FFT
+                high: result.highBalance,          // High percentage from FFT
 
-                // Professional Spectral Balance
+                // Professional Spectral Balance (keep for detailed analysis)
                 subBassEnergy: analysisResult.spectralBalance.subBassEnergy,
                 bassEnergy: analysisResult.spectralBalance.bassEnergy,
                 lowMidEnergy: analysisResult.spectralBalance.lowMidEnergy,
@@ -217,6 +217,10 @@ public class AudioKitService: ObservableObject {
                 hasStereoIssues: result.hasStereoIssues,
                 hasFrequencyImbalance: result.hasFrequencyImbalance,
                 hasDynamicRangeIssues: result.hasDynamicRangeIssues,
+                
+                // Mix Quality Detection
+                isLikelyUnmixed: result.unmixedDetection!.isLikelyUnmixed,
+                mixingQualityScore: result.unmixedDetection!.mixingQualityScore,
                 
                 // User Status
                 isProUser: isProUser
@@ -286,21 +290,19 @@ public class AudioKitService: ObservableObject {
         let dynamicRangeAnalysis = analyzeDynamicRange(leftData, rightData ?? leftData, frameCount: frameCount)
         let peakToAverageRatio = analyzePeakToAverage(leftData, rightData ?? leftData, frameCount: frameCount)
         
-        // MARK: - Unmixed Detection Analysis (DISABLED)
-        // Simple arrangements (vocal+guitar in center) were incorrectly flagged
-        let unmixedDetection = UnmixedDetectionResult(
-            isLikelyUnmixed: false,
-            confidenceScore: 0.0,
-            detectionCriteria: [:],
-            mixingQualityScore: 100.0,
-            recommendations: [],
-            dynamicRangeTest: false,
-            peakToLoudnessRatioTest: false,
-            transientAnalysis: false,
-            rmsVsPeakTest: false,
-            frequencyMaskingTest: false,
-            loudnessTest: false,
-            crestFactorTest: false
+        // MARK: - Unmixed Detection Analysis (RE-ENABLED with CONSERVATIVE thresholds)
+        // Using professional audio engineering standards to detect unmixed tracks
+        let unmixedDetection = detectUnmixedAudio(
+            dynamicRange: dynamicRangeAnalysis.lufsRange,
+            loudness: amplitudeAnalysis.loudness,
+            peakLevel: amplitudeAnalysis.peak,
+            rmsLevel: amplitudeAnalysis.rms,
+            peakToAverage: peakToAverageRatio,
+            spectralBalance: spectralBalance,
+            monoCompatibility: stereoAnalysis.monoCompatibility,
+            phaseCoherence: stereoAnalysis.coherence,
+            stereoWidth: stereoAnalysis.width,
+            stereoBalance: stereoAnalysis.balance
         )
         
         // Combine AudioKit results
@@ -409,14 +411,36 @@ public class AudioKitService: ObservableObject {
         
         // Debug: Show frequency band ranges
         
-        // Calculate energy in each frequency band with proper professional weighting
-        let subBass = calculateBandEnergy(smoothedMagnitudes, range: subBassRange, sampleRate: sampleRate)
-        let bass = calculateBandEnergy(smoothedMagnitudes, range: bassRange, sampleRate: sampleRate)
-        let lowMid = calculateBandEnergy(smoothedMagnitudes, range: lowMidRange, sampleRate: sampleRate)
-        let mid = calculateBandEnergy(smoothedMagnitudes, range: midRange, sampleRate: sampleRate)
-        let highMid = calculateBandEnergy(smoothedMagnitudes, range: highMidRange, sampleRate: sampleRate)
-        let presence = calculateBandEnergy(smoothedMagnitudes, range: presenceRange, sampleRate: sampleRate)
-        let air = calculateBandEnergy(smoothedMagnitudes, range: airRange, sampleRate: sampleRate)
+        // Calculate energy in each frequency band - returns RAW energy, not dB
+        let subBass = calculateBandEnergyRaw(smoothedMagnitudes, range: subBassRange)
+        let bass = calculateBandEnergyRaw(smoothedMagnitudes, range: bassRange)
+        let lowMid = calculateBandEnergyRaw(smoothedMagnitudes, range: lowMidRange)
+        let mid = calculateBandEnergyRaw(smoothedMagnitudes, range: midRange)
+        let highMid = calculateBandEnergyRaw(smoothedMagnitudes, range: highMidRange)
+        let presence = calculateBandEnergyRaw(smoothedMagnitudes, range: presenceRange)
+        let air = calculateBandEnergyRaw(smoothedMagnitudes, range: airRange)
+        
+        // Calculate TOTAL energy across all bands
+        let totalEnergy = subBass + bass + lowMid + mid + highMid + presence + air
+        
+        // Convert to percentages of total energy (this is what we want!)
+        let subBassPercent = totalEnergy > 0 ? (subBass / totalEnergy) * 100.0 : 0.0
+        let bassPercent = totalEnergy > 0 ? (bass / totalEnergy) * 100.0 : 0.0
+        let lowMidPercent = totalEnergy > 0 ? (lowMid / totalEnergy) * 100.0 : 0.0
+        let midPercent = totalEnergy > 0 ? (mid / totalEnergy) * 100.0 : 0.0
+        let highMidPercent = totalEnergy > 0 ? (highMid / totalEnergy) * 100.0 : 0.0
+        let presencePercent = totalEnergy > 0 ? (presence / totalEnergy) * 100.0 : 0.0
+        let airPercent = totalEnergy > 0 ? (air / totalEnergy) * 100.0 : 0.0
+        
+        // Debug: Show frequency percentages
+        print("🎵 FREQUENCY PERCENTAGES:")
+        print("  SubBass: \(String(format: "%.1f", subBassPercent))%")
+        print("  Bass: \(String(format: "%.1f", bassPercent))%")
+        print("  LowMid: \(String(format: "%.1f", lowMidPercent))%")
+        print("  Mid: \(String(format: "%.1f", midPercent))%")
+        print("  HighMid: \(String(format: "%.1f", highMidPercent))%")
+        print("  Presence: \(String(format: "%.1f", presencePercent))%")
+        print("  Air: \(String(format: "%.1f", airPercent))%")
         
         // Debug: Show frequency band energies 
         
@@ -425,11 +449,11 @@ public class AudioKitService: ObservableObject {
         
         // Combine professional bands into the existing 5-band structure for compatibility
         // This maintains API compatibility while using proper professional frequency ranges
-        let combinedLowEnd = subBass + bass      // Combined sub-bass (20-60Hz) + bass (60-250Hz)
-        let combinedLowMid = lowMid              // Low-mid (250-500Hz) 
-        let combinedMid = mid                    // Mid (500Hz-2kHz)
-        let combinedHighMid = highMid            // High-mid (2-6kHz)
-        let combinedHigh = presence + air        // Combined presence (6-12kHz) + air (12-20kHz)
+        let combinedLowEnd = subBassPercent + bassPercent      // Combined sub-bass + bass
+        let combinedLowMid = lowMidPercent                     // Low-mid
+        let combinedMid = midPercent                           // Mid
+        let combinedHighMid = highMidPercent                   // High-mid
+        let combinedHigh = presencePercent + airPercent        // Combined presence + air
         
         // Detect genre for frequency balance assessment
         let detectedGenre = detectGenreFromFrequencies(combinedLowEnd, combinedLowMid, combinedMid, combinedHighMid, combinedHigh)
@@ -726,6 +750,23 @@ public class AudioKitService: ObservableObject {
         }
         
         return magnitudeSum > 0 ? weightedSum / magnitudeSum : 0.0
+    }
+    
+    private func calculateBandEnergyRaw(_ magnitudes: [Float], range: Range<Int>) -> Double {
+        guard !range.isEmpty && range.upperBound <= magnitudes.count && range.lowerBound >= 0 else {
+            return 0.0
+        }
+        
+        // Calculate RMS energy for the band (sum of squared magnitudes)
+        let bandMagnitudes = Array(magnitudes[range])
+        var energySum = 0.0
+        
+        for magnitude in bandMagnitudes {
+            energySum += Double(magnitude * magnitude)  // Square for energy
+        }
+        
+        // Return total energy (not normalized, not dB)
+        return energySum
     }
     
     private func calculateBandEnergy(_ magnitudes: [Float], range: Range<Int>, sampleRate: Double = 44100.0) -> Double {
@@ -2287,60 +2328,61 @@ enum AudioKitError: Error {
         let presenceRange = (6000.0, 12000.0)  // Presence
         let airRange = (12000.0, 20000.0)      // Air
         
-        // Calculate energy in each band
+        // Calculate energy in each band as PERCENTAGES
         let totalEnergy = magnitudes.prefix(magnitudes.count / 2).reduce(0.0) { sum, mag in
             sum + Double(mag * mag)
         }
         
-        let subBassEnergy = calculateBandEnergyForRange(magnitudes, lowFreq: subBassRange.0, highFreq: subBassRange.1, binWidth: binWidth) / totalEnergy
-        let bassEnergy = calculateBandEnergyForRange(magnitudes, lowFreq: bassRange.0, highFreq: bassRange.1, binWidth: binWidth) / totalEnergy
-        let lowMidEnergy = calculateBandEnergyForRange(magnitudes, lowFreq: lowMidRange.0, highFreq: lowMidRange.1, binWidth: binWidth) / totalEnergy
-        let midEnergy = calculateBandEnergyForRange(magnitudes, lowFreq: midRange.0, highFreq: midRange.1, binWidth: binWidth) / totalEnergy
-        let highMidEnergy = calculateBandEnergyForRange(magnitudes, lowFreq: highMidRange.0, highFreq: highMidRange.1, binWidth: binWidth) / totalEnergy
-        let presenceEnergy = calculateBandEnergyForRange(magnitudes, lowFreq: presenceRange.0, highFreq: presenceRange.1, binWidth: binWidth) / totalEnergy
-        let airEnergy = calculateBandEnergyForRange(magnitudes, lowFreq: airRange.0, highFreq: airRange.1, binWidth: binWidth) / totalEnergy
+        // FIXED: Convert to percentages by multiplying by 100
+        let subBassEnergy = (calculateBandEnergyForRange(magnitudes, lowFreq: subBassRange.0, highFreq: subBassRange.1, binWidth: binWidth) / totalEnergy) * 100.0
+        let bassEnergy = (calculateBandEnergyForRange(magnitudes, lowFreq: bassRange.0, highFreq: bassRange.1, binWidth: binWidth) / totalEnergy) * 100.0
+        let lowMidEnergy = (calculateBandEnergyForRange(magnitudes, lowFreq: lowMidRange.0, highFreq: lowMidRange.1, binWidth: binWidth) / totalEnergy) * 100.0
+        let midEnergy = (calculateBandEnergyForRange(magnitudes, lowFreq: midRange.0, highFreq: midRange.1, binWidth: binWidth) / totalEnergy) * 100.0
+        let highMidEnergy = (calculateBandEnergyForRange(magnitudes, lowFreq: highMidRange.0, highFreq: highMidRange.1, binWidth: binWidth) / totalEnergy) * 100.0
+        let presenceEnergy = (calculateBandEnergyForRange(magnitudes, lowFreq: presenceRange.0, highFreq: presenceRange.1, binWidth: binWidth) / totalEnergy) * 100.0
+        let airEnergy = (calculateBandEnergyForRange(magnitudes, lowFreq: airRange.0, highFreq: airRange.1, binWidth: binWidth) / totalEnergy) * 100.0
         
         // Calculate spectral tilt (brightness measure)
         let lowTotal = subBassEnergy + bassEnergy + lowMidEnergy
         let highTotal = highMidEnergy + presenceEnergy + airEnergy
         let tiltMeasure = (highTotal - lowTotal) / max(highTotal + lowTotal, 0.001)
         
-        // Calculate balance score based on deviation from ideal
-        let ideal = [0.14, 0.20, 0.18, 0.22, 0.15, 0.08, 0.03]
+        // Calculate balance score based on deviation from ideal (now in percentages)
+        let ideal = [14.0, 20.0, 18.0, 22.0, 15.0, 8.0, 3.0]  // Percentages
         let actual = [subBassEnergy, bassEnergy, lowMidEnergy, midEnergy, highMidEnergy, presenceEnergy, airEnergy]
         
         // Break down the balance calculation
         let deviations = zip(ideal, actual).map { abs($0 - $1) }
         let totalDeviation = deviations.reduce(0, +)
-        let balanceScore = 100.0 - (totalDeviation * 500.0)
+        let balanceScore = 100.0 - (totalDeviation * 5.0)  // Adjusted for percentage scale
         let clampedBalanceScore = max(0.0, min(100.0, balanceScore))
         
-        // Energy distribution for detailed analysis
+        // Energy distribution for detailed analysis (already in percentages)
         let energyDistribution = [
-            "Sub-bass (20-60Hz)": subBassEnergy * 100,
-            "Bass (60-250Hz)": bassEnergy * 100,
-            "Low-mid (250-500Hz)": lowMidEnergy * 100,
-            "Midrange (500Hz-2kHz)": midEnergy * 100,
-            "High-mid (2-6kHz)": highMidEnergy * 100,
-            "Presence (6-12kHz)": presenceEnergy * 100,
-            "Air (12-20kHz)": airEnergy * 100
+            "Sub-bass (20-60Hz)": subBassEnergy,
+            "Bass (60-250Hz)": bassEnergy,
+            "Low-mid (250-500Hz)": lowMidEnergy,
+            "Midrange (500Hz-2kHz)": midEnergy,
+            "High-mid (2-6kHz)": highMidEnergy,
+            "Presence (6-12kHz)": presenceEnergy,
+            "Air (12-20kHz)": airEnergy
         ]
         
-        // Generate recommendations
+        // Generate recommendations (updated thresholds for percentage scale)
         var recommendations: [String] = []
         
-        if subBassEnergy > 0.20 {
+        if subBassEnergy > 20.0 {
             recommendations.append("🔍 Excessive sub-bass energy - consider high-pass filtering below 30Hz")
         }
-        if bassEnergy < 0.15 {
+        if bassEnergy < 15.0 {
             recommendations.append("🔊 Boost low end around 80-120Hz for more weight")
-        } else if bassEnergy > 0.30 {
+        } else if bassEnergy > 30.0 {
             recommendations.append("📉 Reduce bass energy around 100-200Hz to avoid muddiness")
         }
-        if midEnergy < 0.18 {
+        if midEnergy < 18.0 {
             recommendations.append("🎯 Boost midrange presence for better clarity")
         }
-        if presenceEnergy < 0.05 {
+        if presenceEnergy < 5.0 {
             recommendations.append("✨ Add presence around 8-10kHz for more sparkle")
         }
         if tiltMeasure < -0.3 {
@@ -2353,6 +2395,16 @@ enum AudioKitError: Error {
         let halfSpectrum = magnitudes.count / 2
         let spectrumForDisplay = Array(magnitudes[0..<min(halfSpectrum, 2048)])
         
+        // DEBUG: Print what we're returning
+        print("📊 SPECTRAL BALANCE RESULT:")
+        print("  SubBass: \(String(format: "%.1f", subBassEnergy))%")
+        print("  Bass: \(String(format: "%.1f", bassEnergy))%")
+        print("  LowMid: \(String(format: "%.1f", lowMidEnergy))%")
+        print("  Mid: \(String(format: "%.1f", midEnergy))%")
+        print("  HighMid: \(String(format: "%.1f", highMidEnergy))%")
+        print("  Presence: \(String(format: "%.1f", presenceEnergy))%")
+        print("  Air: \(String(format: "%.1f", airEnergy))%")
+        print("  Total: \(String(format: "%.1f", subBassEnergy + bassEnergy + lowMidEnergy + midEnergy + highMidEnergy + presenceEnergy + airEnergy))%")
         
         return SpectralBalanceResult(
             subBassEnergy: subBassEnergy,
@@ -2415,11 +2467,19 @@ enum AudioKitError: Error {
         // Side chain energy (for stereo imaging)
         let sidechainEnergy = totalEnergy > 0 ? Double(sideEnergy / totalEnergy) : 0.3
         
-        // Mono compatibility (how much is lost when summed to mono)
+        // Mono compatibility (how much energy is RETAINED when summed to mono)
+        // Professional standard: Compare mono sum energy vs theoretical maximum (2x original)
+        // High compatibility (85-100%) = most energy retained, minimal phase cancellation
+        // Low compatibility (<70%) = significant energy loss due to phase issues
         let monoSum = leftSamples.indices.map { leftSamples[$0] + rightSamples[$0] }
         let monoEnergy = monoSum.map { $0 * $0 }.reduce(0, +)
         let originalEnergy = leftEnergy + rightEnergy
-        let monoCompatibility = originalEnergy > 0 ? Double(monoEnergy / originalEnergy) * 100 : 85.0
+        
+        // Calculate what percentage of the theoretical maximum energy is retained
+        // Theoretical max in mono = 4x original (if L+R perfectly in phase)
+        // Actual mono energy / theoretical max * 100 = compatibility %
+        let theoreticalMaxMono = originalEnergy * 4.0
+        let monoCompatibility = theoreticalMaxMono > 0 ? Double(monoEnergy / theoreticalMaxMono) * 100 : 85.0
         
         // Phase coherence analysis
         let phaseCoherence = abs(correlationCoeff)
@@ -2639,10 +2699,7 @@ enum AudioKitError: Error {
     
     /// Detects if audio is unmixed (raw recording/arrangement) vs. professionally mixed
     /// Based on: https://chat.com analysis of mixing characteristics
-    /// ARCHIVED: Unmixed detection disabled - was too aggressive for minimal arrangements
-    /// Simple mixes (vocal+guitar in center) were incorrectly flagged as unmixed
-    /// Keeping function for reference but it's no longer called
-    /*
+    /// RE-ENABLED with improved detection patterns for bass-heavy and frequency-imbalanced tracks
     private func detectUnmixedAudio(
         dynamicRange: Double,
         loudness: Double,
@@ -2837,20 +2894,72 @@ enum AudioKitError: Error {
         // ========================================
         // COMPOSITE SCORING
         // Maximum: 4+2+2+1+3+1+3+1+3+1+1+1+1+3+2 = 29 points
-        // Threshold: 7+ points = Unmixed (~24% failure rate)
+        // AGGRESSIVE THRESHOLD: 3+ points = Unmixed (very sensitive detection)
+        // RATIONALE: Better to flag borderline cases as unmixed than score them too high
         // ========================================
         
         let totalTests = 15
         let maxPoints = 29.0
         let confidenceScore = (Double(failedTests) / maxPoints) * 100.0
         
-        // CRITICAL OVERRIDE: If mono compatibility is extremely poor (<45%), ALWAYS flag as unmixed
-        // Professional mixes would NEVER ship with mono this bad
-        let criticalMonoFailure = monoCompatibility < 0.45
-        let isLikelyUnmixed = failedTests >= 7 || criticalMonoFailure  // Need significant failures OR critical mono issue
+        // MULTIPLE UNMIXED DETECTION PATTERNS:
+        // These patterns are CONSERVATIVE - only flag obvious unmixed tracks
+        
+        // Pattern 1: Critical mono compatibility failure (professional mixes never this bad)
+        let criticalMonoFailure = monoCompatibility < 0.30  // Changed from 0.45 - VERY strict
+        
+        // Pattern 2: Very low loudness + very high dynamic range = clearly unmixed
+        let unmixedPattern1 = loudness < -25.0 && dynamicRange > 18.0  // Changed: more extreme
+        
+        // Pattern 3: Extremely low loudness + very narrow stereo = raw recording
+        let unmixedPattern2 = loudness < -25.0 && stereoWidth < 0.3  // Changed: more extreme
+        
+        // Pattern 4: Extreme bass dominance (>75%) - even bass-heavy genres shouldn't exceed this
+        // Only flag if ALSO has low loudness (mastered bass-heavy tracks are loud)
+        let bassHeavyUnmixed = (spectralBalance.subBassEnergy + spectralBalance.bassEnergy + spectralBalance.lowMidEnergy) > 0.75 && loudness < -18.0
+        
+        // Pattern 5: Very high crest factor + very low loudness = completely unprocessed
+        let unprocessedPattern = crestFactor > 18.0 && loudness < -20.0  // Changed: more extreme
+        
+        // Pattern 6: Peak at 0dBFS but extremely low loudness = unmastered raw recording
+        let rawPeaksPattern = peakLevel > -0.5 && loudness < -18.0  // Changed: more extreme
+        
+        // Pattern 7: Severe frequency imbalance + low loudness = unmixed
+        let severeFreqImbalance = ((spectralBalance.subBassEnergy + spectralBalance.bassEnergy) > 0.70 || 
+                                   (spectralBalance.highMidEnergy + spectralBalance.presenceEnergy + spectralBalance.airEnergy) < 0.03) && 
+                                   loudness < -15.0
+        
+        // VERY CONSERVATIVE: Need MANY failed tests (10+) OR critical patterns
+        // Professional mixes should easily pass with <10 failures
+        let isLikelyUnmixed = failedTests >= 10 || criticalMonoFailure || 
+                              (unmixedPattern1 && unmixedPattern2) ||  // Need BOTH patterns
+                              (bassHeavyUnmixed && severeFreqImbalance) ||  // Need BOTH
+                              (unprocessedPattern && rawPeaksPattern)  // Need BOTH
         
         // Calculate mixing quality score
         let mixingQualityScore = max(0, 100.0 - (Double(failedTests) / maxPoints * 100.0))
+        
+        // DEBUG: Print unmixed detection details
+        print("🔍 UNMIXED DETECTION:")
+        print("  Failed Tests: \(failedTests)/\(Int(maxPoints)) points")
+        print("  Mono Compatibility: \(String(format: "%.1f", monoCompatibility * 100))%")
+        print("  Stereo Width: \(String(format: "%.1f", stereoWidth * 100))%")
+        print("  Loudness: \(String(format: "%.1f", loudness)) LUFS")
+        print("  Dynamic Range: \(String(format: "%.1f", dynamicRange)) dB")
+        print("  Crest Factor: \(String(format: "%.1f", crestFactor)) dB")
+        print("  Peak Level: \(String(format: "%.1f", peakLevel)) dBFS")
+        print("  Bass+Low-Mid+Sub: \(String(format: "%.1f", (spectralBalance.subBassEnergy + spectralBalance.bassEnergy + spectralBalance.lowMidEnergy) * 100))%")
+        print("  High Freqs (HM+P+A): \(String(format: "%.1f", (spectralBalance.highMidEnergy + spectralBalance.presenceEnergy + spectralBalance.airEnergy) * 100))%")
+        print("  Pattern Checks:")
+        print("    - Critical Mono Failure (<45%): \(criticalMonoFailure)")
+        print("    - Low Loud + High DR: \(unmixedPattern1)")
+        print("    - Low Loud + Narrow: \(unmixedPattern2)")
+        print("    - Bass Heavy (>70%): \(bassHeavyUnmixed)")
+        print("    - Unprocessed (High CF + Low Loud): \(unprocessedPattern)")
+        print("    - Raw Peaks (0dB + Low Loud): \(rawPeaksPattern)")
+        print("    - Severe Freq Imbalance: \(severeFreqImbalance)")
+        print("  ➡️ isLikelyUnmixed: \(isLikelyUnmixed)")
+        print("  Mixing Quality Score: \(String(format: "%.1f", mixingQualityScore))%")
         
         // Add overall recommendation
         if isLikelyUnmixed {
@@ -2861,6 +2970,7 @@ enum AudioKitError: Error {
         }
         
         for (key, value) in detectionCriteria.sorted(by: { $0.key < $1.key }) where value {
+            print("  ✓ \(key)")
         }
         
         return UnmixedDetectionResult(
@@ -2878,7 +2988,6 @@ enum AudioKitError: Error {
             crestFactorTest: crestFactor > 14.0
         )
     }
-    */
     
     // MARK: - Helper Functions for Mastering Analysis
     
