@@ -16,6 +16,7 @@ struct ResultsView: View {
     @State private var showError = false
     @State private var errorMessage = ""
     @State private var showPaywall = false
+    @State private var showScoreGuide = false
     // MARK: - Production - Access shared instance directly
     private var subscriptionService: SubscriptionService { SubscriptionService.shared }
 
@@ -80,6 +81,9 @@ struct ResultsView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(errorMessage)
+        }
+        .sheet(isPresented: $showScoreGuide) {
+            ScoreGuideView()
         }
         .task {
             
@@ -306,6 +310,14 @@ struct ResultsView: View {
                     .fontWeight(.semibold)
                 
                 Spacer()
+                
+                Button(action: {
+                    showScoreGuide = true
+                }) {
+                    Image(systemName: "info.circle")
+                        .font(.title3)
+                        .foregroundStyle(.blue)
+                }
             }
             
             // Score Circle with Modern Design
@@ -1667,5 +1679,186 @@ struct AnimatedGradientLoader: View {
             .padding(32)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// MARK: - Score Guide View
+struct ScoreGuideView: View {
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 24) {
+                    // Header
+                    VStack(spacing: 12) {
+                        Image(systemName: "chart.bar.doc.horizontal.fill")
+                            .font(.system(size: 60))
+                            .foregroundStyle(.blue)
+                        
+                        Text("Understanding Your Score")
+                            .font(.title2.bold())
+                        
+                        Text("Mix Doctor uses professional audio engineering standards to analyze your tracks")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.top)
+                    
+                    // Score Ranges
+                    VStack(spacing: 16) {
+                        scoreRangeCard(
+                            range: "95-100",
+                            title: "Reference Quality",
+                            description: "Major label commercial masters (Korn, Green Day, etc.). Perfect loudness, dynamics, and frequency balance. Ready for streaming platforms.",
+                            color: .green,
+                            icon: "star.fill"
+                        )
+                        
+                        scoreRangeCard(
+                            range: "88-94",
+                            title: "Professional Commercial",
+                            description: "Radio-ready, streaming-optimized. Excellent mastering with minor room for improvement. Competitive professional quality.",
+                            color: .blue,
+                            icon: "checkmark.seal.fill"
+                        )
+                        
+                        scoreRangeCard(
+                            range: "75-87",
+                            title: "Semi-Professional",
+                            description: "Good mix quality but needs mastering polish. Suitable for demos or independent releases with some refinement.",
+                            color: .orange,
+                            icon: "waveform.circle.fill"
+                        )
+                        
+                        scoreRangeCard(
+                            range: "60-74",
+                            title: "Amateur/Unmixed",
+                            description: "Track needs professional mixing. Issues with balance, dynamics, or loudness. Not ready for public release.",
+                            color: Color(red: 1.0, green: 0.6, blue: 0.0),
+                            icon: "exclamationmark.triangle.fill"
+                        )
+                        
+                        scoreRangeCard(
+                            range: "Below 60",
+                            title: "Raw/Unprocessed",
+                            description: "Major mixing issues detected. Likely unmixed or has critical technical problems. Requires significant professional work.",
+                            color: .red,
+                            icon: "xmark.circle.fill"
+                        )
+                    }
+                    
+                    // What Affects Score
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("What Affects Your Score?")
+                            .font(.headline)
+                            .padding(.horizontal)
+                        
+                        VStack(spacing: 12) {
+                            scoreFactorRow(icon: "waveform", title: "Frequency Balance", description: "Sub-bass, bass, mids, and highs distribution")
+                            scoreFactorRow(icon: "speaker.wave.3.fill", title: "Loudness & Dynamics", description: "LUFS levels and dynamic range")
+                            scoreFactorRow(icon: "circle.lefthalf.filled", title: "Stereo Imaging", description: "Stereo width and phase coherence")
+                            scoreFactorRow(icon: "checkmark.circle.fill", title: "Mono Compatibility", description: "How well it translates to mono")
+                            scoreFactorRow(icon: "gauge.with.dots.needle.67percent", title: "Peak Levels", description: "Clipping and headroom management")
+                            scoreFactorRow(icon: "waveform.path.ecg", title: "Compression", description: "Dynamic processing quality")
+                        }
+                        .padding(.horizontal)
+                    }
+                    .padding(.top)
+                    
+                    // Footer Note
+                    VStack(spacing: 8) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "info.circle.fill")
+                                .foregroundStyle(.blue)
+                            Text("Bonus Points")
+                                .font(.subheadline.bold())
+                        }
+                        
+                        Text("Exceptional tracks can earn up to +12 bonus points for outstanding loudness, phase coherence, mono compatibility, stereo width, and frequency balance.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding()
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color.blue.opacity(0.1))
+                    )
+                    .padding(.horizontal)
+                }
+                .padding(.bottom, 32)
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+    
+    private func scoreRangeCard(range: String, title: String, description: String, color: Color, icon: String) -> some View {
+        HStack(alignment: .top, spacing: 16) {
+            // Icon
+            ZStack {
+                Circle()
+                    .fill(color.opacity(0.15))
+                    .frame(width: 50, height: 50)
+                
+                Image(systemName: icon)
+                    .font(.title3)
+                    .foregroundStyle(color)
+            }
+            
+            // Content
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(range)
+                        .font(.headline)
+                        .foregroundStyle(color)
+                    
+                    Spacer()
+                }
+                
+                Text(title)
+                    .font(.subheadline.bold())
+                
+                Text(description)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.backgroundSecondary)
+                .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 2)
+        )
+        .padding(.horizontal)
+    }
+    
+    private func scoreFactorRow(icon: String, title: String, description: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.title3)
+                .foregroundStyle(.blue)
+                .frame(width: 30)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.bold())
+                
+                Text(description)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            
+            Spacer()
+        }
     }
 }

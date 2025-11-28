@@ -55,7 +55,13 @@ public final class SubscriptionService {
     private func configureRevenueCat() {
         // Configure RevenueCat with your API key
         Purchases.logLevel = .debug
-        Purchases.configure(withAPIKey: Config.revenueCatAPIKey)
+        
+        // Configure with app user ID - RevenueCat will generate an anonymous ID if nil
+        Purchases.configure(
+            with: Configuration.Builder(withAPIKey: Config.revenueCatAPIKey)
+                .with(usesStoreKit2IfAvailable: true) // Enable StoreKit 2 for better sync
+                .build()
+        )
         
         // Set up listener for customer info updates
         Task {

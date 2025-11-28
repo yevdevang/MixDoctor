@@ -362,7 +362,7 @@ struct AboutView: View {
                             .font(.headline)
                         
                         FeatureRow(icon: "waveform", title: "Audio Import", description: "Import and manage audio files")
-                        FeatureRow(icon: "chart.bar.fill", title: "Analysis", description: "Advanced audio analysis powered by CoreML")
+                        FeatureRow(icon: "chart.bar.fill", title: "Analysis", description: "Advanced audio analysis powered by Claude Sonnet 4.5")
                         FeatureRow(icon: "icloud.fill", title: "iCloud Sync", description: "Sync across all your devices")
                         FeatureRow(icon: "play.circle.fill", title: "Playback", description: "High-quality audio playback")
                     }

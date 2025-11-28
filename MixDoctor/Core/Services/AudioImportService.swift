@@ -56,10 +56,13 @@ final class AudioImportService {
     // MARK: - Public API
 
     func importAudioFile(from url: URL, modelContext: ModelContext? = nil) async throws -> AudioFile {
+        
         guard url.startAccessingSecurityScopedResource() else {
             throw AudioImportError.accessDenied
         }
-        defer { url.stopAccessingSecurityScopedResource() }
+        defer { 
+            url.stopAccessingSecurityScopedResource() 
+        }
 
         do {
             try validateAudioFile(url)
@@ -272,6 +275,9 @@ final class AudioImportService {
             let sameFileName = existingFile.fileName == fileName
             let sameFileSize = existingFile.fileSize == fileSize
             let similarDuration = abs(existingFile.duration - duration) < 1.0
+            
+            if sameFileName {
+            }
             
             if sameFileName && sameFileSize && similarDuration {
                 return true
