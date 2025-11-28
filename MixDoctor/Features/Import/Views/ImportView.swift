@@ -90,12 +90,9 @@ struct ImportView: View {
 
             VStack(spacing: 8) {
                 Text("Import Audio Files")
-                    .font(.title2.weight(.semibold))
+                    .font(.title2.weight(.semibold)) 
 
-                Text("T3ew465tap Browse Files to begin.")
-                    .font(.subheadline)
-                    .foregroundStyle(Color.secondaryText)
-                    .multilineTextAlignment(.center)
+                
             }
 
             HStack(spacing: 16) {

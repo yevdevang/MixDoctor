@@ -47,9 +47,6 @@ struct PaywallView: View {
                         // Purchase button
                         purchaseButton
                         
-                        // Skip trial button
-                        skipTrialButton
-                        
                         // Restore button
                         restoreButton
                         
@@ -178,7 +175,7 @@ struct PaywallView: View {
                     ProgressView()
                         .tint(.white)
                 } else {
-                    Text("Start 7-Day Free Trial")
+                    Text("Start 3-Day Free Trial")
                         .font(.headline)
                 }
             }
@@ -194,34 +191,6 @@ struct PaywallView: View {
                     endPoint: .trailing
                 )
             )
-            .foregroundColor(.white)
-            .cornerRadius(12)
-        }
-        .disabled(selectedPackage == nil || isPurchasing)
-        .opacity(selectedPackage == nil ? 0.6 : 1.0)
-    }
-    
-    // MARK: - Skip Trial Button
-    
-    private var skipTrialButton: some View {
-        Button {
-            Task {
-                await purchase()
-            }
-        } label: {
-            HStack {
-                if isPurchasing {
-                    ProgressView()
-                        .tint(.white)
-                } else {
-                    Image(systemName: "bolt.fill")
-                    Text("Skip Trial - Subscribe Now")
-                }
-            }
-            .font(.headline)
-            .frame(maxWidth: .infinity)
-            .padding()
-            .background(Color.purple)
             .foregroundColor(.white)
             .cornerRadius(12)
         }
@@ -254,12 +223,12 @@ struct PaywallView: View {
     private var footerSection: some View {
         VStack(spacing: 8) {
             if let package = selectedPackage {
-                Text("7-day free trial with 3 analyses, then \(package.localizedPriceString)")
+                Text("3-day free trial, then \(package.localizedPriceString) per \(package.packageType == .annual ? "year" : "month")")
                     .font(.caption2.bold())
                     .foregroundColor(.black)
             }
             
-            Text("Test Pro features during trial. Continue with 3 analyses/month free or subscribe for 50 analyses/month.")
+            Text("Free trial gives you 3 analyses to test Pro features. After trial, continue with 3 free analyses/month or get 50 analyses/month with Pro subscription. Cancel anytime.")
                 .font(.caption2)
                 .foregroundColor(.gray)
                 .multilineTextAlignment(.center)

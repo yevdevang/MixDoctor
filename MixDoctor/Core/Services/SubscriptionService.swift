@@ -25,7 +25,7 @@ public final class SubscriptionService {
     private let monthlyResetKey = "lastMonthlyReset"
     private let analysisCountKey = "analysisCount"
     
-    // Pro tier limits
+    // Pro tier limits (50 analyses per month)
     private let proMonthlyLimit = 50
     private let proAnalysisCountKey = "proAnalysisCount"
     private let proResetDateKey = "proAnalysisResetDate"
@@ -153,8 +153,11 @@ public final class SubscriptionService {
                 proAnalysisResetDate = Calendar.current.date(byAdding: .month, value: 1, to: Date())
                 saveProAnalysisState()
             }
+        } else {
+            // No active subscription found
+            isInTrialPeriod = false
+            isProUser = false
         }
-        
     }
     
     // MARK: - Usage Tracking
