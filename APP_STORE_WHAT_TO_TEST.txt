@@ -1,0 +1,74 @@
+MIXDOCTOR TESTING GUIDE
+
+SETUP:
+- iOS 17.0+ required
+- Prepare test audio files (WAV, MP3, M4A, AIFF)
+- Enable iCloud Drive
+- Delete previous app version before testing
+
+CRITICAL TESTS:
+
+1. FIRST LAUNCH
+- Launch screen animates (6 seconds)
+- Welcome alert shows "3 free analyses"
+- Dashboard loads properly
+
+2. AUDIO IMPORT
+- Import WAV, MP3, M4A, AIFF from Files app
+- Multiple files import successfully
+- Files display name, format, size, duration
+
+3. AUDIO ANALYSIS (CORE)
+- Tap "Analyze Mix" → see results
+- Counter decrements: "Free (2/3 remaining)"
+- After 3 analyses, paywall appears
+- Results show: Score, Frequency Balance, Stereo Imaging, Dynamic Range, Recommendations
+
+4. SUBSCRIPTION
+- Paywall shows Monthly & Annual options with prices
+- "Subscribe Now" → StoreKit sheet → complete purchase
+- Settings shows "Pro (50/50 analyses)"
+- Restore Purchases works after reinstall
+
+5. AUDIO PLAYER
+- Play/Pause works
+- Seek slider smooth
+- Background playback when locked
+- Works with speakers & headphones
+
+6. SETTINGS
+- Shows correct subscription status
+- Theme switching (System/Light/Dark)
+- iCloud sync toggle
+- Privacy/Terms links work
+
+7. iCLOUD SYNC (2 devices)
+- Import on Device 1
+- Pull-to-refresh on Device 2 → file appears
+- File playable on Device 2
+
+8. PERFORMANCE
+- Large files (100MB+) don't crash
+- 20+ files import without lag
+- Phone calls pause/resume playback
+- Works offline
+
+9. UI/UX
+- Dark/Light mode adapts
+- Works on all iPhone sizes
+- VoiceOver support
+- Dynamic Type scales
+
+10. ERRORS
+- Corrupted files show error (no crash)
+- Network failures handled gracefully
+
+PRIORITY: 1) Import/Analysis 2) Subscription 3) iCloud Sync
+
+TEST FILES NEEDED: WAV, MP3, M4A, AIFF (various sizes)
+
+KNOWN ISSUES: None
+
+Please report bugs via TestFlight Feedback with device model, iOS version, and reproduction steps.
+
+Version 1.0 | Build 3
