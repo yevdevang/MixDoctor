@@ -2,14 +2,12 @@ import SwiftUI
 
 struct SettingsView: View {
     @State private var viewModel = SettingsViewModel()
-    @State private var subscriptionService = SubscriptionService.shared
+    @ObservedObject var subscriptionService = SubscriptionService.shared
     @State private var storageInfo: StorageInfo?
     @State private var isLoadingStorage = false
     @State private var showClearCacheAlert = false
     @State private var showPaywall = false
     @State private var isRefreshingSubscription = false
-    @State private var isCancellingSubscription = false
-    @State private var showCancelConfirmation = false
     @AppStorage("muteLaunchSound") private var muteLaunchSound = false
     
     var body: some View {
@@ -77,37 +75,6 @@ struct SettingsView: View {
                             if let url = URL(string: "https://apps.apple.com/account/subscriptions") {
                                 UIApplication.shared.open(url)
                             }
-                        }
-                        
-                        // Cancel subscription button (for testing with MockSubscriptionService)
-                        Button(role: .destructive) {
-                            showCancelConfirmation = true
-                        } label: {
-                            HStack {
-                                if isCancellingSubscription {
-                                    ProgressView()
-                                        .controlSize(.small)
-                                    Text("Cancelling...")
-                                } else {
-                                    Image(systemName: "xmark.circle")
-                                    Text("Cancel Subscription")
-                                }
-                            }
-                        }
-                        .disabled(isCancellingSubscription)
-                        .confirmationDialog(
-                            "Cancel Subscription",
-                            isPresented: $showCancelConfirmation,
-                            titleVisibility: .visible
-                        ) {
-                            Button("Cancel Subscription", role: .destructive) {
-                                Task {
-                                    await cancelSubscription()
-                                }
-                            }
-                            Button("Keep Subscription", role: .cancel) {}
-                        } message: {
-                            Text("Are you sure you want to cancel your subscription? You'll lose access to unlimited analyses and return to the free tier (3 analyses per month).")
                         }
                     }
                 } header: {
@@ -302,19 +269,6 @@ struct SettingsView: View {
             } catch {
             }
         }
-    }
-    
-    private func cancelSubscription() async {
-        isCancellingSubscription = true
-        
-        // Note: RevenueCat doesn't provide API to cancel subscriptions
-        // Users must cancel through App Store settings
-        // This is just for UI demonstration
-        
-        // Small delay for visual feedback
-        try? await Task.sleep(nanoseconds: 500_000_000)
-        
-        isCancellingSubscription = false
     }
     
     private func storageBarColor(for percentage: Double) -> Color {

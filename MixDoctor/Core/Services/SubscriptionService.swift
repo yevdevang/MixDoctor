@@ -8,17 +8,18 @@
 import Foundation
 import RevenueCat
 import SwiftUI
+import Combine
 
 @MainActor
-@Observable
-public final class SubscriptionService {
+public final class SubscriptionService: NSObject, ObservableObject, PurchasesDelegate {
     public static let shared = SubscriptionService()
     
     // MARK: - Properties
-    var isProUser: Bool = false
-    var isInTrialPeriod: Bool = false
-    var currentOffering: Offering?
-    var customerInfo: CustomerInfo?
+    @Published var isProUser: Bool = false
+    @Published var isInTrialPeriod: Bool = false
+    @Published var willRenew: Bool = true
+    @Published var currentOffering: Offering?
+    @Published var customerInfo: CustomerInfo?
      
     // Free tier limits
     private let freeAnalysisLimit = 3
@@ -45,7 +46,8 @@ public final class SubscriptionService {
     
     // MARK: - Initialization
     
-    private init() {
+    private override init() {
+        super.init()
         loadProAnalysisState()
         configureRevenueCat()
         checkMonthlyReset()
@@ -63,6 +65,9 @@ public final class SubscriptionService {
                 .build()
         )
         
+        // Set delegate to receive real-time updates
+        Purchases.shared.delegate = self
+        
         // Set up listener for customer info updates
         Task {
             await updateCustomerInfo()
@@ -72,12 +77,19 @@ public final class SubscriptionService {
     // MARK: - Customer Info
     
     func updateCustomerInfo() async {
+        print("🔄 updateCustomerInfo() called at \(Date())")
         do {
             let info = try await Purchases.shared.customerInfo()
             customerInfo = info
             
             // Check if user has active pro entitlement
             let hasProEntitlement = info.entitlements["pro"]?.isActive == true
+            print("✨ updateCustomerInfo - Has Pro: \(hasProEntitlement)")
+            
+            // Check if subscription will renew
+            if let proEntitlement = info.entitlements["pro"] {
+                print("📱 updateCustomerInfo - Will renew: \(proEntitlement.willRenew)")
+            }
             
             // Check if currently in trial period
             if let proEntitlement = info.entitlements["pro"],
@@ -85,9 +97,14 @@ public final class SubscriptionService {
            proEntitlement.periodType == .trial {
             isInTrialPeriod = true
             isProUser = false // Treat trial users as free tier for analysis limits
+            willRenew = proEntitlement.willRenew
         } else if hasProEntitlement {
             isInTrialPeriod = false
             isProUser = true // Paid subscribers get monthly limit
+            // Update renewal status
+            if let proEntitlement = info.entitlements["pro"] {
+                willRenew = proEntitlement.willRenew
+            }
             // Initialize Pro analysis limit if becoming Pro for first time
             if remainingProAnalyses == 0 && proAnalysisResetDate == nil {
                 remainingProAnalyses = proMonthlyLimit
@@ -97,6 +114,7 @@ public final class SubscriptionService {
         } else {
             isInTrialPeriod = false
             isProUser = false
+            willRenew = true // Reset to default
         }        } catch {
         }
     }
@@ -123,9 +141,14 @@ public final class SubscriptionService {
            proEntitlement.periodType == .trial {
             isInTrialPeriod = true
             isProUser = false // Treat trial users as free tier for analysis limits
+            willRenew = proEntitlement.willRenew
         } else if hasProEntitlement {
             isInTrialPeriod = false
             isProUser = true // Paid subscribers get monthly limit
+            // Update renewal status
+            if let proEntitlement = result.customerInfo.entitlements["pro"] {
+                willRenew = proEntitlement.willRenew
+            }
             // Initialize Pro analysis limit for new purchase
             remainingProAnalyses = proMonthlyLimit
             proAnalysisResetDate = Calendar.current.date(byAdding: .month, value: 1, to: Date())
@@ -150,9 +173,14 @@ public final class SubscriptionService {
            proEntitlement.periodType == .trial {
             isInTrialPeriod = true
             isProUser = false // Treat trial users as free tier for analysis limits
+            willRenew = proEntitlement.willRenew
         } else if hasProEntitlement {
             isInTrialPeriod = false
             isProUser = true // Paid subscribers get monthly limit
+            // Update renewal status
+            if let proEntitlement = info.entitlements["pro"] {
+                willRenew = proEntitlement.willRenew
+            }
             // Initialize Pro analysis limit when restoring
             if remainingProAnalyses == 0 && proAnalysisResetDate == nil {
                 remainingProAnalyses = proMonthlyLimit
@@ -163,6 +191,7 @@ public final class SubscriptionService {
             // No active subscription found
             isInTrialPeriod = false
             isProUser = false
+            willRenew = true // Reset to default
         }
     }
     
@@ -246,11 +275,62 @@ public final class SubscriptionService {
     
     var subscriptionStatus: String {
         if isProUser {
+            if !willRenew {
+                return "Pro (Cancels at period end) (\(remainingProAnalyses)/\(proMonthlyLimit))"
+            }
             return "Pro (\(remainingProAnalyses)/\(proMonthlyLimit) analyses this month)"
         } else if isInTrialPeriod {
             return "Trial (\(remainingFreeAnalyses)/\(freeAnalysisLimit) analyses)"
         } else {
             return "Free (\(remainingFreeAnalyses)/\(freeAnalysisLimit) analyses)"
+        }
+    }
+    
+    // MARK: - PurchasesDelegate
+    
+    nonisolated public func purchases(_ purchases: Purchases, receivedUpdated customerInfo: CustomerInfo) {
+        // This gets called automatically when subscription status changes
+        Task { @MainActor in
+            print("🔄 Delegate: Received updated customerInfo")
+            print("⏰ Timestamp: \(Date())")
+            self.customerInfo = customerInfo
+            
+            // Check if user has active pro entitlement
+            let hasProEntitlement = customerInfo.entitlements["pro"]?.isActive == true
+            print("✨ Has Pro entitlement: \(hasProEntitlement)")
+            
+            // Check if subscription will renew (false means cancelled but still active until period ends)
+            if let proEntitlement = customerInfo.entitlements["pro"] {
+                self.willRenew = proEntitlement.willRenew
+                print("📱 Subscription will renew: \(proEntitlement.willRenew)")
+                print("📅 Expiration date: \(proEntitlement.expirationDate?.description ?? "none")")
+                print("🔍 Period type: \(proEntitlement.periodType)")
+            } else {
+                print("⚠️ No pro entitlement found")
+            }
+            
+            // Check if currently in trial period
+            if let proEntitlement = customerInfo.entitlements["pro"],
+               proEntitlement.isActive,
+               proEntitlement.periodType == .trial {
+                print("✅ Status: Trial period")
+                self.isInTrialPeriod = true
+                self.isProUser = false
+            } else if hasProEntitlement {
+                print("✅ Status: Pro user (active)")
+                self.isInTrialPeriod = false
+                self.isProUser = true
+                // Initialize Pro analysis limit if becoming Pro for first time
+                if self.remainingProAnalyses == 0 && self.proAnalysisResetDate == nil {
+                    self.remainingProAnalyses = self.proMonthlyLimit
+                    self.proAnalysisResetDate = Calendar.current.date(byAdding: .month, value: 1, to: Date())
+                    self.saveProAnalysisState()
+                }
+            } else {
+                print("❌ Status: Free user (no active subscription)")
+                self.isInTrialPeriod = false
+                self.isProUser = false
+            }
         }
     }
 }
