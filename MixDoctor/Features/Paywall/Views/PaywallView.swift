@@ -10,7 +10,7 @@ import RevenueCat
 
 struct PaywallView: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var subscriptionService = SubscriptionService.shared
+    @ObservedObject var subscriptionService = SubscriptionService.shared
     @State private var selectedPackage: Package?
     @State private var isPurchasing = false
     @State private var isRestoring = false
