@@ -31,14 +31,18 @@ struct MixDoctorApp: App {
             let storeURL = appSupportURL.appendingPathComponent("MixDoctor.store")
             
             // Schema version tracking for migration
-            let currentSchemaVersion = 3  // Incremented for CloudKit integration
+            let currentSchemaVersion = 4  // Incremented - ensure clean schema
             let lastSchemaVersion = UserDefaults.standard.integer(forKey: "lastSchemaVersion")
             
             // If there's a corrupted store or schema changed, delete it
             if FileManager.default.fileExists(atPath: storeURL.path) {
                 // Check if we had a migration failure or schema version changed
                 if UserDefaults.standard.bool(forKey: "hadMigrationFailure") || lastSchemaVersion < currentSchemaVersion {
+                    print("⚠️ Deleting old store - schema version: \(lastSchemaVersion) -> \(currentSchemaVersion)")
                     try? FileManager.default.removeItem(at: storeURL)
+                    // Also clean up any -wal or -shm files
+                    try? FileManager.default.removeItem(at: storeURL.deletingLastPathComponent().appendingPathComponent("MixDoctor.store-wal"))
+                    try? FileManager.default.removeItem(at: storeURL.deletingLastPathComponent().appendingPathComponent("MixDoctor.store-shm"))
                     UserDefaults.standard.removeObject(forKey: "hadMigrationFailure")
                     UserDefaults.standard.set(currentSchemaVersion, forKey: "lastSchemaVersion")
                 }
@@ -56,6 +60,8 @@ struct MixDoctorApp: App {
                 configurations: [modelConfiguration]
             )
             
+            print("✅ ModelContainer created successfully with CloudKit: \(iCloudEnabled)")
+            
             // Save schema version on successful initialization
             UserDefaults.standard.set(currentSchemaVersion, forKey: "lastSchemaVersion")
             
@@ -67,7 +73,11 @@ struct MixDoctorApp: App {
             do {
                 let appSupportURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
                 let storeURL = appSupportURL.appendingPathComponent("MixDoctor.store")
+                
+                print("🔄 Attempting recovery - deleting corrupted store")
                 try? FileManager.default.removeItem(at: storeURL)
+                try? FileManager.default.removeItem(at: storeURL.deletingLastPathComponent().appendingPathComponent("MixDoctor.store-wal"))
+                try? FileManager.default.removeItem(at: storeURL.deletingLastPathComponent().appendingPathComponent("MixDoctor.store-shm"))
                 
                 let schema = Schema([AudioFile.self])
                 let modelConfiguration = ModelConfiguration(
@@ -76,6 +86,8 @@ struct MixDoctorApp: App {
                     cloudKitDatabase: .none  // Fallback to local only on error
                 )
                 modelContainer = try ModelContainer(for: schema, configurations: [modelConfiguration])
+                
+                print("✅ ModelContainer recovered successfully (local only)")
                 
                 // Clear the failure flag since it worked
                 UserDefaults.standard.removeObject(forKey: "hadMigrationFailure")
@@ -92,6 +104,7 @@ struct MixDoctorApp: App {
                 ContentView()
                     .modelContainer(modelContainer)
                     .environmentObject(ratingService)
+                    .macCatalystFontScaling(1.3) // Increase all fonts by 30% on Mac
                     .onChange(of: ratingService.shouldTriggerRating) { _, shouldTrigger in
                         if shouldTrigger {
                             requestReview()

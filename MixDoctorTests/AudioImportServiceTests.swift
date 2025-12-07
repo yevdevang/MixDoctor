@@ -21,20 +21,23 @@ final class AudioImportServiceTests: XCTestCase {
         try super.tearDownWithError()
     }
 
-    func testValidateAudioFile_WithValidWAV_ReturnsTrue() throws {
+    func testValidateAudioFile_WithValidWAV_ReturnsTrue() async throws {
         let wavURL = try makeTemporaryWAVFile()
         temporaryURLs.append(wavURL)
 
-        let isValid = try sut.validateAudioFile(wavURL)
+        let isValid = try await sut.validateAudioFile(wavURL)
 
         XCTAssertTrue(isValid)
     }
 
-    func testValidateAudioFile_WithUnsupportedExtension_ThrowsUnsupportedFormat() throws {
+    func testValidateAudioFile_WithUnsupportedExtension_ThrowsUnsupportedFormat() async throws {
         let url = try makeTemporaryFile(extension: "ogg")
         temporaryURLs.append(url)
 
-        XCTAssertThrowsError(try sut.validateAudioFile(url)) { error in
+        do {
+            _ = try await sut.validateAudioFile(url)
+            XCTFail("Expected error to be thrown")
+        } catch {
             XCTAssertEqual(error as? AudioImportError, .unsupportedFormat)
         }
     }

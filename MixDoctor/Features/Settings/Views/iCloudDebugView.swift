@@ -119,6 +119,13 @@ struct iCloudDebugView: View {
                 }
                 .disabled(isRefreshing)
                 
+                Button("Remove Duplicate Files") {
+                    Task {
+                        await removeDuplicates()
+                    }
+                }
+                .disabled(isRefreshing)
+                
                 Button("Scan & Import Files from iCloud") {
                     Task {
                         await scanAndImportFromiCloud()
@@ -203,15 +210,33 @@ struct iCloudDebugView: View {
             var errors = 0
             
             for fileURL in audioFiles {
-                // Check if already imported
+                // Check if already imported (verify file exists)
                 let fileName = fileURL.lastPathComponent
                 let descriptor = FetchDescriptor<AudioFile>(
                     predicate: #Predicate { $0.fileName == fileName }
                 )
                 
                 if let existing = try? modelContext.fetch(descriptor), !existing.isEmpty {
-                    skipped += 1
-                    continue
+                    // Verify the existing file actually exists before treating as duplicate
+                    var isActuallyDuplicate = false
+                    for existingFile in existing {
+                        if FileManager.default.fileExists(atPath: existingFile.fileURL.path) {
+                            isActuallyDuplicate = true
+                            break
+                        } else {
+                            // Stale record - delete it
+                            print("🗑️ iCloudDebugView: Removing stale record for \(fileName)")
+                            modelContext.delete(existingFile)
+                        }
+                    }
+                    
+                    if isActuallyDuplicate {
+                        skipped += 1
+                        continue
+                    }
+                    
+                    // If we get here, all existing records were stale - save cleanup
+                    try? modelContext.save()
                 }
                 
                 // Download if needed
@@ -332,6 +357,50 @@ struct iCloudDebugView: View {
         }
         
         isRefreshing = false
+    }
+    
+    private func removeDuplicates() async {
+        isRefreshing = true
+        defer { isRefreshing = false }
+        
+        print("🔍 Removing duplicate files...")
+        
+        // Group files by fileName
+        var filesByName: [String: [AudioFile]] = [:]
+        for file in audioFiles {
+            filesByName[file.fileName, default: []].append(file)
+        }
+        
+        var duplicatesRemoved = 0
+        
+        for (fileName, files) in filesByName where files.count > 1 {
+            print("⚠️ Found \(files.count) duplicates of: \(fileName)")
+            
+            // Sort by import date (oldest first) and keep the first one
+            let sorted = files.sorted { $0.dateImported < $1.dateImported }
+            let toKeep = sorted.first!
+            let toDelete = sorted.dropFirst()
+            
+            print("   Keeping: imported \(toKeep.dateImported)")
+            for duplicate in toDelete {
+                print("   Deleting: imported \(duplicate.dateImported)")
+                modelContext.delete(duplicate)
+                duplicatesRemoved += 1
+            }
+        }
+        
+        if duplicatesRemoved > 0 {
+            do {
+                try modelContext.save()
+                print("✅ Removed \(duplicatesRemoved) duplicate entries")
+            } catch {
+                print("❌ Failed to remove duplicates: \(error.localizedDescription)")
+            }
+        } else {
+            print("✅ No duplicates found")
+        }
+        
+        checkStatus()
     }
     
     private func checkStatus() {

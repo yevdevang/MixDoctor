@@ -64,9 +64,16 @@ final class AudioImportService {
             url.stopAccessingSecurityScopedResource() 
         }
 
+        print("🚀 AudioImportService.importAudioFile: Starting import of \(url.lastPathComponent)")
+        
         do {
-            try validateAudioFile(url)
+            print("📋 Validating audio file...")
+            try await validateAudioFile(url)
+            print("✅ Validation passed")
+            
+            print("📊 Extracting metadata...")
             let metadata = try await extractMetadata(from: url)
+            print("✅ Metadata extracted: size=\(metadata.fileSize), duration=\(metadata.duration)")
             
             // Check for duplicates BEFORE copying to iCloud
             if let modelContext = modelContext {
@@ -74,12 +81,19 @@ final class AudioImportService {
                 let fileSize = metadata.fileSize
                 let duration = metadata.duration
                 
+                print("🔍 Checking duplicate for: \(fileName), size: \(fileSize), duration: \(duration)")
+                
                 if isDuplicate(fileName: fileName, fileSize: fileSize, duration: duration, modelContext: modelContext) {
+                    print("❌ Duplicate detected: \(fileName)")
                     throw AudioImportError.duplicateFile
+                } else {
+                    print("✅ Not a duplicate, proceeding with import: \(fileName)")
                 }
             }
             
+            print("📁 Copying file to app's iCloud container...")
             let destinationURL = try copyToDocuments(from: url)
+            print("✅ File copied to: \(destinationURL.path)")
 
             let audioFile = AudioFile(
                 fileName: destinationURL.lastPathComponent,
@@ -139,25 +153,64 @@ final class AudioImportService {
     // MARK: - Validation
 
     @discardableResult
-    func validateAudioFile(_ url: URL) throws -> Bool {
+    func validateAudioFile(_ url: URL) async throws -> Bool {
+        print("  🔍 Checking if file exists at path: \(url.path)")
         guard FileManager.default.fileExists(atPath: url.path) else {
+            print("  ❌ File doesn't exist!")
             throw AudioImportError.invalidAudioFile
         }
+        print("  ✅ File exists")
 
+        print("  📏 Checking file size...")
         let fileSize = try getFileSize(url)
         let maxSize = AppConstants.maxFileSizeMB * 1_048_576
+        print("  File size: \(fileSize) bytes, max: \(maxSize) bytes")
         guard fileSize <= maxSize else {
+            print("  ❌ File too large!")
             throw AudioImportError.fileTooLarge
         }
+        print("  ✅ File size OK")
 
         let fileExtension = url.pathExtension.lowercased()
+        print("  🎵 Checking format: \(fileExtension)")
         guard AppConstants.supportedAudioFormats.contains(fileExtension) else {
+            print("  ❌ Unsupported format!")
             throw AudioImportError.unsupportedFormat
         }
+        print("  ✅ Format supported")
 
-        let asset = AVURLAsset(url: url)
-        guard asset.isReadable else {
-            throw AudioImportError.invalidAudioFile
+        // Skip AVURLAsset readable check for files in iCloud (they may not be downloaded yet)
+        // We'll validate after copying to our container
+        let isInICloud = url.path.contains("Mobile Documents") || url.path.contains("iCloud")
+        
+        if isInICloud {
+            print("  ⏭️ Source file is in iCloud - skipping AVURLAsset check (will validate after copy)")
+        } else {
+            print("  📀 Creating AVURLAsset and checking if readable...")
+            let asset = AVURLAsset(url: url)
+            
+            // Check if asset is readable (using new API for Mac Catalyst 16.0+)
+            if #available(macCatalyst 16.0, iOS 16.0, *) {
+                do {
+                    print("  Attempting to load isReadable property...")
+                    let isReadable = try await asset.load(.isReadable)
+                    print("  Asset readable check result: \(isReadable)")
+                    guard isReadable else {
+                        print("  ❌ Asset not readable!")
+                        throw AudioImportError.invalidAudioFile
+                    }
+                } catch {
+                    print("  ❌ Error loading asset readable property: \(error)")
+                    throw AudioImportError.invalidAudioFile
+                }
+            } else {
+                print("  Asset readable (sync check): \(asset.isReadable)")
+                guard asset.isReadable else {
+                    print("  ❌ Asset not readable!")
+                    throw AudioImportError.invalidAudioFile
+                }
+            }
+            print("  ✅ Asset is readable")
         }
 
         return true
@@ -210,12 +263,17 @@ final class AudioImportService {
     // MARK: - File Management
 
     private func copyToDocuments(from sourceURL: URL) throws -> URL {
+        print("  📂 copyToDocuments called")
+        print("  Source: \(sourceURL.path)")
+        
         // Use iCloud storage service for better sync
         let iCloudService = iCloudStorageService.shared
         let directoryURL = iCloudService.getAudioFilesDirectory()
+        print("  App's iCloud container: \(directoryURL.path)")
 
         let fileManager = FileManager.default
         if !fileManager.fileExists(atPath: directoryURL.path) {
+            print("  Creating iCloud directory...")
             try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
         }
 
@@ -226,12 +284,17 @@ final class AudioImportService {
         
         
         let destinationURL = directoryURL.appendingPathComponent(originalFileName)
+        print("  Destination path: \(destinationURL.path)")
         
         // If file already exists at destination, it means:
         // 1. It's an orphaned file being re-imported, OR
         // 2. Previous import failed after copying but before database insert
         // In both cases, we can reuse the existing file instead of creating duplicates
-        if fileManager.fileExists(atPath: destinationURL.path) {
+        let fileExistsAtDestination = fileManager.fileExists(atPath: destinationURL.path)
+        print("  File already exists at destination: \(fileExistsAtDestination)")
+        
+        if fileExistsAtDestination {
+            print("  ⚠️ File already exists in app container - reusing existing file")
             return destinationURL
         }
 
@@ -262,12 +325,15 @@ final class AudioImportService {
     // MARK: - Duplicate Detection
     
     /// Check if a file is a duplicate based on fileName, fileSize, and duration
+    /// Also verifies that the existing file physically exists before treating as duplicate
     private func isDuplicate(fileName: String, fileSize: Int64, duration: TimeInterval, modelContext: ModelContext) -> Bool {
         let descriptor = FetchDescriptor<AudioFile>()
         guard let allFiles = try? modelContext.fetch(descriptor) else {
+            print("⚠️ AudioImportService.isDuplicate: Failed to fetch files from database")
             return false
         }
         
+        print("🔍 AudioImportService.isDuplicate: Checking \(fileName) against \(allFiles.count) existing files")
         
         // Check for exact match on fileName and fileSize
         // Duration check within 1 second tolerance (for encoding variations)
@@ -280,10 +346,28 @@ final class AudioImportService {
             }
             
             if sameFileName && sameFileSize && similarDuration {
-                return true
+                print("⚠️ AudioImportService.isDuplicate: Found potential duplicate match!")
+                print("   Name match: \(sameFileName), Size match: \(sameFileSize), Duration match: \(similarDuration)")
+                
+                // Before treating as duplicate, verify the existing file actually exists
+                let existingFileURL = existingFile.fileURL
+                let fileExists = FileManager.default.fileExists(atPath: existingFileURL.path)
+                print("   File exists check: \(fileExists) at path: \(existingFileURL.path)")
+                
+                if !fileExists {
+                    // File record exists but file is missing - remove the stale record
+                    print("🗑️ Removing stale database record for missing file: \(fileName)")
+                    modelContext.delete(existingFile)
+                    try? modelContext.save()
+                    return false // Not a duplicate since existing file is gone
+                }
+                
+                print("❌ AudioImportService.isDuplicate: DUPLICATE CONFIRMED - file exists")
+                return true // It's a real duplicate
             }
         }
         
+        print("✅ AudioImportService.isDuplicate: NOT a duplicate")
         return false
     }
 }

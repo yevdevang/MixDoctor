@@ -16,18 +16,29 @@ final class iCloudStorageService {
     
     /// Returns the iCloud ubiquity container URL, or nil if iCloud is not available
     var iCloudContainerURL: URL? {
-        // Try with nil (uses default container)
+        // Try with explicit container identifier first (matches entitlements)
+        // Primary container: iCloud.MixDoctor
+        if let url = fileManager.url(forUbiquityContainerIdentifier: "iCloud.MixDoctor") {
+            let documentsURL = url.appendingPathComponent("Documents")
+            print("✅ iCloud container found: iCloud.MixDoctor")
+            return documentsURL
+        }
+        
+        // Fallback to dev container
+        if let url = fileManager.url(forUbiquityContainerIdentifier: "iCloud.dev.yevgenylevin.mixdoctor.MixDoctor") {
+            let documentsURL = url.appendingPathComponent("Documents")
+            print("✅ iCloud container found: iCloud.dev.yevgenylevin.mixdoctor.MixDoctor")
+            return documentsURL
+        }
+        
+        // Last resort: try nil (uses default container)
         if let url = fileManager.url(forUbiquityContainerIdentifier: nil) {
             let documentsURL = url.appendingPathComponent("Documents")
+            print("✅ iCloud container found: default container")
             return documentsURL
         }
         
-        // Try with explicit container identifier
-        if let url = fileManager.url(forUbiquityContainerIdentifier: "iCloud.com.yevgenylevin.animated.MixDoctor") {
-            let documentsURL = url.appendingPathComponent("Documents")
-            return documentsURL
-        }
-        
+        print("❌ No iCloud container available")
         return nil
     }
     
@@ -90,12 +101,36 @@ final class iCloudStorageService {
     
     /// Delete audio file from storage
     func deleteAudioFile(at url: URL) throws {
-        if fileManager.fileExists(atPath: url.path) {
-            // For iCloud files, use eviction first
-            if url.path.contains("Mobile Documents") {
-                try? fileManager.evictUbiquitousItem(at: url)
+        let fileName = url.lastPathComponent
+        
+        guard fileManager.fileExists(atPath: url.path) else {
+            print("⚠️ File doesn't exist, nothing to delete: \(fileName)")
+            return
+        }
+        
+        let isICloudFile = url.path.contains("Mobile Documents")
+        
+        if isICloudFile {
+            print("🗑️ Deleting iCloud file: \(fileName)")
+            
+            // First evict from local storage
+            // This marks the file for deletion from iCloud and removes local copy
+            do {
+                try fileManager.evictUbiquitousItem(at: url)
+                print("✅ Evicted from iCloud: \(fileName)")
+            } catch {
+                print("⚠️ Eviction warning (file may not be in iCloud): \(error.localizedDescription)")
             }
+            
+            // Then remove the file
+            // On iCloud-enabled devices, this will propagate deletion across all devices
             try fileManager.removeItem(at: url)
+            print("✅ Deleted iCloud file: \(fileName)")
+            
+        } else {
+            print("🗑️ Deleting local file: \(fileName)")
+            try fileManager.removeItem(at: url)
+            print("✅ Deleted local file: \(fileName)")
         }
     }
     

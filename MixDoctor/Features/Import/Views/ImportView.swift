@@ -66,46 +66,61 @@ struct ImportView: View {
             }
         }
         .task {
-            if viewModel.importedFiles.isEmpty {
-                viewModel.loadImports()
-                // Automatically scan for orphaned files when Import tab loads empty
-                Task {
-                    await viewModel.scanForOrphanedFiles()
-                }
+            // Always load imports and check for orphans on appear
+            viewModel.loadImports()
+            
+            // Check for orphaned files (files deleted on other devices)
+            Task(priority: .userInitiated) {
+                print("🔍 Import view appeared - checking for orphaned files")
+                await viewModel.scanForOrphanedFiles()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .audioFileDeleted)) { _ in
             // Reload files when a file is deleted from Dashboard
             viewModel.loadImports()
+            // Also check for orphans
+            Task {
+                await viewModel.scanForOrphanedFiles()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .iCloudFilesChanged)) { _ in
+            // When iCloud files change, check for orphaned records
+            print("🔔 Import view received iCloudFilesChanged notification")
+            Task(priority: .userInitiated) {
+                await viewModel.cleanupOrphanedRecords()
+            }
         }
     }
 
     private var dropZoneView: some View {
-        VStack(spacing: 24) {
+        HStack {
             Spacer()
+            
+            VStack(spacing: 24) {
+                Spacer()
 
-            Image(systemName: "waveform.circle.fill")
-                .font(.system(size: 80))
-                .foregroundStyle(Color.primaryAccent)
+                Image(systemName: "waveform.circle.fill")
+                    .font(.system(size: 80))
+                    .foregroundStyle(Color.primaryAccent)
 
-            VStack(spacing: 8) {
-                Text("Import Audio Files")
-                    .font(.title2.weight(.semibold)) 
+                VStack(spacing: 8) {
+                    Text("Import Audio Files")
+                        .font(.title2.weight(.semibold)) 
 
-                
-            }
-
-            HStack(spacing: 16) {
-                Button {
-                    isShowingDocumentPicker = true
-                } label: {
-                    Label("Browse Files", systemImage: "folder")
-                        .frame(maxWidth: 200)
+                    
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                
-                // Sync button to recover orphaned files
+
+                HStack(spacing: 16) {
+                    Button {
+                        isShowingDocumentPicker = true
+                    } label: {
+                        Label("Browse Files", systemImage: "folder")
+                            .frame(maxWidth: 200)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    
+                    // Sync button to recover orphaned files
 //                if let viewModel {
 //                    Button {
 //                        Task {
@@ -119,9 +134,15 @@ struct ImportView: View {
 //                    .controlSize(.large)
 //                    .disabled(viewModel.isImporting)
 //                }
-            }
+                }
 
-            supportedFormatsView
+                supportedFormatsView
+                
+                Spacer()
+            }
+            .frame(maxWidth: 500)
+            
+            Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()

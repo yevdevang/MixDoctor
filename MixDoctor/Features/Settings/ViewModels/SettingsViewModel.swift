@@ -117,8 +117,3 @@ final class SettingsViewModel {
         }
     }
 }
-
-extension Notification.Name {
-    static let iCloudSyncToggled = Notification.Name("iCloudSyncToggled")
-}
-
