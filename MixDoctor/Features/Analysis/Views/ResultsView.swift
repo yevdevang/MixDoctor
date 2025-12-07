@@ -163,13 +163,13 @@ struct ResultsView: View {
                 modernIssuesSection(issues: detectedIssues)
             }
             
-            // Analysis Section
+            // Analysis Section - ALWAYS show for all tracks
             if let aiSummary = result.aiSummary, !aiSummary.isEmpty {
                 modernAnalysisOnlySection(result: result)
             }
-            
-            // Recommendations Section
-            if !result.aiRecommendations.isEmpty {
+
+            // Recommendations Section - ONLY show for scores < 85
+            if !result.aiRecommendations.isEmpty && result.overallScore < 85 {
                 modernRecommendationsOnlySection(result: result)
             }
 
@@ -1129,13 +1129,14 @@ struct ResultsView: View {
     // MARK: - Metric Cards
 
     private func stereoWidthCard(result: AnalysisResult) -> some View {
-        MetricCard(
+        let hideIssues = (result.overallScore >= 85)
+        return MetricCard(
             title: "Stereo Width",
             icon: "arrow.left.and.right",
             value: result.stereoWidthScore,
             unit: "%",
-            status: result.hasStereoIssues ? .warning : .good,
-            description: stereoWidthDescription(result.stereoWidthScore)
+            status: hideIssues ? .good : (result.hasStereoIssues ? .warning : .good),
+            description: hideIssues ? "" : stereoWidthDescription(result.stereoWidthScore)
         )
     }
 
@@ -1152,7 +1153,8 @@ struct ResultsView: View {
     
     private func monoCompatibilityCard(result: AnalysisResult) -> some View {
         let compatibilityPercent = result.monoCompatibility * 100
-        let status: MetricCard.Status = compatibilityPercent >= 60 ? .good : .error
+        let hideIssues = (result.overallScore >= 85)
+        let status: MetricCard.Status = hideIssues ? .good : (compatibilityPercent >= 60 ? .good : .error)
         
         return MetricCard(
             title: "Mono Compatibility",
@@ -1160,7 +1162,7 @@ struct ResultsView: View {
             value: compatibilityPercent,
             unit: "%",
             status: status,
-            description: monoCompatibilityDescription(result.monoCompatibility)
+            description: hideIssues ? "" : monoCompatibilityDescription(result.monoCompatibility)
         )
     }
 
@@ -1168,6 +1170,7 @@ struct ResultsView: View {
         
         // Use score-based logic: ≥80% = good (green), <80% = issue (red)
         let isBalanced = result.frequencyBalanceScore >= 80
+        let hideIssues = (result.overallScore >= 85)
         
         return VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -1179,8 +1182,10 @@ struct ResultsView: View {
 
                 Spacer()
 
-                Image(systemName: isBalanced ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                    .foregroundStyle(isBalanced ? .green : .red)
+                if !hideIssues {
+                    Image(systemName: isBalanced ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                        .foregroundStyle(isBalanced ? .green : .red)
+                }
             }
 
             HStack(alignment: .firstTextBaseline, spacing: 4) {
@@ -1192,9 +1197,11 @@ struct ResultsView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Text(frequencyBalanceDescription(result.frequencyBalanceScore))
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+            if !hideIssues {
+                Text(frequencyBalanceDescription(result.frequencyBalanceScore))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
 
             Divider()
                 .padding(.vertical, 4)
@@ -1212,7 +1219,8 @@ struct ResultsView: View {
     }
 
     private func dynamicRangeCard(result: AnalysisResult) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
+        let hideIssues = (result.overallScore >= 85)
+        return VStack(alignment: .leading, spacing: 16) {
             // Header
             HStack {
                 Image(systemName: "waveform")
@@ -1224,8 +1232,10 @@ struct ResultsView: View {
 
                 Spacer()
 
-                Image(systemName: result.hasDynamicRangeIssues ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
-                    .foregroundStyle(result.hasDynamicRangeIssues ? .red : .green)
+                if !hideIssues {
+                    Image(systemName: result.hasDynamicRangeIssues ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                        .foregroundStyle(result.hasDynamicRangeIssues ? .red : .green)
+                }
             }
 
             // Overall Score
@@ -1239,9 +1249,11 @@ struct ResultsView: View {
                 
                 Spacer()
                 
-                Text(dynamicRangeDescription(result.dynamicRange))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                if !hideIssues {
+                    Text(dynamicRangeDescription(result.dynamicRange))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
             }
             
             // Peak, RMS, Loudness Metrics
@@ -1715,17 +1727,17 @@ struct ScoreGuideView: View {
                             color: .green,
                             icon: "star.fill"
                         )
-                        
+
                         scoreRangeCard(
-                            range: "88-94",
+                            range: "85-94",
                             title: "Professional Commercial",
                             description: "Radio-ready, streaming-optimized. Excellent mastering with minor room for improvement. Competitive professional quality.",
-                            color: .blue,
+                            color: Color(red: 0.0, green: 0.6, blue: 0.0),
                             icon: "checkmark.seal.fill"
                         )
-                        
+
                         scoreRangeCard(
-                            range: "75-87",
+                            range: "75-84",
                             title: "Semi-Professional",
                             description: "Good mix quality but needs mastering polish. Suitable for demos or independent releases with some refinement.",
                             color: .orange,

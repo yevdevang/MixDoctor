@@ -278,7 +278,7 @@ struct DashboardView: View {
     
     // Helper function to detect actual issues based on score and metrics
     private func hasActualIssues(result: AnalysisResult) -> Bool {
-        // If score is high (85+), likely no significant issues
+        // If score is high (85+), likely no significant issues (matches Professional Commercial threshold)
         if result.overallScore >= 85 {
             return false
         }

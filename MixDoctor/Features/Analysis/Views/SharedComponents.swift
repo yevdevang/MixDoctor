@@ -155,14 +155,14 @@ struct AudioFileRow: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 8)
                     .fill(statusColor.opacity(0.15))
-                    .frame(width: 50, height: 50)
+                    .frame(width: 40, height: 40)
 
                 // Mini waveform visualization
                 HStack(spacing: 2) {
                     ForEach(0..<5) { index in
                         RoundedRectangle(cornerRadius: 1)
                             .fill(statusColor)
-                            .frame(width: 3, height: waveformHeight(for: index))
+                            .frame(width: 2.5, height: waveformHeight(for: index))
                     }
                 }
                 
@@ -171,15 +171,15 @@ struct AudioFileRow: View {
                     VStack {
                         if isDownloading {
                             ProgressView()
-                                .scaleEffect(0.7)
+                                .scaleEffect(0.6)
                                 .tint(statusColor)
                         } else {
                             Image(systemName: "icloud.and.arrow.down")
-                                .font(.caption)
+                                .font(.caption2)
                                 .foregroundStyle(statusColor)
                         }
                     }
-                    .frame(width: 50, height: 50)
+                    .frame(width: 40, height: 40)
                     .background(Color.white.opacity(0.8))
                 }
                 
@@ -194,13 +194,13 @@ struct AudioFileRow: View {
                                 .background(
                                     Circle()
                                         .fill(statusColor)
-                                        .frame(width: 16, height: 16)
+                                        .frame(width: 14, height: 14)
                                 )
                         }
                         Spacer()
                     }
-                    .frame(width: 50, height: 50)
-                    .padding(4)
+                    .frame(width: 40, height: 40)
+                    .padding(3)
                 }
             }
 

@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import StoreKit
 
 @main
 struct MixDoctorApp: App {
@@ -15,6 +16,8 @@ struct MixDoctorApp: App {
     @State private var iCloudMonitor = iCloudSyncMonitor.shared
     @State private var showWelcomeMessage = false
     @State private var showLaunchScreen = true
+    @StateObject private var ratingService: RatingService
+    @Environment(\.requestReview) private var requestReview
     
     init() {
         // Check if user has enabled iCloud sync (default to true for better UX)
@@ -80,6 +83,7 @@ struct MixDoctorApp: App {
                 fatalError("Could not create ModelContainer even after deleting store: \(error)")
             }
         }
+        _ratingService = StateObject(wrappedValue: RatingService.shared)
     }
     
     var body: some Scene {
@@ -87,6 +91,12 @@ struct MixDoctorApp: App {
             ZStack {
                 ContentView()
                     .modelContainer(modelContainer)
+                    .environmentObject(ratingService)
+                    .onChange(of: ratingService.shouldTriggerRating) { _, shouldTrigger in
+                        if shouldTrigger {
+                            requestReview()
+                        }
+                    }
                     .alert("Welcome to Mix Doctor! 🎵", isPresented: $showWelcomeMessage) {
                         Button("Got It!") {
                             showWelcomeMessage = false

@@ -3,12 +3,14 @@ import SwiftUI
 struct SettingsView: View {
     @State private var viewModel = SettingsViewModel()
     @ObservedObject var subscriptionService = SubscriptionService.shared
+    @StateObject private var ratingService = RatingService.shared
     @State private var storageInfo: StorageInfo?
     @State private var isLoadingStorage = false
     @State private var showClearCacheAlert = false
     @State private var showPaywall = false
     @State private var isRefreshingSubscription = false
     @AppStorage("muteLaunchSound") private var muteLaunchSound = false
+    @State private var showRatingTestAlert = false
     
     var body: some View {
         NavigationStack {
@@ -194,6 +196,46 @@ struct SettingsView: View {
                     Text("When enabled, your audio file metadata and analysis results will be synced across all your devices. Audio files remain stored locally on each device. You'll need to restart the app for changes to take effect.")
                 }
                 
+                // MARK: - Developer/Test Section
+                #if DEBUG
+                Section {
+                    Button {
+                        ratingService.forceShowRatingForTesting()
+                        showRatingTestAlert = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "star.fill")
+                                .foregroundStyle(.yellow)
+                            Text("Test Rating Prompt")
+                            Spacer()
+                            Image(systemName: "flask")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    
+                    Button {
+                        ratingService.resetAllRatingTracking()
+                    } label: {
+                        HStack {
+                            Image(systemName: "arrow.counterclockwise")
+                                .foregroundStyle(.orange)
+                            Text("Reset Rating Tracking")
+                        }
+                    }
+                    
+                    HStack {
+                        Text("Total Analyses")
+                        Spacer()
+                        Text("\(subscriptionService.totalAnalysisCount)")
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("🧪 Test & Debug")
+                } footer: {
+                    Text("These options are only visible in debug builds")
+                }
+                #endif
+                
                 // MARK: - About Section
                 Section {
                     Button {
@@ -234,6 +276,11 @@ struct SettingsView: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("This will free up space by removing temporary files")
+            }
+            .alert("Rating Request Sent", isPresented: $showRatingTestAlert) {
+                Button("OK") {}
+            } message: {
+                Text("The rating prompt was triggered. Apple controls if/when it actually appears. If you don't see it, try:\n\n1. Reset iPhone (Device menu)\n2. Delete and reinstall app\n3. Try on a real device instead of simulator")
             }
             .sheet(isPresented: $viewModel.showAbout) {
                 AboutView()
