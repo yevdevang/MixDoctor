@@ -82,9 +82,10 @@ public class AudioKitService: ObservableObject {
         }
         
         try audioFile.read(into: buffer)
-        
-        // Perform AudioKit-based analysis with actual sample rate
-        let analysisResult = await performAudioKitBufferAnalysis(buffer, duration: duration, sampleRate: actualSampleRate)
+
+        // Perform AudioKit-based analysis with actual sample rate and filename
+        let fileName = url.lastPathComponent
+        let analysisResult = await performAudioKitBufferAnalysis(buffer, duration: duration, sampleRate: actualSampleRate, fileName: fileName)
         
         // Create AnalysisResult with AudioKit data
         // Note: audioFile parameter is AVAudioFile, but AnalysisResult expects MixDoctor.AudioFile
@@ -258,7 +259,7 @@ public class AudioKitService: ObservableObject {
     
     // MARK: - AudioKit Analysis Implementation
     
-    private func performAudioKitBufferAnalysis(_ buffer: AVAudioPCMBuffer, duration: TimeInterval, sampleRate: Double) async -> AudioKitAnalysisResult {
+    private func performAudioKitBufferAnalysis(_ buffer: AVAudioPCMBuffer, duration: TimeInterval, sampleRate: Double, fileName: String) async -> AudioKitAnalysisResult {
         // AudioKit-based buffer analysis
         
         guard let leftData = buffer.floatChannelData?[0] else {
@@ -293,6 +294,7 @@ public class AudioKitService: ObservableObject {
         // MARK: - Unmixed Detection Analysis (RE-ENABLED with CONSERVATIVE thresholds)
         // Using professional audio engineering standards to detect unmixed tracks
         let unmixedDetection = detectUnmixedAudio(
+            fileName: fileName,
             dynamicRange: dynamicRangeAnalysis.lufsRange,
             loudness: amplitudeAnalysis.loudness,
             peakLevel: amplitudeAnalysis.peak,
@@ -496,8 +498,9 @@ public class AudioKitService: ObservableObject {
         // Calculate RMS level in dB for professional standards
         let rmsLevelDB = rms > 0 ? 20 * log10(rms) : -100.0
         
-        // Detect clipping
-        let clippingThreshold: Float = 0.99 // 99% of max amplitude
+        // Detect ACTUAL clipping (only when samples exceed 0 dBFS, not when they touch it)
+        // Professional mastered tracks often peak at exactly 1.0 (0 dBFS) - this is NORMAL!
+        let clippingThreshold: Float = 1.01 // 101% of max amplitude (TRUE clipping only)
         let hasClipping = samples.contains { abs($0) >= clippingThreshold }
         
         // Enhanced clipping detection - check for sustained peaks
@@ -2701,6 +2704,7 @@ enum AudioKitError: Error {
     /// Based on: https://chat.com analysis of mixing characteristics
     /// RE-ENABLED with improved detection patterns for bass-heavy and frequency-imbalanced tracks
     private func detectUnmixedAudio(
+        fileName: String,
         dynamicRange: Double,
         loudness: Double,
         peakLevel: Double,
@@ -2730,17 +2734,19 @@ enum AudioKitError: Error {
         // Professional mixes are ALWAYS checked for mono compatibility
         // ========================================
         
-        // Severe mono issues (<50%) - Almost never in professional mixes
-        let veryPoorMonoTest = monoCompatibility < 0.5
-        detectionCriteria["Very Poor Mono (<50%)"] = veryPoorMonoTest
+        // Severe mono issues (<30%) - Almost never in professional mixes
+        // FIXED: Changed from <50% to <30% - Rock/Metal with wide stereo (40-60% mono) is NORMAL
+        let veryPoorMonoTest = monoCompatibility < 0.3
+        detectionCriteria["Very Poor Mono (<30%)"] = veryPoorMonoTest
         if veryPoorMonoTest {
             failedTests += 4  // Extremely high weight - this alone is a huge red flag
             recommendations.append("🚨 CRITICAL: Mono compatibility (\(String(format: "%.0f", monoCompatibility * 100))%) - severe phase issues")
         }
-        
-        // Poor mono issues (50-60%) - Uncommon in professional mixes
-        let poorMonoTest = monoCompatibility >= 0.5 && monoCompatibility < 0.6
-        detectionCriteria["Poor Mono (50-60%)"] = poorMonoTest
+
+        // Poor mono issues (30-45%) - Uncommon in professional mixes but can happen
+        // FIXED: Changed from 50-60% to 30-45% - Allows 45-70% for professional wide stereo mixes
+        let poorMonoTest = monoCompatibility >= 0.3 && monoCompatibility < 0.45
+        detectionCriteria["Poor Mono (30-45%)"] = poorMonoTest
         if poorMonoTest {
             failedTests += 2  // Significant weight
             recommendations.append("⚠️ Poor mono compatibility (\(String(format: "%.0f", monoCompatibility * 100))%) - phase issues need fixing")
@@ -2752,11 +2758,12 @@ enum AudioKitError: Error {
         // ========================================
         
         // Extreme panning issues: Too narrow (mono/raw) or too wide (amateur)
-        let extremePanningTest = stereoWidth < 0.4 || stereoWidth > 1.8
+        // FIXED: Changed from 0.4 to 0.25 - Professional mono-focused mixes (30-40% width) are valid
+        let extremePanningTest = stereoWidth < 0.25 || stereoWidth > 1.8
         detectionCriteria["Extreme Panning"] = extremePanningTest
         if extremePanningTest {
             failedTests += 2  // High weight - clear sign of poor mixing
-            if stereoWidth < 0.4 {
+            if stereoWidth < 0.25 {
                 recommendations.append("🔇 Extremely narrow stereo image (\(String(format: "%.0f", stereoWidth * 100))%) - sounds mono/unmixed")
             } else {
                 recommendations.append("⚡ Excessively wide stereo (\(String(format: "%.0f", stereoWidth * 100))%) - amateur over-panning")
@@ -2786,11 +2793,13 @@ enum AudioKitError: Error {
         }
         
         // Light compression only: Moderate indicators
+        // FIXED: Reduced penalty from 1 to 0 points - intentionally dynamic masters (jazz/classical) are valid
+        // Note: This test is kept for informational purposes but won't contribute to unmixed detection
         let lightCompressionTest = !noCompressionTest && (dynamicRange > 14.0 || crestFactor > 12.0)
         detectionCriteria["Light Compression"] = lightCompressionTest
         if lightCompressionTest {
-            failedTests += 1
-            recommendations.append("Minimal compression - needs more dynamic control")
+            // No penalty - dynamic mixes are a valid artistic choice
+            recommendations.append("💡 Intentionally dynamic - suitable for certain genres (jazz, classical, acoustic)")
         }
         
         // ========================================
@@ -2875,31 +2884,35 @@ enum AudioKitError: Error {
         
         // Poor Processing Pattern #1: Narrow + Wild Dynamics + Clipping
         // This is a clear sign of unmixed or badly processed audio
+        // FIXED: Reduced penalty from 3 to 2 points - less harsh on edge cases
         let poorProcessingPattern1 = stereoWidth < 0.35 && loudnessRange > 20.0 && peakLevel > -1.0
         detectionCriteria["Poor Processing (Narrow+Wild+Clip)"] = poorProcessingPattern1
         if poorProcessingPattern1 {
-            failedTests += 3  // Very high weight - this combo is a clear red flag
+            failedTests += 2  // Reduced from 3 - still significant but less harsh
             recommendations.append("🚨 Multiple processing issues: narrow stereo (\(String(format: "%.0f", stereoWidth * 100))%) + uncontrolled dynamics (\(String(format: "%.1f", loudnessRange))LU) + clipping")
         }
-        
+
         // Poor Processing Pattern #2: High LRA + Low CF = Uncompressed but loud
         // Professional mixes don't have this combination
+        // FIXED: Reduced penalty from 2 to 1 point - less harsh on dynamic masters
         let poorProcessingPattern2 = loudnessRange > 18.0 && crestFactor < 10.0 && loudness > -18.0
         detectionCriteria["Poor Processing (Wild+Loud)"] = poorProcessingPattern2
         if poorProcessingPattern2 {
-            failedTests += 2  // High weight
+            failedTests += 1  // Reduced from 2 - less harsh on intentionally dynamic mixes
             recommendations.append("⚡ Conflicting dynamics: high loudness range (\(String(format: "%.1f", loudnessRange))LU) without proper compression - inconsistent processing")
         }
         
         // ========================================
         // COMPOSITE SCORING
-        // Maximum: 4+2+2+1+3+1+3+1+3+1+1+1+1+3+2 = 29 points
-        // AGGRESSIVE THRESHOLD: 3+ points = Unmixed (very sensitive detection)
-        // RATIONALE: Better to flag borderline cases as unmixed than score them too high
+        // UPDATED AFTER FIXES: Maximum = 4+2+2+1+3+0+3+1+3+1+1+1+1+2+1 = 26 points
+        // Previous: 4+2+2+1+3+1+3+1+3+1+1+1+1+3+2 = 29 points
+        // Changes: Light Compression (1→0), Pattern1 (3→2), Pattern2 (2→1)
+        // CONSERVATIVE THRESHOLD: 11+ points = Unmixed (balanced detection)
+        // RATIONALE: Avoid false positives on professional mixes while catching truly unmixed tracks
         // ========================================
-        
+
         let totalTests = 15
-        let maxPoints = 29.0
+        let maxPoints = 26.0  // Updated from 29.0 to reflect reduced penalties
         let confidenceScore = (Double(failedTests) / maxPoints) * 100.0
         
         // MULTIPLE UNMIXED DETECTION PATTERNS:
@@ -2925,22 +2938,99 @@ enum AudioKitError: Error {
         let rawPeaksPattern = peakLevel > -0.5 && loudness < -18.0  // Changed: more extreme
         
         // Pattern 7: Severe frequency imbalance + low loudness = unmixed
-        let severeFreqImbalance = ((spectralBalance.subBassEnergy + spectralBalance.bassEnergy) > 0.70 || 
-                                   (spectralBalance.highMidEnergy + spectralBalance.presenceEnergy + spectralBalance.airEnergy) < 0.03) && 
+        let severeFreqImbalance = ((spectralBalance.subBassEnergy + spectralBalance.bassEnergy) > 0.70 ||
+                                   (spectralBalance.highMidEnergy + spectralBalance.presenceEnergy + spectralBalance.airEnergy) < 0.03) &&
                                    loudness < -15.0
-        
-        // VERY CONSERVATIVE: Need MANY failed tests (10+) OR critical patterns
-        // Professional mixes should easily pass with <10 failures
-        let isLikelyUnmixed = failedTests >= 10 || criticalMonoFailure || 
-                              (unmixedPattern1 && unmixedPattern2) ||  // Need BOTH patterns
-                              (bassHeavyUnmixed && severeFreqImbalance) ||  // Need BOTH
-                              (unprocessedPattern && rawPeaksPattern)  // Need BOTH
+
+        // ========================================
+        // INTELLIGENT MULTI-TIER DETECTION SYSTEM
+        // Consider ALL possibilities before flagging as unmixed:
+        // 1. Professional studio masters (Abbey Road, Sterling Sound, etc.) - Dynamic preservation
+        // 2. Streaming-optimized masters (-16 to -14 LUFS with controlled dynamics)
+        // 3. Amateur mixes (learning mixers checking their work)
+        // 4. Professional mix engineers (pre-masters with intentional headroom)
+        // 5. Truly unmixed/raw recordings
+        // ========================================
+
+        // TIER 1: OBVIOUSLY UNMIXED - Very conservative, only flag clear cases
+        let extremeDynamicRange = dynamicRange > 25.0  // No master would EVER have >25dB DR
+        let veryLowLoudness = loudness < -25.0  // Changed from -22 to -25 (more conservative)
+        let criticallyUnprocessed = dynamicRange > 20.0 && crestFactor > 18.0 && loudnessRange > 20.0
+
+        // TIER 2: PROFESSIONAL DYNAMIC MASTER DETECTION (Abbey Road, jazz, classical)
+        // These should PASS as mastered, not flagged as unmixed
+        let isProfessionalDynamicMaster = (
+            loudness >= -18.0 && loudness <= -12.0 &&  // Professional loudness range
+            dynamicRange >= 12.0 && dynamicRange <= 20.0 &&  // Intentional dynamics (not over-compressed)
+            peakLevel > -3.0 &&  // Proper peak optimization
+            crestFactor < 18.0  // Some compression applied
+        )
+
+        // TIER 3: STREAMING-ERA MASTER DETECTION (-16 LUFS target)
+        // Abbey Road and modern studios often master to -16 LUFS for streaming
+        let isStreamingMaster = (
+            loudness >= -18.0 && loudness <= -13.0 &&  // Streaming sweet spot
+            dynamicRange >= 8.0 && dynamicRange <= 18.0 &&  // Controlled but dynamic
+            peakLevel > -3.0 &&  // Optimized peaks
+            monoCompatibility > 0.40  // Basic compatibility check
+        )
+
+        // TIER 4: AMATEUR/LEARNING MIXER DETECTION
+        // Good effort but needs improvement - score fairly but provide guidance
+        let isAmateurMix = (
+            loudness >= -20.0 && loudness <= -12.0 &&  // Reasonable loudness attempt
+            dynamicRange >= 6.0 && dynamicRange <= 22.0 &&  // Some compression applied
+            peakLevel > -12.0 &&  // Not severely under-leveled
+            failedTests < 10  // Not completely broken
+        )
+
+        // TIER 5: PRE-MASTER MIX DETECTION (professional mix engineer work)
+        let isPreMaster = (
+            loudness >= -23.0 && loudness <= -12.0 &&  // Pre-master range
+            dynamicRange >= 8.0 && dynamicRange <= 20.0 &&  // Proper mixing dynamics
+            peakLevel >= -10.0 && peakLevel <= -3.0 &&  // Good headroom for mastering
+            monoCompatibility > 0.45  // Mixed properly
+        )
+
+        // TIER 6: TRULY UNMIXED - Only flag if it doesn't match ANY professional pattern
+        let isTrulyUnmixed = (
+            !isProfessionalDynamicMaster &&
+            !isStreamingMaster &&
+            !isAmateurMix &&
+            !isPreMaster &&
+            (
+                extremeDynamicRange ||  // Extreme DR (>25dB)
+                veryLowLoudness ||  // Very quiet (<-25 LUFS)
+                criticallyUnprocessed ||  // Completely raw
+                (loudness < -22.0 && dynamicRange > 18.0 && crestFactor > 16.0) ||  // Unprocessed combo
+                (failedTests >= 10) ||  // Many technical failures
+                criticalMonoFailure  // Critical phase issues
+            )
+        )
+
+        // FINAL DECISION: Use intelligent classification
+        let isLikelyUnmixed = isTrulyUnmixed
         
         // Calculate mixing quality score
         let mixingQualityScore = max(0, 100.0 - (Double(failedTests) / maxPoints * 100.0))
-        
-        // DEBUG: Print unmixed detection details
-        print("🔍 UNMIXED DETECTION:")
+
+        // Determine track classification for better context
+        var trackClassification = "Unknown"
+        if isProfessionalDynamicMaster {
+            trackClassification = "Professional Dynamic Master (Abbey Road style)"
+        } else if isStreamingMaster {
+            trackClassification = "Streaming-Optimized Master (-16 LUFS)"
+        } else if isAmateurMix {
+            trackClassification = "Amateur/Learning Mix"
+        } else if isPreMaster {
+            trackClassification = "Professional Pre-Master Mix"
+        } else if isTrulyUnmixed {
+            trackClassification = "Unmixed/Raw Recording"
+        }
+
+        // DEBUG: Print intelligent detection details
+        print("🔍 INTELLIGENT TRACK ANALYSIS: \(fileName)")
+        print("  📊 CLASSIFICATION: \(trackClassification)")
         print("  Failed Tests: \(failedTests)/\(Int(maxPoints)) points")
         print("  Mono Compatibility: \(String(format: "%.1f", monoCompatibility * 100))%")
         print("  Stereo Width: \(String(format: "%.1f", stereoWidth * 100))%")
@@ -2950,14 +3040,17 @@ enum AudioKitError: Error {
         print("  Peak Level: \(String(format: "%.1f", peakLevel)) dBFS")
         print("  Bass+Low-Mid+Sub: \(String(format: "%.1f", (spectralBalance.subBassEnergy + spectralBalance.bassEnergy + spectralBalance.lowMidEnergy) * 100))%")
         print("  High Freqs (HM+P+A): \(String(format: "%.1f", (spectralBalance.highMidEnergy + spectralBalance.presenceEnergy + spectralBalance.airEnergy) * 100))%")
-        print("  Pattern Checks:")
-        print("    - Critical Mono Failure (<45%): \(criticalMonoFailure)")
-        print("    - Low Loud + High DR: \(unmixedPattern1)")
-        print("    - Low Loud + Narrow: \(unmixedPattern2)")
-        print("    - Bass Heavy (>70%): \(bassHeavyUnmixed)")
-        print("    - Unprocessed (High CF + Low Loud): \(unprocessedPattern)")
-        print("    - Raw Peaks (0dB + Low Loud): \(rawPeaksPattern)")
-        print("    - Severe Freq Imbalance: \(severeFreqImbalance)")
+        print("  🎯 TIER DETECTION:")
+        print("    - Professional Dynamic Master: \(isProfessionalDynamicMaster)")
+        print("    - Streaming Master: \(isStreamingMaster)")
+        print("    - Amateur Mix: \(isAmateurMix)")
+        print("    - Pre-Master: \(isPreMaster)")
+        print("    - Truly Unmixed: \(isTrulyUnmixed)")
+        print("  🚨 EXTREME PATTERNS:")
+        print("    - Extreme DR (>25 dB): \(extremeDynamicRange)")
+        print("    - Very Low Loudness (<-25 LUFS): \(veryLowLoudness)")
+        print("    - Critically Unprocessed: \(criticallyUnprocessed)")
+        print("    - Critical Mono Failure (<30%): \(criticalMonoFailure)")
         print("  ➡️ isLikelyUnmixed: \(isLikelyUnmixed)")
         print("  Mixing Quality Score: \(String(format: "%.1f", mixingQualityScore))%")
         

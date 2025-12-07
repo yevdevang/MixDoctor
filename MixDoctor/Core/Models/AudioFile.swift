@@ -166,11 +166,33 @@ public final class AnalysisResult {
     
     // Mixing Status
     var isProfessionallyMixed: Bool  // True if mixed, False if unmixed recording
-    
+
     // Full FFT Spectrum Data for professional analyzer visualization
-    var frequencySpectrum: [Float]?  // Full FFT magnitudes for spectrum display
+    // FIXED: Use @Transient with Data backing to prevent SwiftData detachment crashes
+    @Transient
+    var frequencySpectrum: [Float]? {
+        get {
+            guard let data = frequencySpectrumData else { return nil }
+            // Convert Data back to [Float]
+            let floatCount = data.count / MemoryLayout<Float>.size
+            return data.withUnsafeBytes { buffer in
+                Array(buffer.bindMemory(to: Float.self).prefix(floatCount))
+            }
+        }
+        set {
+            guard let floats = newValue else {
+                frequencySpectrumData = nil
+                return
+            }
+            // Convert [Float] to Data
+            frequencySpectrumData = floats.withUnsafeBytes { buffer in
+                Data(buffer)
+            }
+        }
+    }
+    var frequencySpectrumData: Data?  // Backing storage for spectrum data
     var spectrumSampleRate: Double?  // Sample rate used for FFT
-    
+
     // Unmixed Detection Result (stored as JSON data)
     @Transient
     var unmixedDetection: UnmixedDetectionResult? {
@@ -234,8 +256,8 @@ public final class AnalysisResult {
         self.isReadyForMastering = false
         self.isProfessionallyMixed = true  // Assume mixed until proven otherwise
         
-        // Initialize spectrum data
-        self.frequencySpectrum = nil
+        // Initialize spectrum data backing storage
+        self.frequencySpectrumData = nil
         self.spectrumSampleRate = nil
     }
 }

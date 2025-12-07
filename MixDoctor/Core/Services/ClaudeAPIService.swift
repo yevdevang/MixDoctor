@@ -127,28 +127,69 @@ class ClaudeAPIService {
             print("🚨 UNMIXED TRACK DETECTED - not mastered")
             return false
         }
-        
-        // FIXED: Previous version was TOO STRICT - Abbey Road masters were being scored as pre-masters!
-        // Mastered tracks typically have MOST (3 out of 4) of these characteristics:
-        // 1. High peak levels (>-3dB) - mastered tracks are close to 0dB
-        // 2. Moderate dynamic range (4-15dB) - professional masters vary by genre
-        // 3. Optimized loudness (-6 to -25 LUFS) - wide range for different streaming platforms
-        // 4. High RMS levels (>-16dB) - indicates proper loudness optimization
-        
-        let hasHighPeaks = metrics.peakLevel > -3.0  // Relaxed from >-2.0
-        let hasModerateToLowDynamicRange = metrics.dynamicRange < 15.0  // Relaxed from <12.0
-        let hasOptimizedLoudness = metrics.loudness > -25.0 && metrics.loudness < -6.0  // Widened from -8 to -23
-        let hasHighRMS = metrics.rmsLevel > -16.0  // Relaxed from >-14.0
-        
-        // Require 3 out of 4 criteria (not ALL 4) - more realistic for professional masters
-        let criteriaCount = [hasHighPeaks, hasModerateToLowDynamicRange, hasOptimizedLoudness, hasHighRMS].filter { $0 }.count
-        let isMastered = criteriaCount >= 3
-        
+
+        // INTELLIGENT MASTERED TRACK DETECTION
+        // Consider multiple professional mastering styles:
+
+        // 1. PROFESSIONAL DYNAMIC MASTERS (Abbey Road, jazz, classical, audiophile)
+        // - Loudness: -18 to -12 LUFS (intentionally dynamic)
+        // - Dynamic Range: 12-20 dB (preserves dynamics)
+        // - Peak Level: -3 to 0 dBFS (properly optimized)
+        let isProfessionalDynamic = (
+            metrics.loudness >= -18.0 && metrics.loudness <= -12.0 &&
+            metrics.dynamicRange >= 12.0 && metrics.dynamicRange <= 20.0 &&
+            metrics.peakLevel > -3.0
+        )
+
+        // 2. STREAMING-OPTIMIZED MASTERS (-16 to -14 LUFS target)
+        // - Loudness: -18 to -13 LUFS (streaming sweet spot)
+        // - Dynamic Range: 8-18 dB (controlled but musical)
+        // - Peak Level: -2 to 0 dBFS (optimized)
+        let isStreamingOptimized = (
+            metrics.loudness >= -18.0 && metrics.loudness <= -13.0 &&
+            metrics.dynamicRange >= 8.0 && metrics.dynamicRange <= 18.0 &&
+            metrics.peakLevel > -2.0
+        )
+
+        // 3. COMPETITIVE LOUD MASTERS (modern pop, EDM)
+        // - Loudness: -10 to -6 LUFS (very loud)
+        // - Dynamic Range: 4-10 dB (heavily compressed)
+        // - Peak Level: -1 to 0 dBFS (maximized)
+        let isCompetitiveLoud = (
+            metrics.loudness >= -10.0 && metrics.loudness <= -6.0 &&
+            metrics.dynamicRange >= 4.0 && metrics.dynamicRange <= 10.0 &&
+            metrics.peakLevel > -1.0
+        )
+
+        // 4. BALANCED COMMERCIAL MASTERS (most professional releases)
+        // - Loudness: -14 to -8 LUFS (industry standard)
+        // - Dynamic Range: 6-14 dB (balanced)
+        // - Peak Level: -2 to 0 dBFS (professional)
+        let isBalancedCommercial = (
+            metrics.loudness >= -14.0 && metrics.loudness <= -8.0 &&
+            metrics.dynamicRange >= 6.0 && metrics.dynamicRange <= 14.0 &&
+            metrics.peakLevel > -2.0
+        )
+
+        // Track is mastered if it matches ANY professional mastering style
+        let isMastered = isProfessionalDynamic || isStreamingOptimized ||
+                        isCompetitiveLoud || isBalancedCommercial
+
         // Enhanced debug logging
         if isMastered {
+            if isProfessionalDynamic {
+                print("✅ DETECTED: Professional Dynamic Master (Abbey Road style)")
+            } else if isStreamingOptimized {
+                print("✅ DETECTED: Streaming-Optimized Master (-16 LUFS)")
+            } else if isCompetitiveLoud {
+                print("✅ DETECTED: Competitive Loud Master")
+            } else if isBalancedCommercial {
+                print("✅ DETECTED: Balanced Commercial Master")
+            }
         } else {
+            print("📝 DETECTED: Pre-Master Mix or Amateur Mix")
         }
-        
+
         return isMastered
     }
     

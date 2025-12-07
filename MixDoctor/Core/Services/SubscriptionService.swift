@@ -32,12 +32,19 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
     private let proResetDateKey = "proAnalysisResetDate"
     private let cloudStore = NSUbiquitousKeyValueStore.default
     
+    // Total analysis tracking (for rating prompts)
+    private let totalAnalysisCountKey = "totalAnalysisCount"
+    
     var remainingProAnalyses: Int = 50
     var proAnalysisResetDate: Date?
     
     var remainingFreeAnalyses: Int {
         let count = UserDefaults.standard.integer(forKey: analysisCountKey)
         return max(0, freeAnalysisLimit - count)
+    }
+    
+    var totalAnalysisCount: Int {
+        UserDefaults.standard.integer(forKey: totalAnalysisCountKey)
     }
     
     var hasReachedFreeLimit: Bool {
@@ -198,6 +205,10 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
     // MARK: - Usage Tracking
     
     func incrementAnalysisCount() {
+        // Increment total analysis count (for rating prompts)
+        let totalCount = UserDefaults.standard.integer(forKey: totalAnalysisCountKey)
+        UserDefaults.standard.set(totalCount + 1, forKey: totalAnalysisCountKey)
+        
         if isProUser {
             // Decrement Pro monthly limit
             remainingProAnalyses = max(0, remainingProAnalyses - 1)
@@ -207,6 +218,9 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
             let currentCount = UserDefaults.standard.integer(forKey: analysisCountKey)
             UserDefaults.standard.set(currentCount + 1, forKey: analysisCountKey)
         }
+        
+        // Check if we should show rating prompt
+        checkForRatingPrompt()
     }
     
     func canPerformAnalysis() -> Bool {
@@ -269,6 +283,26 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
         let savedCount = cloudStore.longLong(forKey: proAnalysisCountKey)
         remainingProAnalyses = savedCount > 0 ? Int(savedCount) : proMonthlyLimit
         proAnalysisResetDate = cloudStore.object(forKey: proResetDateKey) as? Date
+    }
+    
+    // MARK: - Rating Prompt
+    
+    private func checkForRatingPrompt() {
+        let ratingService = RatingService.shared
+        let shouldShow = ratingService.shouldShowRating(
+            analysisCount: totalAnalysisCount,
+            isProUser: isProUser,
+            isInTrialPeriod: isInTrialPeriod
+        )
+        
+        if shouldShow {
+            // Delay slightly to avoid interrupting the user
+            Task {
+                try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second delay
+                ratingService.requestRating()
+                ratingService.markRatingAsShown(isProUser: isProUser, isInTrialPeriod: isInTrialPeriod)
+            }
+        }
     }
     
     // MARK: - Helper Methods
