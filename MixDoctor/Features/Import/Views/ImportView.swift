@@ -295,22 +295,33 @@ struct ImportView: View {
 
     private func importProgressView(progress: Double) -> some View {
         VStack(spacing: 12) {
+            HStack(spacing: 12) {
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .scaleEffect(0.8)
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Importing files…")
+                        .font(.headline)
+                    
+                    if progress > 0 {
+                        Text("\(Int(progress * 100))% complete")
+                            .font(.caption)
+                            .foregroundStyle(Color.secondaryText)
+                    }
+                }
+                
+                Spacer()
+            }
+            
             if progress > 0 {
-                ProgressView(value: progress, total: 1) {
-                    Text("Importing files…")
-                        .font(.headline)
-                }
-                .progressViewStyle(.linear)
-
-                Text("\(Int(progress * 100))% complete")
-                    .font(.caption)
-                    .foregroundStyle(Color.secondaryText)
+                ProgressView(value: progress, total: 1)
+                    .progressViewStyle(.linear)
+                    .tint(.accentColor)
             } else {
-                ProgressView {
-                    Text("Importing files…")
-                        .font(.headline)
-                }
-                .progressViewStyle(.linear)
+                ProgressView()
+                    .progressViewStyle(.linear)
+                    .tint(.accentColor)
             }
         }
         .padding()
@@ -333,10 +344,24 @@ struct ImportView: View {
     private func handleFileImport(_ result: Result<[URL], Error>) {
         guard let viewModel else { return }
 
+        print("\n" + String(repeating: "🔥", count: 40))
+        print("🔥 IMPORT VIEW: handleFileImport called")
+        print(String(repeating: "🔥", count: 40))
+        
         switch result {
         case .success(let urls):
+            print("✅ File picker success: \(urls.count) file(s) selected")
+            for (index, url) in urls.enumerated() {
+                print("   File \(index + 1): \(url.lastPathComponent)")
+                print("      Path: \(url.path)")
+                print("      Is security scoped: \(url.startAccessingSecurityScopedResource())")
+                url.stopAccessingSecurityScopedResource()
+            }
+            
             Task {
+                print("📞 Calling viewModel.importFiles with \(urls.count) URL(s)")
                 await viewModel.importFiles(urls)
+                print("✅ viewModel.importFiles completed")
                 
                 // Just select the first file, don't auto-play or switch tabs
                 if !viewModel.importedFiles.isEmpty && selectedAudioFile == nil {
@@ -344,9 +369,12 @@ struct ImportView: View {
                 }
             }
         case .failure(let error):
+            print("❌ File picker failed: \(error.localizedDescription)")
             viewModel.errorMessage = error.localizedDescription
             viewModel.showError = true
         }
+        
+        print(String(repeating: "🔥", count: 40) + "\n")
     }
 
     private func deleteFiles(at offsets: IndexSet, viewModel: ImportViewModel) {

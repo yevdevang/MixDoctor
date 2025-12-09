@@ -898,29 +898,41 @@ struct DashboardView: View {
     }
 
     private func deleteFiles(at offsets: IndexSet) {
+        print("🗑️ DashboardView.deleteFiles: Starting deletion of \(offsets.count) file(s)")
+        
         for index in offsets {
             let file = filteredFiles[index]
+            print("🗑️ Deleting: \(file.fileName)")
             
             // Delete the actual audio file from storage (iCloud or local)
             // Using iCloudStorageService ensures proper eviction and cross-device sync
             let fileURL = file.fileURL
             do {
                 try iCloudStorageService.shared.deleteAudioFile(at: fileURL)
-                print("🗑️ Deleted file: \(file.fileName)")
+                print("✅ File deleted from storage: \(file.fileName)")
             } catch {
                 print("❌ Failed to delete file \(file.fileName): \(error.localizedDescription)")
             }
         
             // Delete the analysis result JSON from iCloud Drive
             AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: file.fileName)
+            print("✅ Analysis result deleted for: \(file.fileName)")
         
             // Delete the SwiftData record (CloudKit will sync this deletion)
+            print("🗑️ Deleting database record for: \(file.fileName)")
             modelContext.delete(file)
         }
-        try? modelContext.save()
+        
+        do {
+            try modelContext.save()
+            print("✅ Database records deleted and saved for \(offsets.count) file(s)")
+        } catch {
+            print("❌ CRITICAL: Failed to save database deletions: \(error.localizedDescription)")
+        }
         
         // Notify other views that files were deleted
         NotificationCenter.default.post(name: .audioFileDeleted, object: nil)
+        print("✅ Deletion complete for \(offsets.count) file(s)")
     }
 }
 

@@ -131,58 +131,84 @@ final class ImportViewModel {
             return false
         }
         
+        print("🔍 ImportViewModel.isDuplicate: Checking \(file.fileName) against \(allFiles.count) existing files")
         
         // Check for exact match on fileName and fileSize
         // Duration check within 1 second tolerance (for encoding variations)
         for existingFile in allFiles {
+            // Skip comparing the file to itself (same object ID)
+            if existingFile.id == file.id {
+                print("   ⏭️ Skipping self-comparison")
+                continue
+            }
+            
             let sameFileName = existingFile.fileName == file.fileName
             let sameFileSize = existingFile.fileSize == file.fileSize
             let similarDuration = abs(existingFile.duration - file.duration) < 1.0
             
             if sameFileName {
+                print("   🔍 Found matching fileName: \(existingFile.fileName)")
             }
             
             if sameFileName && sameFileSize && similarDuration {
+                print("   ⚠️ Potential duplicate found!")
                 // Before treating as duplicate, verify the existing file actually exists
                 let existingFileURL = existingFile.fileURL
                 let fileExists = FileManager.default.fileExists(atPath: existingFileURL.path)
                 
+                print("   File exists check: \(fileExists) at \(existingFileURL.path)")
+                
                 if !fileExists {
                     // File record exists but file is missing - remove the stale record
+                    print("   🗑️ Removing stale record")
                     modelContext.delete(existingFile)
                     try? modelContext.save()
                     return false // Not a duplicate since existing file is gone
                 }
                 
+                print("   ❌ DUPLICATE CONFIRMED")
                 return true // It's a real duplicate
             }
         }
         
+        print("   ✅ NOT a duplicate")
         return false
     }
 
     func removeImportedFile(_ file: AudioFile) {
+        print("🗑️ ImportViewModel.removeImportedFile: Starting deletion of \(file.fileName)")
         
         // Delete the actual audio file from storage (iCloud or local)
         // Using iCloudStorageService ensures proper eviction and cross-device sync
         let fileURL = file.fileURL
         do {
             try iCloudStorageService.shared.deleteAudioFile(at: fileURL)
-            print("🗑️ Deleted file: \(file.fileName)")
+            print("✅ File deleted from storage: \(file.fileName)")
         } catch {
             print("❌ Failed to delete file \(file.fileName): \(error.localizedDescription)")
         }
         
         // Delete the analysis result JSON from iCloud Drive
         AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: file.fileName)
+        print("✅ Analysis result deleted for: \(file.fileName)")
         
         // Delete the SwiftData record (CloudKit will sync this deletion)
+        print("🗑️ Deleting database record for: \(file.fileName)")
         modelContext.delete(file)
-        try? modelContext.save()
-        importedFiles.removeAll { $0.id == file.id }
+        
+        do {
+            try modelContext.save()
+            print("✅ Database record deleted and saved for: \(file.fileName)")
+        } catch {
+            print("❌ CRITICAL: Failed to save database deletion for \(file.fileName): \(error.localizedDescription)")
+        }
+        
+        // Reload imports to ensure UI is in sync with database
+        loadImports()
         
         // Notify other views that files were deleted
         NotificationCenter.default.post(name: .audioFileDeleted, object: nil)
+        print("✅ Deletion complete for: \(file.fileName)")
     }
     
     // MARK: - Orphaned File Recovery

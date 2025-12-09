@@ -114,6 +114,21 @@ struct iCloudDebugView: View {
             }
             
             Section("Actions") {
+                Button("📋 SHOW ALL DATABASE RECORDS WITH PATHS") {
+                    Task {
+                        await showAllRecordsDetailed()
+                    }
+                }
+                .disabled(isRefreshing || audioFiles.isEmpty)
+                
+                Button("🔥 FORCE DELETE ALL DATABASE RECORDS") {
+                    Task {
+                        await forceDeleteAllDatabaseRecords()
+                    }
+                }
+                .foregroundColor(.red)
+                .disabled(isRefreshing || audioFiles.isEmpty)
+                
                 Button("Refresh Status") {
                     checkStatus()
                 }
@@ -122,6 +137,13 @@ struct iCloudDebugView: View {
                 Button("Remove Duplicate Files") {
                     Task {
                         await removeDuplicates()
+                    }
+                }
+                .disabled(isRefreshing)
+                
+                Button("Clean Up Orphaned Records") {
+                    Task {
+                        await cleanUpOrphanedRecords()
                     }
                 }
                 .disabled(isRefreshing)
@@ -151,6 +173,15 @@ struct iCloudDebugView: View {
                     }
                 }
                 .disabled(isRefreshing)
+                
+                Button(role: .destructive) {
+                    Task {
+                        await clearAllDatabaseRecords()
+                    }
+                } label: {
+                    Label("Clear All Database Records", systemImage: "externaldrive.badge.xmark")
+                }
+                .disabled(isRefreshing || audioFiles.isEmpty)
                 
                 Button(role: .destructive) {
                     showDeleteConfirmation = true
@@ -398,6 +429,219 @@ struct iCloudDebugView: View {
             }
         } else {
             print("✅ No duplicates found")
+        }
+        
+        checkStatus()
+    }
+    
+    private func cleanUpOrphanedRecords() async {
+        isRefreshing = true
+        defer { isRefreshing = false }
+        
+        print("🔍 Cleaning up orphaned records...")
+        
+        var orphanedCount = 0
+        var checkedCount = 0
+        
+        for file in audioFiles {
+            checkedCount += 1
+            let fileURL = file.fileURL
+            var fileExists = FileManager.default.fileExists(atPath: fileURL.path)
+            
+            // On MacCatalyst, check if it's an iCloud file that might need downloading
+            #if targetEnvironment(macCatalyst)
+            if !fileExists && fileURL.path.contains("Mobile Documents") {
+                do {
+                    let resourceValues = try fileURL.resourceValues(forKeys: [.ubiquitousItemDownloadingStatusKey, .ubiquitousItemIsUploadedKey])
+                    if let status = resourceValues.ubiquitousItemDownloadingStatus,
+                       let isUploaded = resourceValues.ubiquitousItemIsUploaded,
+                       isUploaded && (status == .current || status == .notDownloaded) {
+                        // File exists in iCloud, just not downloaded
+                        fileExists = true
+                    }
+                } catch {
+                    // Error checking - treat as doesn't exist
+                }
+            }
+            #endif
+            
+            if !fileExists {
+                print("🗑️ Removing orphaned record: \(file.fileName)")
+                print("   Path: \(fileURL.path)")
+                
+                // Delete analysis result too
+                AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: file.fileName)
+                
+                modelContext.delete(file)
+                orphanedCount += 1
+            }
+        }
+        
+        if orphanedCount > 0 {
+            do {
+                try modelContext.save()
+                print("✅ Removed \(orphanedCount) orphaned record(s) out of \(checkedCount) checked")
+                
+                await MainActor.run {
+                    deleteMessage = "Cleaned up \(orphanedCount) orphaned record(s).\n\nThese were database entries for files that no longer exist."
+                }
+            } catch {
+                print("❌ Failed to save after cleanup: \(error.localizedDescription)")
+                
+                await MainActor.run {
+                    deleteMessage = "Error cleaning up: \(error.localizedDescription)"
+                }
+            }
+        } else {
+            print("✅ No orphaned records found")
+            
+            await MainActor.run {
+                deleteMessage = "No orphaned records found.\n\nAll \(checkedCount) database entries have corresponding files."
+            }
+        }
+        
+        checkStatus()
+    }
+    
+    private func showAllRecordsDetailed() async {
+        isRefreshing = true
+        defer { isRefreshing = false }
+        
+        print("\n" + String(repeating: "=", count: 80))
+        print("📋 DATABASE RECORDS DETAILED DUMP")
+        print(String(repeating: "=", count: 80))
+        
+        // Get fresh list
+        let descriptor = FetchDescriptor<AudioFile>()
+        guard let allRecords = try? modelContext.fetch(descriptor) else {
+            print("❌ Failed to fetch records")
+            return
+        }
+        
+        print("Total records: \(allRecords.count)\n")
+        
+        var audioFilesCount = 0
+        var audioFiles2Count = 0
+        var otherCount = 0
+        
+        for (index, record) in allRecords.enumerated() {
+            let fileURL = record.fileURL
+            let path = fileURL.path
+            let exists = FileManager.default.fileExists(atPath: path)
+            
+            print("Record #\(index + 1):")
+            print("  Name: \(record.fileName)")
+            print("  Full Path: \(path)")
+            print("  File Exists: \(exists ? "✅ YES" : "❌ NO")")
+            print("  Size: \(record.fileSize) bytes")
+            print("  Duration: \(String(format: "%.1f", record.duration))s")
+            
+            // Count folder types
+            if path.contains("/AudioFiles/") {
+                audioFilesCount += 1
+                print("  Folder: AudioFiles")
+            } else if path.contains("/AudioFiles 2/") {
+                audioFiles2Count += 1
+                print("  Folder: ⚠️ AudioFiles 2")
+            } else {
+                otherCount += 1
+                print("  Folder: OTHER")
+            }
+            
+            print("")
+        }
+        
+        print(String(repeating: "=", count: 80))
+        print("SUMMARY:")
+        print("  AudioFiles folder: \(audioFilesCount)")
+        print("  AudioFiles 2 folder: \(audioFiles2Count)")
+        print("  Other folders: \(otherCount)")
+        print(String(repeating: "=", count: 80) + "\n")
+        
+        await MainActor.run {
+            var message = "Database has \(allRecords.count) record(s):\n\n"
+            message += "AudioFiles: \(audioFilesCount)\n"
+            message += "AudioFiles 2: \(audioFiles2Count)\n"
+            message += "Other: \(otherCount)\n\n"
+            message += "See console for full details"
+            deleteMessage = message
+        }
+    }
+    
+    private func forceDeleteAllDatabaseRecords() async {
+        isRefreshing = true
+        defer { isRefreshing = false }
+        
+        print("🔥 FORCE DELETING ALL DATABASE RECORDS")
+        
+        let recordCount = audioFiles.count
+        print("Found \(recordCount) records to delete")
+        
+        // Get fresh list to avoid issues
+        let descriptor = FetchDescriptor<AudioFile>()
+        guard let allRecords = try? modelContext.fetch(descriptor) else {
+            print("❌ Failed to fetch records")
+            await MainActor.run {
+                deleteMessage = "Error: Could not fetch database records"
+            }
+            return
+        }
+        
+        print("Deleting \(allRecords.count) records...")
+        
+        for record in allRecords {
+            print("  🗑️ \(record.fileName)")
+            modelContext.delete(record)
+        }
+        
+        do {
+            try modelContext.save()
+            print("✅ Successfully deleted all \(allRecords.count) records")
+            
+            await MainActor.run {
+                deleteMessage = "✅ Deleted all \(allRecords.count) database records.\n\nYou can now import files fresh!"
+            }
+        } catch {
+            print("❌ Failed to save: \(error.localizedDescription)")
+            
+            await MainActor.run {
+                deleteMessage = "❌ Error: \(error.localizedDescription)"
+            }
+        }
+        
+        checkStatus()
+    }
+    
+    private func clearAllDatabaseRecords() async {
+        isRefreshing = true
+        defer { isRefreshing = false }
+        
+        print("🗑️ Clearing ALL database records...")
+        
+        let recordCount = audioFiles.count
+        
+        for file in audioFiles {
+            print("🗑️ Removing database record: \(file.fileName)")
+            
+            // Also delete analysis results
+            AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: file.fileName)
+            
+            modelContext.delete(file)
+        }
+        
+        do {
+            try modelContext.save()
+            print("✅ Successfully cleared \(recordCount) database record(s)")
+            
+            await MainActor.run {
+                deleteMessage = "Cleared \(recordCount) database record(s).\n\nYou can now import files fresh.\n\nNote: Physical files in iCloud were NOT deleted."
+            }
+        } catch {
+            print("❌ Failed to clear database records: \(error.localizedDescription)")
+            
+            await MainActor.run {
+                deleteMessage = "Error clearing database: \(error.localizedDescription)"
+            }
         }
         
         checkStatus()
