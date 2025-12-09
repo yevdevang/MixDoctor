@@ -20,6 +20,11 @@ struct MixDoctorApp: App {
     @Environment(\.requestReview) private var requestReview
     
     init() {
+        // Configure Mac Catalyst fonts FIRST, before anything else
+        #if targetEnvironment(macCatalyst)
+        Self.configureMacCatalystFonts()
+        #endif
+        
         // Check if user has enabled iCloud sync (default to true for better UX)
         let iCloudEnabled = UserDefaults.standard.object(forKey: "iCloudSyncEnabled") as? Bool ?? true
         
@@ -98,13 +103,51 @@ struct MixDoctorApp: App {
         _ratingService = StateObject(wrappedValue: RatingService.shared)
     }
     
+    #if targetEnvironment(macCatalyst)
+    private static func configureMacCatalystFonts() {
+        // Scale all UIKit fonts by 1.4x (40% larger) for Mac Catalyst
+        let fontScale: CGFloat = 1.4
+        
+        // Navigation bar fonts
+        let navBarAppearance = UINavigationBarAppearance()
+        navBarAppearance.configureWithDefaultBackground()
+        navBarAppearance.largeTitleTextAttributes = [
+            .font: UIFont.systemFont(ofSize: 34 * fontScale, weight: .bold)
+        ]
+        navBarAppearance.titleTextAttributes = [
+            .font: UIFont.systemFont(ofSize: 17 * fontScale, weight: .semibold)
+        ]
+        
+        UINavigationBar.appearance().standardAppearance = navBarAppearance
+        UINavigationBar.appearance().scrollEdgeAppearance = navBarAppearance
+        UINavigationBar.appearance().compactAppearance = navBarAppearance
+        
+        // Tab bar fonts
+        let tabBarAppearance = UITabBarAppearance()
+        tabBarAppearance.configureWithDefaultBackground()
+        let tabBarItemAppearance = UITabBarItemAppearance()
+        tabBarItemAppearance.normal.titleTextAttributes = [
+            .font: UIFont.systemFont(ofSize: 10 * fontScale)
+        ]
+        tabBarItemAppearance.selected.titleTextAttributes = [
+            .font: UIFont.systemFont(ofSize: 10 * fontScale)
+        ]
+        tabBarAppearance.stackedLayoutAppearance = tabBarItemAppearance
+        tabBarAppearance.inlineLayoutAppearance = tabBarItemAppearance
+        tabBarAppearance.compactInlineLayoutAppearance = tabBarItemAppearance
+        
+        UITabBar.appearance().standardAppearance = tabBarAppearance
+        UITabBar.appearance().scrollEdgeAppearance = tabBarAppearance
+    }
+    #endif
+    
     var body: some Scene {
         WindowGroup {
             ZStack {
                 ContentView()
                     .modelContainer(modelContainer)
                     .environmentObject(ratingService)
-                    .macCatalystFontScaling(1.3) // Increase all fonts by 30% on Mac
+                    .macCatalystFontScaling(1.5) // Scale entire UI by 50% on Mac
                     .onChange(of: ratingService.shouldTriggerRating) { _, shouldTrigger in
                         if shouldTrigger {
                             requestReview()

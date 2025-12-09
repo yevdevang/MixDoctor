@@ -29,7 +29,7 @@ struct PaywallView: View {
                     .ignoresSafeArea()
                 
                 ScrollView {
-                    VStack(spacing: 32) {
+                    VStack(spacing: 40) {
                         // Header
                         headerSection
                         
@@ -53,8 +53,9 @@ struct PaywallView: View {
                         // Footer
                         footerSection
                     }
-                    .padding()
-                    .padding(.top, -20)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 20)
+                    .padding(.bottom, 40)
                 }
             }
             .navigationTitle("Upgrade to Pro")
@@ -89,31 +90,30 @@ struct PaywallView: View {
     // MARK: - Header Section
     
     private var headerSection: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 20) {
             Image("mix-doctor-bg")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
-                .frame(width: 100, height: 100)
-                .clipShape(RoundedRectangle(cornerRadius: 22.5, style: .continuous))
+                .frame(width: 120, height: 120)
+                .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
             
             Text("Unlock Pro Features")
-                .font(.title.bold())
+                .font(.largeTitle.bold())
                 .foregroundColor(.black)
             
             Text("Get 50 audio analyses and access to all premium features")
-                .font(.body)
+                .font(.title3)
                 .foregroundColor(.gray)
                 .multilineTextAlignment(.center)
         }
-        .padding(.top)
     }
     
     // MARK: - Features Section
     
     private var featuresSection: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 24) {
             Text("Premium Features")
-                .font(.headline)
+                .font(.title2.weight(.semibold))
                 .foregroundColor(.primary)
             
             PaywallFeatureRow(
@@ -176,11 +176,12 @@ struct PaywallView: View {
                         .tint(.white)
                 } else {
                     Text("Start 3-Day Free Trial")
-                        .font(.headline)
+                        .font(.title3.weight(.semibold))
                 }
             }
             .frame(maxWidth: .infinity)
-            .padding()
+            .padding(.vertical, 18)
+            .padding(.horizontal)
             .background(
                 LinearGradient(
                     colors: [
@@ -192,7 +193,7 @@ struct PaywallView: View {
                 )
             )
             .foregroundColor(.white)
-            .cornerRadius(12)
+            .cornerRadius(14)
         }
         .disabled(selectedPackage == nil || isPurchasing)
         .opacity(selectedPackage == nil ? 0.6 : 1.0)
@@ -211,7 +212,7 @@ struct PaywallView: View {
                     ProgressView()
                 } else {
                     Text("Restore Purchases")
-                        .font(.subheadline)
+                        .font(.headline)
                 }
             }
         }
@@ -221,19 +222,19 @@ struct PaywallView: View {
     // MARK: - Footer Section
     
     private var footerSection: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 12) {
             if let package = selectedPackage {
                 Text("3-day free trial, then \(package.localizedPriceString) per \(package.packageType == .annual ? "year" : "month")")
-                    .font(.caption2.bold())
+                    .font(.caption.weight(.semibold))
                     .foregroundColor(.black)
             }
             
             Text("Free trial gives you 3 analyses to test Pro features. After trial, continue with 3 free analyses/month or get 50 analyses/month with Pro subscription. Cancel anytime.")
-                .font(.caption2)
+                .font(.caption)
                 .foregroundColor(.gray)
                 .multilineTextAlignment(.center)
             
-            HStack(spacing: 12) {
+            HStack(spacing: 16) {
                 Button("Terms") {
                     showTerms = true
                 }
@@ -241,7 +242,7 @@ struct PaywallView: View {
                     showPrivacy = true
                 }
             }
-            .font(.caption2)
+            .font(.caption)
             .foregroundColor(Color(red: 0.435, green: 0.173, blue: 0.871))
         }
     }
@@ -312,18 +313,18 @@ private struct PaywallFeatureRow: View {
     let description: String
     
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
+        HStack(alignment: .center, spacing: 16) {
             Image(systemName: icon)
-                .font(.title3)
+                .font(.title2)
                 .foregroundStyle(Color(red: 0.435, green: 0.173, blue: 0.871))
-                .frame(width: 28)
+                .frame(width: 32)
             
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.headline)
                     .foregroundColor(.black)
                 Text(description)
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundColor(.gray)
             }
             
@@ -357,36 +358,36 @@ private struct PackageCard: View {
     var body: some View {
         Button(action: onTap) {
             HStack {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 10) {
                     HStack {
                         Text(package.storeProduct.localizedTitle)
-                            .font(.headline)
+                            .font(.title3.weight(.semibold))
                             .foregroundColor(.black)
                         
                         if isAnnual {
                             Text("SAVE 33%")
-                                .font(.caption2.bold())
+                                .font(.caption.weight(.semibold))
                                 .foregroundStyle(.white)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
                                 .background(Color.green)
-                                .cornerRadius(4)
+                                .cornerRadius(6)
                         }
                     }
                     
                     if isAnnual {
                         Text("\(pricePerMonth)/month")
-                            .font(.title2.bold())
+                            .font(.title.bold())
                             .foregroundColor(.black)
                         Text("Billed annually as \(package.localizedPriceString)")
-                            .font(.caption)
+                            .font(.subheadline)
                             .foregroundColor(.gray)
                     } else {
                         Text(package.localizedPriceString)
-                            .font(.title2.bold())
+                            .font(.title.bold())
                             .foregroundColor(.black)
                         Text("per month")
-                            .font(.caption)
+                            .font(.subheadline)
                             .foregroundColor(.gray)
                     }
                 }
@@ -394,14 +395,14 @@ private struct PackageCard: View {
                 Spacer()
                 
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .font(.title2)
+                    .font(.title)
                     .foregroundStyle(isSelected ? Color(red: 0.435, green: 0.173, blue: 0.871) : .secondary)
             }
-            .padding()
+            .padding(20)
             .background(isSelected ? Color(red: 0.435, green: 0.173, blue: 0.871).opacity(0.1) : Color.white)
-            .cornerRadius(12)
+            .cornerRadius(16)
             .overlay(
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: 16)
                     .stroke(isSelected ? Color(red: 0.435, green: 0.173, blue: 0.871) : Color.secondary.opacity(0.2), lineWidth: 2)
             )
         }

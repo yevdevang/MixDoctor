@@ -137,7 +137,12 @@ final class PlayerViewModel {
     private func generateWaveform() {
         // Generate sample waveform data for visualization
         // In a real implementation, this would extract actual audio samples
+        #if targetEnvironment(macCatalyst)
+        // More segments on Mac for better detail
+        waveformSamples = (0..<200).map { _ in Float.random(in: -1...1) }
+        #else
         waveformSamples = (0..<100).map { _ in Float.random(in: -1...1) }
+        #endif
     }
     
     // MARK: - Playback Controls

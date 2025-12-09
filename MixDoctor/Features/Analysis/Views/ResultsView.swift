@@ -76,6 +76,11 @@ struct ResultsView: View {
                     await performAnalysis()
                 }
             })
+            #if targetEnvironment(macCatalyst)
+            .frame(width: 850, height: 1100)
+            #endif
+            .presentationDetents([.large])
+            .presentationContentInteraction(.scrolls)
         }
         .alert("Analysis Error", isPresented: $showError) {
             Button("OK", role: .cancel) { }

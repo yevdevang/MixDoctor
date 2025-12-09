@@ -29,6 +29,10 @@ struct DashboardView: View {
     @State private var navigateToFile: AudioFile?
     @State private var hasPerformedInitialSync = false // Track if we've done initial sync
     @State private var isScanning = false // Prevent concurrent scans
+    #if targetEnvironment(macCatalyst)
+    @State private var fileToDelete: AudioFile?
+    @State private var showDeleteConfirmation = false
+    #endif
 
     enum FilterOption: String, CaseIterable {
         case all = "All"
@@ -198,7 +202,12 @@ struct DashboardView: View {
             #if canImport(UIKit)
             // Set navigation title color to purple
             let appearance = UINavigationBarAppearance()
+            #if targetEnvironment(macCatalyst)
+            appearance.configureWithTransparentBackground()
+            appearance.shadowColor = nil
+            #else
             appearance.configureWithDefaultBackground()
+            #endif
             appearance.largeTitleTextAttributes = [.foregroundColor: UIColor(red: 0.435, green: 0.173, blue: 0.871, alpha: 1.0)]
             appearance.titleTextAttributes = [.foregroundColor: UIColor(red: 0.435, green: 0.173, blue: 0.871, alpha: 1.0)]
             
@@ -274,6 +283,24 @@ struct DashboardView: View {
                 await scanAndImportFromiCloud()
             }
         }
+        #if targetEnvironment(macCatalyst)
+        .alert("Delete File", isPresented: $showDeleteConfirmation) {
+            Button("Cancel", role: .cancel) {
+                fileToDelete = nil
+            }
+            Button("Delete", role: .destructive) {
+                if let file = fileToDelete,
+                   let index = filteredFiles.firstIndex(where: { $0.id == file.id }) {
+                    deleteFiles(at: IndexSet(integer: index))
+                }
+                fileToDelete = nil
+            }
+        } message: {
+            if let file = fileToDelete {
+                Text("Are you sure you want to delete '\(file.fileName)'? This will remove it from all your devices.")
+            }
+        }
+        #endif
     }
 
     // MARK: - Statistics View
@@ -312,7 +339,9 @@ struct DashboardView: View {
             )
         }
         .padding()
+        #if !targetEnvironment(macCatalyst)
         .background(Color.backgroundSecondary)
+        #endif
     }
 
     private var analyzedCount: Int {
@@ -376,12 +405,30 @@ struct DashboardView: View {
                 Button {
                     handleAudioFileSelection(file)
                 } label: {
-                    AudioFileRow(audioFile: file)
+                    AudioFileRow(
+                        audioFile: file,
+                        onDelete: {
+                            #if targetEnvironment(macCatalyst)
+                            fileToDelete = file
+                            showDeleteConfirmation = true
+                            #else
+                            if let index = filteredFiles.firstIndex(where: { $0.id == file.id }) {
+                                deleteFiles(at: IndexSet(integer: index))
+                            }
+                            #endif
+                        }
+                    )
                 }
                 .buttonStyle(PlainButtonStyle())
+                #if targetEnvironment(macCatalyst)
+                .listRowBackground(Color.clear)
+                #endif
             }
             .onDelete(perform: deleteFiles)
         }
+        #if targetEnvironment(macCatalyst)
+        .scrollContentBackground(.hidden)
+        #endif
         .refreshable {
             await iCloudMonitor.syncNow()
             await scanAndImportFromiCloud()
@@ -390,11 +437,38 @@ struct DashboardView: View {
         .navigationDestination(item: $navigateToFile) { file in
             ResultsView(audioFile: file)
         }
+        #if targetEnvironment(macCatalyst)
+        .overlay {
+            if isAnalyzing, let file = analyzingFile {
+                ZStack {
+                    Color.black.opacity(0.5)
+                        .ignoresSafeArea()
+                    
+                    VStack(spacing: 20) {
+                        ProgressView()
+                            .scaleEffect(1.5)
+                            .tint(.white)
+                        
+                        Text("Analyzing \(file.fileName)...")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                    }
+                    .padding(40)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(.ultraThinMaterial)
+                    )
+                }
+                .allowsHitTesting(true)
+            }
+        }
+        #else
         .fullScreenCover(isPresented: $isAnalyzing) {
             if let file = analyzingFile {
                 AnimatedGradientLoader(fileName: file.fileName)
             }
         }
+        #endif
     }
 
     // MARK: - Empty State
@@ -448,8 +522,18 @@ struct DashboardView: View {
             }
             
             // Start analysis with loader
+            #if targetEnvironment(macCatalyst)
+            // On Mac, ensure UI updates on main thread with delay for spinner to show
+            await MainActor.run {
+                analyzingFile = file
+                isAnalyzing = true
+            }
+            // Small delay to allow UI to update and show the spinner
+            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
+            #else
             analyzingFile = file
             isAnalyzing = true
+            #endif
             
             do {
                 
@@ -475,15 +559,32 @@ struct DashboardView: View {
                 
                 
                 // Hide loader and navigate
+                #if targetEnvironment(macCatalyst)
+                await MainActor.run {
+                    isAnalyzing = false
+                    analyzingFile = nil
+                    navigateToFile = file
+                }
+                #else
                 isAnalyzing = false
                 analyzingFile = nil
                 navigateToFile = file
+                #endif
                 
             } catch {
+                #if targetEnvironment(macCatalyst)
+                await MainActor.run {
+                    isAnalyzing = false
+                    analyzingFile = nil
+                    // Still navigate to show error in ResultsView
+                    navigateToFile = file
+                }
+                #else
                 isAnalyzing = false
                 analyzingFile = nil
                 // Still navigate to show error in ResultsView
                 navigateToFile = file
+                #endif
             }
         }
     }

@@ -304,6 +304,14 @@ class ClaudeAPIService {
         // UNMIXED TRACKS - completely different scoring approach
         if isUnmixed {
             return """
+            ⚠️ CRITICAL RESPONSE STYLE REQUIREMENT:
+            In the ANALYSIS and RECOMMENDATIONS sections:
+            - Use CONVERSATIONAL, SIMPLE language
+            - DO NOT mention specific numbers, dB values, percentages, frequencies, LUFS, points, penalties, or bonuses
+            - Describe what you HEAR in plain terms (muddy, clear, bright, dark, balanced, imbalanced, etc.)
+            - Keep recommendations actionable but non-technical (e.g., "Needs more clarity in the low end" instead of "Reduce 200Hz by 3dB")
+            - The scoring details below are for YOUR calculation only - do NOT expose them to the user
+            
             You are analyzing an UNMIXED TRACK - raw multi-track recording that has NOT been mixed or mastered.
             
             ⚠️ CRITICAL CONTEXT: This is RAW UNMIXED AUDIO
@@ -373,24 +381,26 @@ class ClaudeAPIService {
             
             SCORE: [60-75]
             
-            ANALYSIS: Start with "This is an AMATEUR/UNMIXED track that needs professional mixing and mastering." Then in 1-2 brief sentences, describe the main sonic issue (muddy, harsh, thin, unbalanced, etc.) and what needs the most work.
+            ANALYSIS: Start with "This is an unmixed track that needs professional mixing and mastering." Then in 2-3 brief sentences, describe the main sonic character: Is it muddy, harsh, thin, or unbalanced? What's the overall impression? Keep it simple and conversational without numbers or technical values.
             
             RECOMMENDATIONS:
-            - [One specific mixing recommendation]
-            - [One specific EQ/frequency balance recommendation]
-            - [One specific dynamics/loudness recommendation]
-            - [One specific stereo imaging recommendation]
-            - [One mastering preparation recommendation]
+            - [Describe what needs improvement in plain language, e.g., "Needs better balance between instruments" instead of "Reduce bass by 3dB"]
+            - [Focus on the most important mixing needs without technical numbers]
+            - [Keep it brief and actionable]
+            - [Maximum 3-4 recommendations]
             
-            Keep the ANALYSIS brief (2-3 sentences maximum). Make RECOMMENDATIONS specific and actionable.
-            
-            IMPORTANT: 
-            - Always include the ANALYSIS section with at least 2-3 sentences
-            - Always include at least 4 RECOMMENDATIONS as bullet points
-            - Never skip these sections for unmixed tracks
+            Keep the ANALYSIS brief (2-4 sentences). Make RECOMMENDATIONS simple and conversational without numbers or percentages.
             """
         } else if isMastered {
             return """
+            ⚠️ CRITICAL RESPONSE STYLE REQUIREMENT:
+            In the ANALYSIS and RECOMMENDATIONS sections:
+            - Use CONVERSATIONAL, SIMPLE language
+            - DO NOT mention specific numbers, dB values, percentages, frequencies, LUFS, points, penalties, or bonuses
+            - Describe what you HEAR in plain terms (muddy, clear, bright, dark, punchy, compressed, etc.)
+            - Keep recommendations simple and actionable without technical jargon
+            - The scoring details below are for YOUR calculation only - do NOT expose them to the user
+            
             You are analyzing a MASTERED TRACK using industry-standard professional mastering metrics.
             
             🎯 CORE ANALYSIS METRICS (Industry Standards):
@@ -598,6 +608,14 @@ class ClaudeAPIService {
             """
         } else {
             return """
+            ⚠️ CRITICAL RESPONSE STYLE REQUIREMENT:
+            In the ANALYSIS and RECOMMENDATIONS sections:
+            - Use CONVERSATIONAL, SIMPLE language
+            - DO NOT mention specific numbers, dB values, percentages, frequencies, LUFS, points, penalties, or bonuses
+            - Describe what you HEAR in plain terms (muddy, clear, bright, dark, balanced, professional, amateur, etc.)
+            - Keep recommendations actionable but simple without technical numbers
+            - The scoring details below are for YOUR calculation only - do NOT expose them to the user
+            
             You are analyzing a PRE-MASTERED MIX using professional mixing standards. This is NOT a final master.
             
             🎯 PRE-MASTER MIX ANALYSIS - Use MIXING STANDARDS:
@@ -883,12 +901,13 @@ class ClaudeAPIService {
         
         SCORE: [0-100 based on thresholds above]
         
-        ANALYSIS: Describe the mix character and quality in 2-3 sentences. Focus on: Is it muddy or clear? Bright or dark? Balanced or imbalanced? Punchy or compressed? Professional or amateur? Describe what you HEAR, not the penalties.
+        ANALYSIS: Describe the overall sonic character and quality of this mix in 2-4 sentences. Focus on what you HEAR: Is it muddy or clear? Bright or dark? Balanced or imbalanced? Punchy or compressed? Professional or amateur? Does it sound good or does it have issues? Keep it conversational and avoid mentioning specific numbers, dB values, percentages, or technical penalties.
         
         RECOMMENDATIONS:
-        - [Specific actionable fixes - use bullet points starting with dash (-), NOT numbers]
-        - [Each recommendation should be concrete and specific]
-        - [If score is excellent (>90), keep recommendations minimal or say "Ready for distribution"]
+        - [If the mix sounds good and professional, write "This mix sounds great and is ready for distribution" or similar positive statement]
+        - [If there are issues, describe them in plain language without numbers: e.g., "The low end could be clearer" instead of "Reduce 200Hz by 3dB"]
+        - [Keep recommendations brief, actionable, and conversational - use bullet points starting with dash (-), NOT numbers]
+        - [Maximum 3-4 recommendations]
         
         READY FOR MASTERING: [yes/no - based on whether all critical thresholds are met]
         """
@@ -1011,12 +1030,14 @@ class ClaudeAPIService {
         Format response as (FOLLOW EXACTLY):
         SCORE: [realistic 0-100 score for PRE-MASTER MIX]
         
-        ANALYSIS: Describe the mix in 2-3 sentences. Is it muddy, clear, balanced, or imbalanced? Bright or dark? Does it sound professional or amateur? Focus on sonic character - what you HEAR, NOT technical penalties.
+        ANALYSIS: Describe the overall sonic quality in 2-4 sentences. Is it muddy or clear? Balanced or imbalanced? Bright or dark? Professional or amateur? Focus on what you HEAR - the overall sound and feeling. Do NOT mention specific dB values, percentages, points, penalties, or technical numbers.
         
         RECOMMENDATIONS:
-        - [Specific actionable mixing improvements - use dash (-), NOT numbers]
-        - [Be concrete: "Cut 200Hz to reduce muddiness" not just "needs EQ"]
-        - [If excellent, say "Ready for mastering" or similar]
+        - [If the mix is good, simply say "This mix sounds good and is ready for mastering" or similar]
+        - [If there are issues, describe what needs improvement in plain language: e.g., "The mix could use more clarity in the low end" instead of "Cut 200Hz by 3dB"]
+        - [Keep it conversational and simple - no numbers, no technical jargon]
+        - [Use dash (-) for bullet points, NOT numbers]
+        - [Maximum 3-4 recommendations]
         """
     }
     

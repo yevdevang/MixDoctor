@@ -11,11 +11,6 @@ struct SettingsView: View {
     @State private var showPaywall = false
     @State private var isRefreshingSubscription = false
     @AppStorage("muteLaunchSound") private var muteLaunchSound = false
-    @State private var showRatingTestAlert = false
-    @State private var showCleanupAlert = false
-    @State private var cleanupMessage = ""
-    @State private var showDatabaseInfo = false
-    @State private var databaseInfo = ""
     @Environment(\.modelContext) private var modelContext
     
     var body: some View {
@@ -202,91 +197,6 @@ struct SettingsView: View {
                     Text("When enabled, your audio file metadata and analysis results will be synced across all your devices. Audio files remain stored locally on each device. You'll need to restart the app for changes to take effect.")
                 }
                 
-                // MARK: - Developer/Test Section
-                #if DEBUG
-                Section {
-                    Button {
-                        let descriptor = FetchDescriptor<AudioFile>()
-                        if let allFiles = try? modelContext.fetch(descriptor) {
-                            var info = "Total records: \(allFiles.count)\n\n"
-                            for (index, file) in allFiles.enumerated() {
-                                let exists = FileManager.default.fileExists(atPath: file.fileURL.path)
-                                info += "[\(index + 1)] \(file.fileName)\n"
-                                info += "   Size: \(file.fileSize) bytes\n"
-                                info += "   Duration: \(String(format: "%.1f", file.duration))s\n"
-                                info += "   Path: \(file.fileURL.path)\n"
-                                info += "   EXISTS: \(exists ? "✅" : "❌")\n\n"
-                            }
-                            databaseInfo = info
-                        } else {
-                            databaseInfo = "Failed to fetch database records"
-                        }
-                        showDatabaseInfo = true
-                    } label: {
-                        HStack {
-                            Image(systemName: "list.bullet.clipboard")
-                                .foregroundStyle(.blue)
-                            Text("Show All Database Records")
-                            Spacer()
-                            Image(systemName: "info.circle")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    
-                    Button {
-                        Task {
-                            let count = await DatabaseCleanup.shared.cleanupOrphanedRecords(modelContext: modelContext)
-                            showCleanupAlert = true
-                            cleanupMessage = "Removed \(count) orphaned record(s)"
-                        }
-                    } label: {
-                        HStack {
-                            Image(systemName: "trash.fill")
-                                .foregroundStyle(.red)
-                            Text("Clean Orphaned Records")
-                            Spacer()
-                            Image(systemName: "wrench.and.screwdriver")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    
-                    Button {
-                        ratingService.forceShowRatingForTesting()
-                        showRatingTestAlert = true
-                    } label: {
-                        HStack {
-                            Image(systemName: "star.fill")
-                                .foregroundStyle(.yellow)
-                            Text("Test Rating Prompt")
-                            Spacer()
-                            Image(systemName: "flask")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    
-                    Button {
-                        ratingService.resetAllRatingTracking()
-                    } label: {
-                        HStack {
-                            Image(systemName: "arrow.counterclockwise")
-                                .foregroundStyle(.orange)
-                            Text("Reset Rating Tracking")
-                        }
-                    }
-                    
-                    HStack {
-                        Text("Total Analyses")
-                        Spacer()
-                        Text("\(subscriptionService.totalAnalysisCount)")
-                            .foregroundStyle(.secondary)
-                    }
-                } header: {
-                    Text("🧪 Test & Debug")
-                } footer: {
-                    Text("These options are only visible in debug builds")
-                }
-                #endif
-                
                 // MARK: - About Section
                 Section {
                     Button {
@@ -312,6 +222,9 @@ struct SettingsView: View {
                     Text("App Information")
                 }
             }
+            #if targetEnvironment(macCatalyst)
+            .scrollContentBackground(.hidden)
+            #endif
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .task {
@@ -328,21 +241,6 @@ struct SettingsView: View {
             } message: {
                 Text("This will free up space by removing temporary files")
             }
-            .alert("Rating Request Sent", isPresented: $showRatingTestAlert) {
-                Button("OK") {}
-            } message: {
-                Text("The rating prompt was triggered. Apple controls if/when it actually appears. If you don't see it, try:\n\n1. Reset iPhone (Device menu)\n2. Delete and reinstall app\n3. Try on a real device instead of simulator")
-            }
-            .alert("Database Cleanup", isPresented: $showCleanupAlert) {
-                Button("OK") { }
-            } message: {
-                Text(cleanupMessage)
-            }
-            .alert("Database Records", isPresented: $showDatabaseInfo) {
-                Button("OK") { }
-            } message: {
-                Text(databaseInfo)
-            }
             .sheet(isPresented: $viewModel.showAbout) {
                 AboutView()
             }
@@ -350,6 +248,11 @@ struct SettingsView: View {
                 PaywallView(onPurchaseComplete: {
                     // Subscription service updates automatically via RevenueCat listener
                 })
+                #if targetEnvironment(macCatalyst)
+                .frame(width: 850, height: 1100)
+                #endif
+                .presentationDetents([.large])
+                .presentationContentInteraction(.scrolls)
             }
             .task {
                 // Refresh subscription status when view appears
@@ -429,7 +332,9 @@ struct AboutView: View {
                         FeatureRow(icon: "play.circle.fill", title: "Playback", description: "High-quality audio playback")
                     }
                     .padding()
+                    #if !targetEnvironment(macCatalyst)
                     .background(Color(.secondarySystemGroupedBackground))
+                    #endif
                     .cornerRadius(12)
                     
                     Text("© 2025 MixDoctor. All rights reserved.")

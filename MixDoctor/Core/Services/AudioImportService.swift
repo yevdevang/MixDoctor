@@ -286,6 +286,25 @@ final class AudioImportService {
         let destinationURL = directoryURL.appendingPathComponent(originalFileName)
         print("  Destination path: \(destinationURL.path)")
         
+        // Check if the source file is already in our app's container
+        // This can happen on MacCatalyst when user picks a file from iCloud Drive
+        // that was previously imported. We need to resolve both paths to handle symlinks.
+        let resolvedSourcePath = (try? fileManager.destinationOfSymbolicLink(atPath: sourceURL.path)) ?? sourceURL.path
+        let resolvedDirectoryPath = (try? fileManager.destinationOfSymbolicLink(atPath: directoryURL.path)) ?? directoryURL.path
+        
+        let sourceIsInAppContainer = resolvedSourcePath.hasPrefix(resolvedDirectoryPath) || 
+                                      sourceURL.path.hasPrefix(directoryURL.path) ||
+                                      sourceURL.standardizedFileURL == destinationURL.standardizedFileURL
+        print("  Source is already in app container: \(sourceIsInAppContainer)")
+        print("  Resolved source path: \(resolvedSourcePath)")
+        print("  Resolved directory path: \(resolvedDirectoryPath)")
+        
+        if sourceIsInAppContainer {
+            // File is already in the right place, just return the URL
+            print("  ✅ File is already in app container, using as-is")
+            return sourceURL
+        }
+        
         // If file already exists at destination, it means:
         // 1. It's an orphaned file being re-imported, OR
         // 2. Previous import failed after copying but before database insert
