@@ -129,9 +129,6 @@ final class AudioImportService {
             }
             
             // Check for duplicates BEFORE copying to iCloud
-            // TEMPORARILY DISABLED due to CloudKit sync issues
-            print("⚠️ Duplicate check temporarily disabled - will check after copy")
-            /*
             if let modelContext = modelContext {
                 let fileName = url.lastPathComponent
                 let fileSize = metadata.fileSize
@@ -148,7 +145,6 @@ final class AudioImportService {
             } else {
                 print("⚠️ No modelContext provided - skipping duplicate check")
             }
-            */
             
             print("📁 Copying file to app's iCloud container...")
             let destinationURL = try copyToDocuments(from: url)
