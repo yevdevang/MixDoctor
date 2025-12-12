@@ -437,38 +437,11 @@ struct DashboardView: View {
         .navigationDestination(item: $navigateToFile) { file in
             ResultsView(audioFile: file)
         }
-        #if targetEnvironment(macCatalyst)
-        .overlay {
-            if isAnalyzing, let file = analyzingFile {
-                ZStack {
-                    Color.black.opacity(0.5)
-                        .ignoresSafeArea()
-                    
-                    VStack(spacing: 20) {
-                        ProgressView()
-                            .scaleEffect(1.5)
-                            .tint(.white)
-                        
-                        Text("Analyzing \(file.fileName)...")
-                            .font(.headline)
-                            .foregroundStyle(.white)
-                    }
-                    .padding(40)
-                    .background(
-                        RoundedRectangle(cornerRadius: 16)
-                            .fill(.ultraThinMaterial)
-                    )
-                }
-                .allowsHitTesting(true)
-            }
-        }
-        #else
         .fullScreenCover(isPresented: $isAnalyzing) {
             if let file = analyzingFile {
                 AnimatedGradientLoader(fileName: file.fileName)
             }
         }
-        #endif
     }
 
     // MARK: - Empty State
