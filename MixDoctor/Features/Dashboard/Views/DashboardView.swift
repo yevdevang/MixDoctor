@@ -495,17 +495,14 @@ struct DashboardView: View {
             }
             
             // Start analysis with loader
-            #if targetEnvironment(macCatalyst)
-            // On Mac, ensure UI updates on main thread with delay for spinner to show
-            await MainActor.run {
-                analyzingFile = file
-                isAnalyzing = true
-            }
-            // Small delay to allow UI to update and show the spinner
-            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
-            #else
             analyzingFile = file
             isAnalyzing = true
+            
+            #if targetEnvironment(macCatalyst)
+            // On MacCatalyst, give more time for fullScreenCover to present
+            print("🖥️ MacCatalyst: Showing loader for \(file.fileName)")
+            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+            print("🖥️ MacCatalyst: Starting analysis")
             #endif
             
             do {
@@ -531,33 +528,36 @@ struct DashboardView: View {
                 }
                 
                 
-                // Hide loader and navigate
                 #if targetEnvironment(macCatalyst)
-                await MainActor.run {
-                    isAnalyzing = false
-                    analyzingFile = nil
-                    navigateToFile = file
-                }
-                #else
+                print("🖥️ MacCatalyst: Analysis complete, hiding loader")
+                #endif
+                
+                // Hide loader and navigate
                 isAnalyzing = false
                 analyzingFile = nil
-                navigateToFile = file
+                
+                #if targetEnvironment(macCatalyst)
+                // Small delay to let the fullScreenCover dismiss smoothly
+                try? await Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
                 #endif
+                
+                navigateToFile = file
                 
             } catch {
                 #if targetEnvironment(macCatalyst)
-                await MainActor.run {
-                    isAnalyzing = false
-                    analyzingFile = nil
-                    // Still navigate to show error in ResultsView
-                    navigateToFile = file
-                }
-                #else
+                print("🖥️ MacCatalyst: Analysis error, hiding loader")
+                #endif
+                
                 isAnalyzing = false
                 analyzingFile = nil
+                
+                #if targetEnvironment(macCatalyst)
+                // Small delay to let the fullScreenCover dismiss smoothly
+                try? await Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
+                #endif
+                
                 // Still navigate to show error in ResultsView
                 navigateToFile = file
-                #endif
             }
         }
     }
