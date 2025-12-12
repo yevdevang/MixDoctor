@@ -266,41 +266,89 @@ struct PaywallView: View {
         guard let package = selectedPackage else { return }
         
         isPurchasing = true
-        defer { isPurchasing = false }
         
         do {
             let customerInfo = try await subscriptionService.purchase(package: package)
             
+            // Wait a bit for state to propagate (especially on MacCatalyst)
+            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+            
+            // Force refresh customer info to ensure latest state
+            await subscriptionService.updateCustomerInfo()
+            
+            // Wait for UI state to update
+            try? await Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
+            
             // Verify purchase was successful
-            if customerInfo.entitlements["pro"]?.isActive == true {
-                onPurchaseComplete()
-                dismiss()
+            if customerInfo.entitlements["pro"]?.isActive == true || subscriptionService.isProUser || subscriptionService.isInTrialPeriod {
+                // Ensure we're on main actor for UI updates
+                await MainActor.run {
+                    isPurchasing = false
+                    onPurchaseComplete()
+                }
+                
+                // Small delay before dismiss to ensure callbacks complete
+                try? await Task.sleep(nanoseconds: 200_000_000) // 0.2 seconds
+                
+                await MainActor.run {
+                    dismiss()
+                }
             } else {
-                errorMessage = "Purchase completed but subscription not activated. Please try restoring purchases."
-                showError = true
+                await MainActor.run {
+                    isPurchasing = false
+                    errorMessage = "Purchase completed but subscription not activated. Please try restoring purchases."
+                    showError = true
+                }
             }
         } catch {
-            errorMessage = "Purchase failed: \(error.localizedDescription)"
-            showError = true
+            await MainActor.run {
+                isPurchasing = false
+                errorMessage = "Purchase failed: \(error.localizedDescription)"
+                showError = true
+            }
         }
     }
     
     private func restore() async {
         isRestoring = true
-        defer { isRestoring = false }
         
         do {
             try await subscriptionService.restorePurchases()
-            if subscriptionService.isProUser {
-                onPurchaseComplete()
-                dismiss()
+            
+            // Wait for state to propagate
+            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+            
+            // Force refresh to ensure latest state
+            await subscriptionService.updateCustomerInfo()
+            
+            // Wait for UI state to update
+            try? await Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
+            
+            if subscriptionService.isProUser || subscriptionService.isInTrialPeriod {
+                await MainActor.run {
+                    isRestoring = false
+                    onPurchaseComplete()
+                }
+                
+                // Small delay before dismiss
+                try? await Task.sleep(nanoseconds: 200_000_000) // 0.2 seconds
+                
+                await MainActor.run {
+                    dismiss()
+                }
             } else {
-                errorMessage = "No previous purchases found"
-                showError = true
+                await MainActor.run {
+                    isRestoring = false
+                    errorMessage = "No previous purchases found"
+                    showError = true
+                }
             }
         } catch {
-            errorMessage = "Restore failed: \(error.localizedDescription)"
-            showError = true
+            await MainActor.run {
+                isRestoring = false
+                errorMessage = "Restore failed: \(error.localizedDescription)"
+                showError = true
+            }
         }
     }
 }
