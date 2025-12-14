@@ -71,11 +71,16 @@ struct ResultsView: View {
                 dismiss()
             }
         }) {
-            PaywallView(onPurchaseComplete: {
-                Task {
-                    await performAnalysis()
+            PaywallView(
+                onPurchaseComplete: {
+                    Task {
+                        await performAnalysis()
+                    }
+                },
+                onDismiss: {
+                    showPaywall = false
                 }
-            })
+            )
             #if targetEnvironment(macCatalyst)
             .frame(width: 850, height: 1100)
             #endif

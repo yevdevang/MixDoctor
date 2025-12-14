@@ -179,16 +179,14 @@ struct SettingsView: View {
                     }
                     .tint(Color.accentColor)
                     
-                    // Cloud Storage Info - Pro users only
-                    if subscriptionService.isProUser {
-                        NavigationLink {
-                            iCloudDebugView()
-                        } label: {
-                            HStack {
-                                Image(systemName: "info.circle")
-                                    .foregroundStyle(.secondary)
-                                Text("Cloud Storage Info")
-                            }
+                    // Cloud Storage Info & Debug Tools
+                    NavigationLink {
+                        iCloudDebugView()
+                    } label: {
+                        HStack {
+                            Image(systemName: "info.circle")
+                                .foregroundStyle(.secondary)
+                            Text("Cloud Storage Info")
                         }
                     }
                 } header: {
@@ -245,9 +243,14 @@ struct SettingsView: View {
                 AboutView()
             }
             .sheet(isPresented: $showPaywall) {
-                PaywallView(onPurchaseComplete: {
-                    // Subscription service updates automatically via RevenueCat listener
-                })
+                PaywallView(
+                    onPurchaseComplete: {
+                        // Subscription service updates automatically via RevenueCat listener
+                    },
+                    onDismiss: {
+                        showPaywall = false
+                    }
+                )
                 #if targetEnvironment(macCatalyst)
                 .frame(width: 850, height: 1100)
                 #endif

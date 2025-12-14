@@ -106,13 +106,22 @@ final class ImportViewModel {
             // If insertedCount > 0 and duplicateCount == 0, no message needed (success)
         } catch let error as AudioImportError where error == .duplicateFile {
             // All files were duplicates - caught at import service level
+            print("❌ ImportViewModel: Caught duplicateFile error")
             infoMessage = urls.count == 1 
                 ? "This file is already imported" 
                 : "All \(urls.count) files are already imported"
             showInfo = true
             importProgress = 1.0
+        } catch let error as AudioImportError where error == .iCloudDownloadFailed {
+            // File not downloaded from iCloud
+            print("❌ ImportViewModel: Caught iCloudDownloadFailed error")
+            errorMessage = error.errorDescription
+            showError = true
+            importProgress = 0
         } catch {
+            print("❌ ImportViewModel: Caught general error: \(error)")
             if let importError = error as? AudioImportError {
+                print("   Error is AudioImportError: \(importError)")
                 errorMessage = importError.errorDescription
             } else {
                 errorMessage = error.localizedDescription

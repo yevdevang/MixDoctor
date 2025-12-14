@@ -20,6 +20,7 @@ struct PaywallView: View {
     @State private var showPrivacy = false
     
     let onPurchaseComplete: () -> Void
+    let onDismiss: (() -> Void)?
     
     var body: some View {
         NavigationStack {
@@ -63,7 +64,11 @@ struct PaywallView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button {
+                        #if targetEnvironment(macCatalyst)
+                        onDismiss?()
+                        #else
                         dismiss()
+                        #endif
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundColor(Color(red: 0.435, green: 0.173, blue: 0.871))
@@ -291,7 +296,12 @@ struct PaywallView: View {
                 try? await Task.sleep(nanoseconds: 200_000_000) // 0.2 seconds
                 
                 await MainActor.run {
+                    #if targetEnvironment(macCatalyst)
+                    // On MacCatalyst, use explicit dismissal callback
+                    onDismiss?()
+                    #else
                     dismiss()
+                    #endif
                 }
             } else {
                 await MainActor.run {
@@ -334,7 +344,12 @@ struct PaywallView: View {
                 try? await Task.sleep(nanoseconds: 200_000_000) // 0.2 seconds
                 
                 await MainActor.run {
+                    #if targetEnvironment(macCatalyst)
+                    // On MacCatalyst, use explicit dismissal callback
+                    onDismiss?()
+                    #else
                     dismiss()
+                    #endif
                 }
             } else {
                 await MainActor.run {
@@ -471,5 +486,5 @@ private struct PackageCard: View {
 }
 
 #Preview {
-    PaywallView(onPurchaseComplete: {})
+    PaywallView(onPurchaseComplete: {}, onDismiss: nil)
 }
