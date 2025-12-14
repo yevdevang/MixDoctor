@@ -77,40 +77,49 @@ struct ImportView: View {
     private func contentView(viewModel: ImportViewModel) -> some View {
         @Bindable var viewModel = viewModel
 
-        ZStack {
-            VStack(spacing: 0) {
-                if viewModel.isImporting {
-                    importProgressView(progress: viewModel.importProgress)
-                }
+        VStack(spacing: 0) {
+            if viewModel.isImporting {
+                importProgressView(progress: viewModel.importProgress)
+            }
 
-                if viewModel.importedFiles.isEmpty {
-                    dropZoneView
-                        .padding()
-                } else {
-                    importedFilesList(viewModel: viewModel)
+            if viewModel.importedFiles.isEmpty {
+                dropZoneView
+                    .padding()
+            } else {
+                importedFilesList(viewModel: viewModel)
+            }
+        }
+        .background(
+            ZStack {
+                // Invisible full-coverage drop target - only active when dragging
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onDrop(of: [.audio], isTargeted: $isDropTargeted) { providers in
+                        handleDrop(providers: providers)
+                        return true
+                    }
+                
+                // Visual drop zone overlay when dragging
+                if isDropTargeted {
+                    RoundedRectangle(cornerRadius: 16)
+                        .strokeBorder(
+                            Color.primaryAccent,
+                            style: StrokeStyle(
+                                lineWidth: 3,
+                                dash: [10, 5]
+                            )
+                        )
+                        .background(
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(Color.primaryAccent.opacity(0.1))
+                        )
+                        .padding(8)
+                        .allowsHitTesting(false)
+                        .transition(.opacity)
                 }
             }
-            
-            // Invisible overlay to catch drops anywhere
-            Color.clear
-                .contentShape(Rectangle())
-                .onDrop(of: [.audio], isTargeted: $isDropTargeted) { providers in
-                    handleDrop(providers: providers)
-                    return true
-                }
-        }
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .strokeBorder(
-                    style: StrokeStyle(
-                        lineWidth: 3,
-                        dash: [10, 5]
-                    )
-                )
-                .foregroundStyle(isDropTargeted ? Color.primaryAccent : Color.clear)
-                .padding(8)
-                .animation(.easeInOut(duration: 0.2), value: isDropTargeted)
         )
+        .animation(.easeInOut(duration: 0.2), value: isDropTargeted)
         .task {
             // Always load imports and check for orphans on appear
             viewModel.loadImports()
@@ -527,7 +536,6 @@ private struct ImportedFileRow: View {
             .buttonStyle(.plain)
         }
         .padding(.vertical, 8)
-        .contentShape(Rectangle())
     }
 
     private func secondsText(duration: TimeInterval) -> String {
