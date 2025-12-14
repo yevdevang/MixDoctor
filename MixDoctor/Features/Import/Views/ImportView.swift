@@ -29,15 +29,19 @@ struct ImportView: View {
                         }
                 }
             }
+            .fileImporter(
+                isPresented: $isShowingDocumentPicker,
+                allowedContentTypes: [.audio],
+                allowsMultipleSelection: true
+            ) { result in
+                handleFileImport(result)
+            }
+            #if targetEnvironment(macCatalyst)
+            .navigationTitle("")
+            #else
             .navigationTitle("Import Audio")
+            #endif
             .navigationBarTitleDisplayMode(.inline)
-        }
-        .fileImporter(
-            isPresented: $isShowingDocumentPicker,
-            allowedContentTypes: [.audio],
-            allowsMultipleSelection: true
-        ) { result in
-            handleFileImport(result)
         }
         .alert("Import Error", isPresented: errorBinding) {
             Button("OK", role: .cancel) { }
@@ -148,37 +152,36 @@ struct ImportView: View {
     }
 
     private var dropZoneView: some View {
-        ZStack {
-            HStack {
+        HStack {
+            Spacer()
+            
+            VStack(spacing: 24) {
                 Spacer()
-                
-                VStack(spacing: 24) {
-                    Spacer()
 
-                    Image(systemName: "waveform.circle.fill")
-                        .font(.system(size: 80))
-                        .foregroundStyle(Color.primaryAccent)
+                Image(systemName: "waveform.circle.fill")
+                    .font(.system(size: 80))
+                    .foregroundStyle(Color.primaryAccent)
 
-                    VStack(spacing: 8) {
-                        Text("Import Audio Files")
-                            .font(.title2.weight(.semibold))
-                        
-                        Text("Drag & drop or browse files")
-                            .font(.subheadline)
-                            .foregroundStyle(Color.secondaryText)
+                VStack(spacing: 8) {
+                    Text("Import Audio Files")
+                        .font(.title2.weight(.semibold))
+                    
+                    Text("Drag & drop or browse files")
+                        .font(.subheadline)
+                        .foregroundStyle(Color.secondaryText)
+                }
+
+                HStack(spacing: 16) {
+                    Button {
+                        isShowingDocumentPicker = true
+                    } label: {
+                        Label("Browse Files", systemImage: "folder")
+                            .frame(maxWidth: 200)
                     }
-
-                    HStack(spacing: 16) {
-                        Button {
-                            isShowingDocumentPicker = true
-                        } label: {
-                            Label("Browse Files", systemImage: "folder")
-                                .frame(maxWidth: 200)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
-                        
-                        // Sync button to recover orphaned files
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    
+                    // Sync button to recover orphaned files
 //                if let viewModel {
 //                    Button {
 //                        Task {
@@ -192,20 +195,15 @@ struct ImportView: View {
 //                    .controlSize(.large)
 //                    .disabled(viewModel.isImporting)
 //                }
-                    }
-
-                    supportedFormatsView
-                    
-                    Spacer()
                 }
-                .frame(maxWidth: 500)
+
+                supportedFormatsView
                 
                 Spacer()
             }
+            .frame(maxWidth: 500)
             
-            // Invisible overlay to catch drops anywhere
-            Color.clear
-                .contentShape(Rectangle())
+            Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()

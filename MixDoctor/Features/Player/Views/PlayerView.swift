@@ -46,7 +46,11 @@ struct PlayerView: View {
                     emptyPlayerState
                 }
             }
+            #if targetEnvironment(macCatalyst)
+            .navigationTitle("")
+            #else
             .navigationTitle("Player")
+            #endif
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
                 // Auto-select first file if none is selected but files exist

@@ -12,8 +12,10 @@ final class SettingsViewModel {
     var selectedTheme: String = "system" {
         didSet {
             guard !isInitializing else { return }
+            print("🎨 Theme changed to: \(selectedTheme)")
             cloudStore.set(selectedTheme, forKey: "theme")
-            cloudStore.synchronize()
+            let synced = cloudStore.synchronize()
+            print("🎨 iCloud sync result: \(synced)")
             
             // Notify ContentView to update immediately
             NotificationCenter.default.post(name: NSNotification.Name("ThemeDidChange"), object: nil)
@@ -69,12 +71,20 @@ final class SettingsViewModel {
             forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
             object: cloudStore,
             queue: .main
-        ) { [weak self] _ in
+        ) { [weak self] notification in
             guard let self = self else { return }
+            print("🎨 Received iCloud theme change notification")
+            if let userInfo = notification.userInfo {
+                print("🎨 Changed keys: \(userInfo)")
+            }
             Task { @MainActor in
                 let newTheme = self.cloudStore.string(forKey: "theme") ?? "system"
+                print("🎨 New theme from iCloud: \(newTheme)")
                 if self.selectedTheme != newTheme {
+                    self.isInitializing = true // Prevent triggering didSet
                     self.selectedTheme = newTheme
+                    self.isInitializing = false
+                    NotificationCenter.default.post(name: NSNotification.Name("ThemeDidChange"), object: nil)
                 }
             }
         }

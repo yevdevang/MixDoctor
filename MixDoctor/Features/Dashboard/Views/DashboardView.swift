@@ -143,7 +143,11 @@ struct DashboardView: View {
                     filesList
                 }
             }
+            #if targetEnvironment(macCatalyst)
+            .navigationTitle("")
+            #else
             .navigationTitle("Dashboard")
+            #endif
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $searchText, prompt: "Search audio files")
             .toolbar {

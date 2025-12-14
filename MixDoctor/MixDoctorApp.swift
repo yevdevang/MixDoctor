@@ -198,6 +198,14 @@ struct MixDoctorApp: App {
                         showLaunchScreen = false
                     }
                 }
+                
+                #if targetEnvironment(macCatalyst)
+                // Hide window title on Mac
+                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                   let titlebar = windowScene.titlebar {
+                    titlebar.titleVisibility = .hidden
+                }
+                #endif
             }
         }
     }

@@ -114,62 +114,9 @@ struct iCloudDebugView: View {
             }
             
             Section("Actions") {
-                Button("📋 SHOW ALL DATABASE RECORDS WITH PATHS") {
-                    Task {
-                        await showAllRecordsDetailed()
-                    }
-                }
-                .disabled(isRefreshing || audioFiles.isEmpty)
-                
-                Button("🔥 FORCE DELETE ALL DATABASE RECORDS") {
-                    Task {
-                        await forceDeleteAllDatabaseRecords()
-                    }
-                }
-                .foregroundColor(.red)
-                .disabled(isRefreshing || audioFiles.isEmpty)
-                
-                Button("Refresh Status") {
-                    checkStatus()
-                }
-                .disabled(isRefreshing)
-                
-                Button("Remove Duplicate Files") {
-                    Task {
-                        await removeDuplicates()
-                    }
-                }
-                .disabled(isRefreshing)
-                
-                Button("Clean Up Orphaned Records") {
-                    Task {
-                        await cleanUpOrphanedRecords()
-                    }
-                }
-                .disabled(isRefreshing)
-                
                 Button("Scan & Import Files from iCloud") {
                     Task {
                         await scanAndImportFromiCloud()
-                    }
-                }
-                .disabled(isRefreshing)
-                
-                Button("Force Download All iCloud Files") {
-                    Task {
-                        await forceDownloadAll()
-                    }
-                }
-                .disabled(isRefreshing)
-                
-                Button("Comprehensive File Status Check") {
-                    checkComprehensiveFileStatus()
-                }
-                .disabled(isRefreshing)
-                
-                Button("Download All Using New Service") {
-                    Task {
-                        await downloadAllWithNewService()
                     }
                 }
                 .disabled(isRefreshing)

@@ -222,8 +222,10 @@ struct SettingsView: View {
             }
             #if targetEnvironment(macCatalyst)
             .scrollContentBackground(.hidden)
-            #endif
+            .navigationTitle("")
+            #else
             .navigationTitle("Settings")
+            #endif
             .navigationBarTitleDisplayMode(.inline)
             .task {
                 await loadStorageInfo()
