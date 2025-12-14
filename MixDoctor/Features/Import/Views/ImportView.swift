@@ -7,6 +7,7 @@ struct ImportView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var viewModel: ImportViewModel?
     @State private var isShowingDocumentPicker = false
+    @State private var isDropTargeted = false
     @Binding var selectedAudioFile: AudioFile?
     @Binding var selectedTab: Int
     @Binding var shouldAutoPlay: Bool
@@ -76,18 +77,40 @@ struct ImportView: View {
     private func contentView(viewModel: ImportViewModel) -> some View {
         @Bindable var viewModel = viewModel
 
-        VStack(spacing: 0) {
-            if viewModel.isImporting {
-                importProgressView(progress: viewModel.importProgress)
-            }
+        ZStack {
+            VStack(spacing: 0) {
+                if viewModel.isImporting {
+                    importProgressView(progress: viewModel.importProgress)
+                }
 
-            if viewModel.importedFiles.isEmpty {
-                dropZoneView
-                    .padding()
-            } else {
-                importedFilesList(viewModel: viewModel)
+                if viewModel.importedFiles.isEmpty {
+                    dropZoneView
+                        .padding()
+                } else {
+                    importedFilesList(viewModel: viewModel)
+                }
             }
+            
+            // Invisible overlay to catch drops anywhere
+            Color.clear
+                .contentShape(Rectangle())
+                .onDrop(of: [.audio], isTargeted: $isDropTargeted) { providers in
+                    handleDrop(providers: providers)
+                    return true
+                }
         }
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(
+                    style: StrokeStyle(
+                        lineWidth: 3,
+                        dash: [10, 5]
+                    )
+                )
+                .foregroundStyle(isDropTargeted ? Color.primaryAccent : Color.clear)
+                .padding(8)
+                .animation(.easeInOut(duration: 0.2), value: isDropTargeted)
+        )
         .task {
             // Always load imports and check for orphans on appear
             viewModel.loadImports()
@@ -116,34 +139,37 @@ struct ImportView: View {
     }
 
     private var dropZoneView: some View {
-        HStack {
-            Spacer()
-            
-            VStack(spacing: 24) {
+        ZStack {
+            HStack {
                 Spacer()
+                
+                VStack(spacing: 24) {
+                    Spacer()
 
-                Image(systemName: "waveform.circle.fill")
-                    .font(.system(size: 80))
-                    .foregroundStyle(Color.primaryAccent)
+                    Image(systemName: "waveform.circle.fill")
+                        .font(.system(size: 80))
+                        .foregroundStyle(Color.primaryAccent)
 
-                VStack(spacing: 8) {
-                    Text("Import Audio Files")
-                        .font(.title2.weight(.semibold)) 
-
-                    
-                }
-
-                HStack(spacing: 16) {
-                    Button {
-                        isShowingDocumentPicker = true
-                    } label: {
-                        Label("Browse Files", systemImage: "folder")
-                            .frame(maxWidth: 200)
+                    VStack(spacing: 8) {
+                        Text("Import Audio Files")
+                            .font(.title2.weight(.semibold))
+                        
+                        Text("Drag & drop or browse files")
+                            .font(.subheadline)
+                            .foregroundStyle(Color.secondaryText)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    
-                    // Sync button to recover orphaned files
+
+                    HStack(spacing: 16) {
+                        Button {
+                            isShowingDocumentPicker = true
+                        } label: {
+                            Label("Browse Files", systemImage: "folder")
+                                .frame(maxWidth: 200)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        
+                        // Sync button to recover orphaned files
 //                if let viewModel {
 //                    Button {
 //                        Task {
@@ -157,15 +183,20 @@ struct ImportView: View {
 //                    .controlSize(.large)
 //                    .disabled(viewModel.isImporting)
 //                }
-                }
+                    }
 
-                supportedFormatsView
+                    supportedFormatsView
+                    
+                    Spacer()
+                }
+                .frame(maxWidth: 500)
                 
                 Spacer()
             }
-            .frame(maxWidth: 500)
             
-            Spacer()
+            // Invisible overlay to catch drops anywhere
+            Color.clear
+                .contentShape(Rectangle())
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
@@ -233,6 +264,12 @@ struct ImportView: View {
                     .onDelete { indexSet in
                         deleteFiles(at: indexSet, viewModel: viewModel)
                     }
+                    
+                    // Spacer row to make list take full height and accept drops
+                    Color.clear
+                        .frame(maxWidth: .infinity, minHeight: 100)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                 } header: {
                     #if !targetEnvironment(macCatalyst)
                     HStack(alignment: .center) {
@@ -341,6 +378,46 @@ struct ImportView: View {
         viewModel = newViewModel
     }
 
+    private func handleDrop(providers: [NSItemProvider]) -> Bool {
+        guard let viewModel else { return false }
+        
+        print("\n" + String(repeating: "📦", count: 40))
+        print("📦 IMPORT VIEW: handleDrop called with \(providers.count) item(s)")
+        print(String(repeating: "📦", count: 40))
+        
+        Task {
+            var urls: [URL] = []
+            
+            for provider in providers {
+                if provider.hasItemConformingToTypeIdentifier(UTType.audio.identifier) {
+                    do {
+                        let url = try await provider.loadItem(forTypeIdentifier: UTType.audio.identifier, options: nil) as? URL
+                        if let url = url {
+                            print("✅ Dropped file: \(url.lastPathComponent)")
+                            urls.append(url)
+                        }
+                    } catch {
+                        print("❌ Failed to load dropped item: \(error.localizedDescription)")
+                    }
+                }
+            }
+            
+            if !urls.isEmpty {
+                print("📞 Calling viewModel.importFiles with \(urls.count) dropped URL(s)")
+                await viewModel.importFiles(urls)
+                print("✅ viewModel.importFiles completed for dropped files")
+                
+                // Select the first file if nothing is selected
+                if !viewModel.importedFiles.isEmpty && selectedAudioFile == nil {
+                    selectedAudioFile = viewModel.importedFiles.first
+                }
+            }
+        }
+        
+        print(String(repeating: "📦", count: 40) + "\n")
+        return true
+    }
+    
     private func handleFileImport(_ result: Result<[URL], Error>) {
         guard let viewModel else { return }
 
