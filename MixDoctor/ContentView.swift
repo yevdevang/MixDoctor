@@ -15,9 +15,6 @@ struct ContentView: View {
     @State private var shouldAutoPlay = false
     @State private var theme: String = NSUbiquitousKeyValueStore.default.string(forKey: "theme") ?? "system"
     @Query(sort: \AudioFile.dateImported, order: .reverse) private var allAudioFiles: [AudioFile]
-    #if targetEnvironment(macCatalyst)
-    @State private var themeCheckTimer: Timer?
-    #endif
     
     var colorScheme: ColorScheme? {
         switch theme {
@@ -75,7 +72,6 @@ struct ContentView: View {
         .onAppear {
             // Load theme from iCloud
             theme = NSUbiquitousKeyValueStore.default.string(forKey: "theme") ?? "system"
-            print("🎨 ContentView: Initial theme loaded: \(theme)")
             
             // Listen for iCloud theme changes from other devices
             NotificationCenter.default.addObserver(
@@ -83,9 +79,7 @@ struct ContentView: View {
                 object: NSUbiquitousKeyValueStore.default,
                 queue: .main
             ) { _ in
-                let newTheme = NSUbiquitousKeyValueStore.default.string(forKey: "theme") ?? "system"
-                print("🎨 ContentView: External theme change received: \(newTheme)")
-                theme = newTheme
+                theme = NSUbiquitousKeyValueStore.default.string(forKey: "theme") ?? "system"
             }
             
             // Listen for local theme changes within this app
@@ -94,50 +88,7 @@ struct ContentView: View {
                 object: nil,
                 queue: .main
             ) { _ in
-                let newTheme = NSUbiquitousKeyValueStore.default.string(forKey: "theme") ?? "system"
-                print("🎨 ContentView: Local theme change: \(newTheme)")
-                theme = newTheme
-            }
-            
-            #if targetEnvironment(macCatalyst)
-            // On Mac, poll for theme changes every 2 seconds (workaround for simulator sync issues)
-            themeCheckTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
-                NSUbiquitousKeyValueStore.default.synchronize()
-                let newTheme = NSUbiquitousKeyValueStore.default.string(forKey: "theme") ?? "system"
-                if theme != newTheme {
-                    print("🎨 ContentView: Theme updated via polling: \(newTheme)")
-                    theme = newTheme
-                }
-            }
-            
-            // Also check when app becomes active
-            NotificationCenter.default.addObserver(
-                forName: UIApplication.didBecomeActiveNotification,
-                object: nil,
-                queue: .main
-            ) { _ in
-                NSUbiquitousKeyValueStore.default.synchronize()
-                let newTheme = NSUbiquitousKeyValueStore.default.string(forKey: "theme") ?? "system"
-                if theme != newTheme {
-                    print("🎨 ContentView: Theme updated on app activation: \(newTheme)")
-                    theme = newTheme
-                }
-            }
-            #endif
-        }
-        .onDisappear {
-            #if targetEnvironment(macCatalyst)
-            themeCheckTimer?.invalidate()
-            themeCheckTimer = nil
-            #endif
-        }
-        .onChange(of: selectedTab) { _, _ in
-            // Check for theme updates when switching tabs
-            NSUbiquitousKeyValueStore.default.synchronize()
-            let newTheme = NSUbiquitousKeyValueStore.default.string(forKey: "theme") ?? "system"
-            if theme != newTheme {
-                print("🎨 ContentView: Theme updated on tab change: \(newTheme)")
-                theme = newTheme
+                theme = NSUbiquitousKeyValueStore.default.string(forKey: "theme") ?? "system"
             }
         }
     }

@@ -43,7 +43,6 @@ struct MixDoctorApp: App {
             if FileManager.default.fileExists(atPath: storeURL.path) {
                 // Check if we had a migration failure or schema version changed
                 if UserDefaults.standard.bool(forKey: "hadMigrationFailure") || lastSchemaVersion < currentSchemaVersion {
-                    print("⚠️ Deleting old store - schema version: \(lastSchemaVersion) -> \(currentSchemaVersion)")
                     try? FileManager.default.removeItem(at: storeURL)
                     // Also clean up any -wal or -shm files
                     try? FileManager.default.removeItem(at: storeURL.deletingLastPathComponent().appendingPathComponent("MixDoctor.store-wal"))
@@ -65,7 +64,6 @@ struct MixDoctorApp: App {
                 configurations: [modelConfiguration]
             )
             
-            print("✅ ModelContainer created successfully with CloudKit: \(iCloudEnabled)")
             
             // Save schema version on successful initialization
             UserDefaults.standard.set(currentSchemaVersion, forKey: "lastSchemaVersion")
@@ -79,7 +77,6 @@ struct MixDoctorApp: App {
                 let appSupportURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
                 let storeURL = appSupportURL.appendingPathComponent("MixDoctor.store")
                 
-                print("🔄 Attempting recovery - deleting corrupted store")
                 try? FileManager.default.removeItem(at: storeURL)
                 try? FileManager.default.removeItem(at: storeURL.deletingLastPathComponent().appendingPathComponent("MixDoctor.store-wal"))
                 try? FileManager.default.removeItem(at: storeURL.deletingLastPathComponent().appendingPathComponent("MixDoctor.store-shm"))
@@ -92,7 +89,6 @@ struct MixDoctorApp: App {
                 )
                 modelContainer = try ModelContainer(for: schema, configurations: [modelConfiguration])
                 
-                print("✅ ModelContainer recovered successfully (local only)")
                 
                 // Clear the failure flag since it worked
                 UserDefaults.standard.removeObject(forKey: "hadMigrationFailure")

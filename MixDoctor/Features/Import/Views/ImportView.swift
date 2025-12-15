@@ -130,7 +130,6 @@ struct ImportView: View {
             
             // Check for orphaned files (files deleted on other devices)
             Task(priority: .userInitiated) {
-                print("🔍 Import view appeared - checking for orphaned files")
                 await viewModel.scanForOrphanedFiles()
             }
         }
@@ -144,7 +143,6 @@ struct ImportView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .iCloudFilesChanged)) { _ in
             // When iCloud files change, check for orphaned records
-            print("🔔 Import view received iCloudFilesChanged notification")
             Task(priority: .userInitiated) {
                 await viewModel.cleanupOrphanedRecords()
             }
@@ -388,9 +386,6 @@ struct ImportView: View {
     private func handleDrop(providers: [NSItemProvider]) -> Bool {
         guard let viewModel else { return false }
         
-        print("\n" + String(repeating: "📦", count: 40))
-        print("📦 IMPORT VIEW: handleDrop called with \(providers.count) item(s)")
-        print(String(repeating: "📦", count: 40))
         
         Task {
             var urls: [URL] = []
@@ -400,19 +395,15 @@ struct ImportView: View {
                     do {
                         let url = try await provider.loadItem(forTypeIdentifier: UTType.audio.identifier, options: nil) as? URL
                         if let url = url {
-                            print("✅ Dropped file: \(url.lastPathComponent)")
                             urls.append(url)
                         }
                     } catch {
-                        print("❌ Failed to load dropped item: \(error.localizedDescription)")
                     }
                 }
             }
             
             if !urls.isEmpty {
-                print("📞 Calling viewModel.importFiles with \(urls.count) dropped URL(s)")
                 await viewModel.importFiles(urls)
-                print("✅ viewModel.importFiles completed for dropped files")
                 
                 // Select the first file if nothing is selected
                 if !viewModel.importedFiles.isEmpty && selectedAudioFile == nil {
@@ -421,31 +412,21 @@ struct ImportView: View {
             }
         }
         
-        print(String(repeating: "📦", count: 40) + "\n")
         return true
     }
     
     private func handleFileImport(_ result: Result<[URL], Error>) {
         guard let viewModel else { return }
 
-        print("\n" + String(repeating: "🔥", count: 40))
-        print("🔥 IMPORT VIEW: handleFileImport called")
-        print(String(repeating: "🔥", count: 40))
         
         switch result {
         case .success(let urls):
-            print("✅ File picker success: \(urls.count) file(s) selected")
             for (index, url) in urls.enumerated() {
-                print("   File \(index + 1): \(url.lastPathComponent)")
-                print("      Path: \(url.path)")
-                print("      Is security scoped: \(url.startAccessingSecurityScopedResource())")
                 url.stopAccessingSecurityScopedResource()
             }
             
             Task {
-                print("📞 Calling viewModel.importFiles with \(urls.count) URL(s)")
                 await viewModel.importFiles(urls)
-                print("✅ viewModel.importFiles completed")
                 
                 // Just select the first file, don't auto-play or switch tabs
                 if !viewModel.importedFiles.isEmpty && selectedAudioFile == nil {
@@ -453,12 +434,10 @@ struct ImportView: View {
                 }
             }
         case .failure(let error):
-            print("❌ File picker failed: \(error.localizedDescription)")
             viewModel.errorMessage = error.localizedDescription
             viewModel.showError = true
         }
         
-        print(String(repeating: "🔥", count: 40) + "\n")
     }
 
     private func deleteFiles(at offsets: IndexSet, viewModel: ImportViewModel) {

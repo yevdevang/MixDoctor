@@ -155,7 +155,6 @@ struct DashboardView: View {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button {
                         Task {
-                            print("🔄 Manual sync triggered")
                             // First cleanup orphaned records
                             await checkAndDownloadMissingFiles()
                             // Then sync and scan
@@ -224,7 +223,6 @@ struct DashboardView: View {
             // This ensures deleted files are removed immediately when switching back to Dashboard
             Task(priority: .userInitiated) {
                 if !audioFiles.isEmpty {
-                    print("🔍 View appeared - checking for orphaned records")
                     await checkAndDownloadMissingFiles()
                 }
             }
@@ -242,7 +240,6 @@ struct DashboardView: View {
                 if !audioFiles.isEmpty {
                     // On MacCatalyst, aggressively check for orphaned records first
                     #if targetEnvironment(macCatalyst)
-                    print("🖥️ MacCatalyst: Running aggressive orphan cleanup on launch")
                     await checkAndDownloadMissingFiles()
                     // Small delay to let iCloud settle
                     try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
@@ -273,7 +270,6 @@ struct DashboardView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .iCloudSyncCompleted)) { _ in
             // When iCloud sync completes, check for orphaned records AND scan for new files
-            print("🔔 Received iCloudSyncCompleted notification - scanning for new files")
             Task(priority: .utility) {
                 await checkAndDownloadMissingFiles()
                 await scanAndImportFromiCloud()
@@ -281,7 +277,6 @@ struct DashboardView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .iCloudFilesChanged)) { _ in
             // When iCloud files change, immediately check for orphaned records AND scan for new files
-            print("🔔 Received iCloudFilesChanged notification - scanning for new files")
             Task(priority: .userInitiated) {
                 await checkAndDownloadMissingFiles()
                 await scanAndImportFromiCloud()
@@ -504,9 +499,7 @@ struct DashboardView: View {
             
             #if targetEnvironment(macCatalyst)
             // On MacCatalyst, give more time for fullScreenCover to present
-            print("🖥️ MacCatalyst: Showing loader for \(file.fileName)")
             try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
-            print("🖥️ MacCatalyst: Starting analysis")
             #endif
             
             do {
@@ -533,7 +526,6 @@ struct DashboardView: View {
                 
                 
                 #if targetEnvironment(macCatalyst)
-                print("🖥️ MacCatalyst: Analysis complete, hiding loader")
                 #endif
                 
                 // Hide loader and navigate
@@ -549,7 +541,6 @@ struct DashboardView: View {
                 
             } catch {
                 #if targetEnvironment(macCatalyst)
-                print("🖥️ MacCatalyst: Analysis error, hiding loader")
                 #endif
                 
                 isAnalyzing = false
@@ -567,7 +558,6 @@ struct DashboardView: View {
     }
     
     private func checkAndDownloadMissingFiles() async {
-        print("🔍 Checking for missing or orphaned files...")
         
         var missingFiles: [(AudioFile, URL)] = []
         var orphanedRecords: [AudioFile] = []
@@ -576,7 +566,6 @@ struct DashboardView: View {
             let fileURL = file.fileURL
             let fileExists = FileManager.default.fileExists(atPath: fileURL.path)
             
-            print("📄 Checking: \(file.fileName) - exists locally: \(fileExists)")
             
             if !fileExists {
                 // Check if it's in iCloud but not downloaded, or truly deleted
@@ -591,20 +580,16 @@ struct DashboardView: View {
                     let downloadStatus = values.ubiquitousItemDownloadingStatus
                     let isUploaded = values.ubiquitousItemIsUploaded ?? false
                     
-                    print("   iCloud file: \(isICloud), status: \(downloadStatus?.rawValue ?? "nil"), uploaded: \(isUploaded)")
                     
                     // If file is in iCloud AND has a valid download status AND is uploaded, try to download
                     if isICloud && isUploaded && downloadStatus != nil {
-                        print("☁️ File in iCloud, will download: \(file.fileName)")
                         missingFiles.append((file, fileURL))
                     } else {
                         // File doesn't exist in iCloud or is being deleted - orphaned record
-                        print("👻 Orphaned record detected (not in iCloud or being deleted): \(file.fileName)")
                         orphanedRecords.append(file)
                     }
                 } catch {
                     // If we can't get resource values and file doesn't exist, it's orphaned
-                    print("👻 Orphaned record (error checking): \(file.fileName) - \(error.localizedDescription)")
                     orphanedRecords.append(file)
                 }
             }
@@ -612,24 +597,19 @@ struct DashboardView: View {
         
         // Clean up orphaned records (files deleted on another device)
         if !orphanedRecords.isEmpty {
-            print("🗑️ Cleaning up \(orphanedRecords.count) orphaned record(s)")
             for record in orphanedRecords {
-                print("   Removing orphaned record: \(record.fileName)")
                 // Also delete the analysis result
                 AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: record.fileName)
                 modelContext.delete(record)
             }
             do {
                 try modelContext.save()
-                print("✅ Successfully cleaned up orphaned records")
             } catch {
-                print("❌ Failed to save after cleanup: \(error.localizedDescription)")
             }
         }
         
         // Download missing files that still exist in iCloud
         if !missingFiles.isEmpty {
-            print("⬇️ Downloading \(missingFiles.count) missing file(s)")
             
             // Trigger iCloud sync to download missing files
             await iCloudMonitor.syncNow()
@@ -638,19 +618,15 @@ struct DashboardView: View {
             for (file, fileURL) in missingFiles {
                 do {
                     try FileManager.default.startDownloadingUbiquitousItem(at: fileURL)
-                    print("   Started download: \(file.fileName)")
                 } catch {
-                    print("   Failed to start download: \(file.fileName)")
                 }
             }
         } else if orphanedRecords.isEmpty {
-            print("✅ All files are present and accounted for")
         }
     }
     
     /// Remove duplicate entries from the database (keeps oldest import)
     private func removeDuplicateFiles() async {
-        print("🔍 Checking for duplicate files in database...")
         
         // Group files by fileName
         var filesByName: [String: [AudioFile]] = [:]
@@ -661,16 +637,13 @@ struct DashboardView: View {
         var duplicatesRemoved = 0
         
         for (fileName, files) in filesByName where files.count > 1 {
-            print("⚠️ Found \(files.count) duplicates of: \(fileName)")
             
             // Sort by import date (oldest first) and keep the first one
             let sorted = files.sorted { $0.dateImported < $1.dateImported }
             let toKeep = sorted.first!
             let toDelete = sorted.dropFirst()
             
-            print("   Keeping: imported \(toKeep.dateImported)")
             for duplicate in toDelete {
-                print("   Deleting: imported \(duplicate.dateImported)")
                 modelContext.delete(duplicate)
                 duplicatesRemoved += 1
             }
@@ -679,32 +652,25 @@ struct DashboardView: View {
         if duplicatesRemoved > 0 {
             do {
                 try modelContext.save()
-                print("✅ Removed \(duplicatesRemoved) duplicate entries")
             } catch {
-                print("❌ Failed to remove duplicates: \(error.localizedDescription)")
             }
         } else {
-            print("✅ No duplicates found")
         }
     }
     
     private func scanAndImportFromiCloud() async {
         // Prevent concurrent scans
         guard !isScanning else {
-            print("⏭️ Scan already in progress, skipping")
             return
         }
         
         isScanning = true
         defer { isScanning = false }
         
-        print("📂 DashboardView.scanAndImportFromiCloud: Starting scan")
         
         let service = iCloudStorageService.shared
         let audioDir = service.getAudioFilesDirectory()
         
-        print("📂 iCloud audio directory: \(audioDir.path)")
-        print("📂 Directory exists: \(FileManager.default.fileExists(atPath: audioDir.path))")
         
         do {
             let files = try FileManager.default.contentsOfDirectory(
@@ -713,7 +679,6 @@ struct DashboardView: View {
                 options: [.skipsHiddenFiles]
             )
             
-            print("📂 Found \(files.count) total items in iCloud directory")
             
             // Filter audio files - use all supported formats from AppConstants
             let audioFiles = files.filter { fileURL in
@@ -724,14 +689,11 @@ struct DashboardView: View {
                 return AppConstants.supportedAudioFormats.contains(fileURL.pathExtension.lowercased())
             }
             
-            print("📂 Found \(audioFiles.count) audio files:")
             for (index, file) in audioFiles.enumerated() {
-                print("   \(index + 1). \(file.lastPathComponent)")
             }
             
             // Early exit if no audio files found
             guard !audioFiles.isEmpty else {
-                print("📂 No audio files found - exiting")
                 return
             }
             
@@ -741,7 +703,6 @@ struct DashboardView: View {
                 // Check if already imported by comparing stored filename
                 let fileName = fileURL.lastPathComponent
                 
-                print("🔍 Checking file: \(fileName)")
                 
                 let descriptor = FetchDescriptor<AudioFile>(
                     predicate: #Predicate<AudioFile> { $0.fileName == fileName }
@@ -751,13 +712,10 @@ struct DashboardView: View {
                 do {
                     let existing = try modelContext.fetch(descriptor)
                     if !existing.isEmpty {
-                        print("⏭️ File already in database (\(existing.count) matches): \(fileName)")
                         continue
                     } else {
-                        print("✅ File not in database, will import: \(fileName)")
                     }
                 } catch {
-                    print("⚠️ Error checking for existing file: \(error.localizedDescription)")
                 }
                 
                 // Download if needed (with shorter timeout on Mac Catalyst)
@@ -875,41 +833,32 @@ struct DashboardView: View {
     }
 
     private func deleteFiles(at offsets: IndexSet) {
-        print("🗑️ DashboardView.deleteFiles: Starting deletion of \(offsets.count) file(s)")
         
         for index in offsets {
             let file = filteredFiles[index]
-            print("🗑️ Deleting: \(file.fileName)")
             
             // Delete the actual audio file from storage (iCloud or local)
             // Using iCloudStorageService ensures proper eviction and cross-device sync
             let fileURL = file.fileURL
             do {
                 try iCloudStorageService.shared.deleteAudioFile(at: fileURL)
-                print("✅ File deleted from storage: \(file.fileName)")
             } catch {
-                print("❌ Failed to delete file \(file.fileName): \(error.localizedDescription)")
             }
         
             // Delete the analysis result JSON from iCloud Drive
             AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: file.fileName)
-            print("✅ Analysis result deleted for: \(file.fileName)")
         
             // Delete the SwiftData record (CloudKit will sync this deletion)
-            print("🗑️ Deleting database record for: \(file.fileName)")
             modelContext.delete(file)
         }
         
         do {
             try modelContext.save()
-            print("✅ Database records deleted and saved for \(offsets.count) file(s)")
         } catch {
-            print("❌ CRITICAL: Failed to save database deletions: \(error.localizedDescription)")
         }
         
         // Notify other views that files were deleted
         NotificationCenter.default.post(name: .audioFileDeleted, object: nil)
-        print("✅ Deletion complete for \(offsets.count) file(s)")
     }
 }
 
