@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 
 struct SettingsView: View {
     @State private var viewModel = SettingsViewModel()
@@ -10,7 +11,7 @@ struct SettingsView: View {
     @State private var showPaywall = false
     @State private var isRefreshingSubscription = false
     @AppStorage("muteLaunchSound") private var muteLaunchSound = false
-    @State private var showRatingTestAlert = false
+    @Environment(\.modelContext) private var modelContext
     
     var body: some View {
         NavigationStack {
@@ -178,16 +179,14 @@ struct SettingsView: View {
                     }
                     .tint(Color.accentColor)
                     
-                    // Cloud Storage Info - Pro users only
-                    if subscriptionService.isProUser {
-                        NavigationLink {
-                            iCloudDebugView()
-                        } label: {
-                            HStack {
-                                Image(systemName: "info.circle")
-                                    .foregroundStyle(.secondary)
-                                Text("Cloud Storage Info")
-                            }
+                    // Cloud Storage Info & Debug Tools
+                    NavigationLink {
+                        iCloudDebugView()
+                    } label: {
+                        HStack {
+                            Image(systemName: "info.circle")
+                                .foregroundStyle(.secondary)
+                            Text("Cloud Storage Info")
                         }
                     }
                 } header: {
@@ -195,46 +194,6 @@ struct SettingsView: View {
                 } footer: {
                     Text("When enabled, your audio file metadata and analysis results will be synced across all your devices. Audio files remain stored locally on each device. You'll need to restart the app for changes to take effect.")
                 }
-                
-                // MARK: - Developer/Test Section
-                #if DEBUG
-                Section {
-                    Button {
-                        ratingService.forceShowRatingForTesting()
-                        showRatingTestAlert = true
-                    } label: {
-                        HStack {
-                            Image(systemName: "star.fill")
-                                .foregroundStyle(.yellow)
-                            Text("Test Rating Prompt")
-                            Spacer()
-                            Image(systemName: "flask")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    
-                    Button {
-                        ratingService.resetAllRatingTracking()
-                    } label: {
-                        HStack {
-                            Image(systemName: "arrow.counterclockwise")
-                                .foregroundStyle(.orange)
-                            Text("Reset Rating Tracking")
-                        }
-                    }
-                    
-                    HStack {
-                        Text("Total Analyses")
-                        Spacer()
-                        Text("\(subscriptionService.totalAnalysisCount)")
-                            .foregroundStyle(.secondary)
-                    }
-                } header: {
-                    Text("🧪 Test & Debug")
-                } footer: {
-                    Text("These options are only visible in debug builds")
-                }
-                #endif
                 
                 // MARK: - About Section
                 Section {
@@ -261,7 +220,12 @@ struct SettingsView: View {
                     Text("App Information")
                 }
             }
+            #if targetEnvironment(macCatalyst)
+            .scrollContentBackground(.hidden)
+            .navigationTitle("")
+            #else
             .navigationTitle("Settings")
+            #endif
             .navigationBarTitleDisplayMode(.inline)
             .task {
                 await loadStorageInfo()
@@ -277,18 +241,23 @@ struct SettingsView: View {
             } message: {
                 Text("This will free up space by removing temporary files")
             }
-            .alert("Rating Request Sent", isPresented: $showRatingTestAlert) {
-                Button("OK") {}
-            } message: {
-                Text("The rating prompt was triggered. Apple controls if/when it actually appears. If you don't see it, try:\n\n1. Reset iPhone (Device menu)\n2. Delete and reinstall app\n3. Try on a real device instead of simulator")
-            }
             .sheet(isPresented: $viewModel.showAbout) {
                 AboutView()
             }
             .sheet(isPresented: $showPaywall) {
-                PaywallView(onPurchaseComplete: {
-                    // Subscription service updates automatically via RevenueCat listener
-                })
+                PaywallView(
+                    onPurchaseComplete: {
+                        // Subscription service updates automatically via RevenueCat listener
+                    },
+                    onDismiss: {
+                        showPaywall = false
+                    }
+                )
+                #if targetEnvironment(macCatalyst)
+                .frame(width: 850, height: 1100)
+                #endif
+                .presentationDetents([.large])
+                .presentationContentInteraction(.scrolls)
             }
             .task {
                 // Refresh subscription status when view appears
@@ -368,7 +337,9 @@ struct AboutView: View {
                         FeatureRow(icon: "play.circle.fill", title: "Playback", description: "High-quality audio playback")
                     }
                     .padding()
+                    #if !targetEnvironment(macCatalyst)
                     .background(Color(.secondarySystemGroupedBackground))
+                    #endif
                     .cornerRadius(12)
                     
                     Text("© 2025 MixDoctor. All rights reserved.")

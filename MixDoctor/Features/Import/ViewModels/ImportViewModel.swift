@@ -64,11 +64,9 @@ final class ImportViewModel {
                     
                     // Remove the physical file since it's a duplicate
                     let fileURL = file.fileURL
-                    if FileManager.default.fileExists(atPath: fileURL.path) {
-                        do {
-                            try FileManager.default.removeItem(at: fileURL)
-                        } catch {
-                        }
+                    do {
+                        try iCloudStorageService.shared.deleteAudioFile(at: fileURL)
+                    } catch {
                     }
                 }
             }
@@ -104,6 +102,11 @@ final class ImportViewModel {
                 : "All \(urls.count) files are already imported"
             showInfo = true
             importProgress = 1.0
+        } catch let error as AudioImportError where error == .iCloudDownloadFailed {
+            // File not downloaded from iCloud
+            errorMessage = error.errorDescription
+            showError = true
+            importProgress = 0
         } catch {
             if let importError = error as? AudioImportError {
                 errorMessage = importError.errorDescription
@@ -117,6 +120,7 @@ final class ImportViewModel {
     // MARK: - Duplicate Detection
     
     /// Check if a file is a duplicate based on fileName, fileSize, and duration
+    /// Also verifies that the existing file physically exists before treating as duplicate
     private func isDuplicate(_ file: AudioFile) -> Bool {
         let descriptor = FetchDescriptor<AudioFile>()
         guard let allFiles = try? modelContext.fetch(descriptor) else {
@@ -127,6 +131,11 @@ final class ImportViewModel {
         // Check for exact match on fileName and fileSize
         // Duration check within 1 second tolerance (for encoding variations)
         for existingFile in allFiles {
+            // Skip comparing the file to itself (same object ID)
+            if existingFile.id == file.id {
+                continue
+            }
+            
             let sameFileName = existingFile.fileName == file.fileName
             let sameFileSize = existingFile.fileSize == file.fileSize
             let similarDuration = abs(existingFile.duration - file.duration) < 1.0
@@ -135,7 +144,19 @@ final class ImportViewModel {
             }
             
             if sameFileName && sameFileSize && similarDuration {
-                return true
+                // Before treating as duplicate, verify the existing file actually exists
+                let existingFileURL = existingFile.fileURL
+                let fileExists = FileManager.default.fileExists(atPath: existingFileURL.path)
+                
+                
+                if !fileExists {
+                    // File record exists but file is missing - remove the stale record
+                    modelContext.delete(existingFile)
+                    try? modelContext.save()
+                    return false // Not a duplicate since existing file is gone
+                }
+                
+                return true // It's a real duplicate
             }
         }
         
@@ -145,22 +166,26 @@ final class ImportViewModel {
     func removeImportedFile(_ file: AudioFile) {
         
         // Delete the actual audio file from storage (iCloud or local)
+        // Using iCloudStorageService ensures proper eviction and cross-device sync
         let fileURL = file.fileURL
-        if FileManager.default.fileExists(atPath: fileURL.path) {
-            do {
-                try FileManager.default.removeItem(at: fileURL)
-            } catch {
-            }
+        do {
+            try iCloudStorageService.shared.deleteAudioFile(at: fileURL)
+        } catch {
         }
         
         // Delete the analysis result JSON from iCloud Drive
-        let _ = AnalysisResultPersistence.shared
         AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: file.fileName)
         
-        // Delete the SwiftData record
+        // Delete the SwiftData record (CloudKit will sync this deletion)
         modelContext.delete(file)
-        try? modelContext.save()
-        importedFiles.removeAll { $0.id == file.id }
+        
+        do {
+            try modelContext.save()
+        } catch {
+        }
+        
+        // Reload imports to ensure UI is in sync with database
+        loadImports()
         
         // Notify other views that files were deleted
         NotificationCenter.default.post(name: .audioFileDeleted, object: nil)
@@ -207,6 +232,58 @@ final class ImportViewModel {
             }
             
         } catch {
+        }
+    }
+    
+    /// Remove database records for files that no longer exist (deleted on other devices)
+    func cleanupOrphanedRecords() async {
+        
+        let descriptor = FetchDescriptor<AudioFile>()
+        guard let allFiles = try? modelContext.fetch(descriptor) else {
+            return
+        }
+        
+        var orphanedRecords: [AudioFile] = []
+        
+        for file in allFiles {
+            let fileURL = file.fileURL
+            let fileExists = FileManager.default.fileExists(atPath: fileURL.path)
+            
+            if !fileExists {
+                // Check if file is truly gone or just not downloaded from iCloud
+                do {
+                    let values = try fileURL.resourceValues(forKeys: [
+                        .isUbiquitousItemKey,
+                        .ubiquitousItemIsUploadedKey
+                    ])
+                    
+                    let isICloud = values.isUbiquitousItem ?? false
+                    let isUploaded = values.ubiquitousItemIsUploaded ?? false
+                    
+                    // If not in iCloud or not uploaded, it's orphaned
+                    if !isICloud || !isUploaded {
+                        orphanedRecords.append(file)
+                    }
+                } catch {
+                    // Error checking means file is gone
+                    orphanedRecords.append(file)
+                }
+            }
+        }
+        
+        if !orphanedRecords.isEmpty {
+            for record in orphanedRecords {
+                AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: record.fileName)
+                modelContext.delete(record)
+                importedFiles.removeAll { $0.id == record.id }
+            }
+            
+            do {
+                try modelContext.save()
+                loadImports() // Refresh the list
+            } catch {
+            }
+        } else {
         }
     }
 }

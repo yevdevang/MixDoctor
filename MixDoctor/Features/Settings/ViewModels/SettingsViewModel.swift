@@ -74,7 +74,10 @@ final class SettingsViewModel {
             Task { @MainActor in
                 let newTheme = self.cloudStore.string(forKey: "theme") ?? "system"
                 if self.selectedTheme != newTheme {
+                    self.isInitializing = true // Prevent triggering didSet
                     self.selectedTheme = newTheme
+                    self.isInitializing = false
+                    NotificationCenter.default.post(name: NSNotification.Name("ThemeDidChange"), object: nil)
                 }
             }
         }
@@ -117,8 +120,3 @@ final class SettingsViewModel {
         }
     }
 }
-
-extension Notification.Name {
-    static let iCloudSyncToggled = Notification.Name("iCloudSyncToggled")
-}
-

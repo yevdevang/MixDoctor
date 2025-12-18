@@ -71,11 +71,21 @@ struct ResultsView: View {
                 dismiss()
             }
         }) {
-            PaywallView(onPurchaseComplete: {
-                Task {
-                    await performAnalysis()
+            PaywallView(
+                onPurchaseComplete: {
+                    Task {
+                        await performAnalysis()
+                    }
+                },
+                onDismiss: {
+                    showPaywall = false
                 }
-            })
+            )
+            #if targetEnvironment(macCatalyst)
+            .frame(width: 850, height: 1100)
+            #endif
+            .presentationDetents([.large])
+            .presentationContentInteraction(.scrolls)
         }
         .alert("Analysis Error", isPresented: $showError) {
             Button("OK", role: .cancel) { }
@@ -1562,18 +1572,19 @@ struct ResultsView: View {
     private func deleteFile() {
         
         // Delete the actual audio file from storage (iCloud or local)
+        // Using iCloudStorageService ensures proper eviction and cross-device sync
         let fileURL = audioFile.fileURL
-        if FileManager.default.fileExists(atPath: fileURL.path) {
-            do {
-                try FileManager.default.removeItem(at: fileURL)
-            } catch {
-            }
+        do {
+            try iCloudStorageService.shared.deleteAudioFile(at: fileURL)
+            print("🗑️ Deleted file: \(audioFile.fileName)")
+        } catch {
+            print("❌ Failed to delete file \(audioFile.fileName): \(error.localizedDescription)")
         }
         
         // Delete the analysis result JSON from iCloud Drive
         AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: audioFile.fileName)
         
-        // Delete the SwiftData record
+        // Delete the SwiftData record (CloudKit will sync this deletion)
         modelContext.delete(audioFile)
         try? modelContext.save()
         dismiss()

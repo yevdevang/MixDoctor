@@ -410,9 +410,21 @@ private struct MockPackageCard: View {
                 
                 Spacer()
                 
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .font(.title2)
-                    .foregroundColor(isSelected ? Color(red: 0.435, green: 0.173, blue: 0.871) : .gray)
+                ZStack {
+                    Circle()
+                        .fill(isSelected ? Color(red: 0.435, green: 0.173, blue: 0.871) : Color.white)
+                        .frame(width: 28, height: 28)
+                        .overlay(
+                            Circle()
+                                .stroke(isSelected ? Color.clear : Color.gray.opacity(0.4), lineWidth: 2)
+                        )
+                    
+                    if isSelected {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(.white)
+                    }
+                }
             }
             .padding()
             .background(

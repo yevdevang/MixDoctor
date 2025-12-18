@@ -28,6 +28,102 @@ struct ContentView: View {
     }
     
     var body: some View {
+        #if targetEnvironment(macCatalyst)
+        macOSView
+        #else
+        iOSView
+        #endif
+    }
+    
+    // MARK: - macOS/Catalyst View
+    
+    #if targetEnvironment(macCatalyst)
+    private var macOSView: some View {
+        NavigationSplitView(columnVisibility: .constant(.all)) {
+            // Sidebar
+            List {
+                sidebarButton(title: "Dashboard", icon: "square.grid.2x2", tag: 0)
+                sidebarButton(title: "Import", icon: "square.and.arrow.down", tag: 1)
+                sidebarButton(title: "Player", icon: isPlaying ? "pause.circle.fill" : "play.circle", tag: 2)
+                sidebarButton(title: "Settings", icon: "gear", tag: 3)
+            }
+            .listStyle(.sidebar)
+            .navigationTitle("Mix Doctor")
+            .navigationSplitViewColumnWidth(min: 200, ideal: 250, max: 300)
+        } detail: {
+            // Main content area
+            Group {
+                switch selectedTab {
+                case 0:
+                    DashboardView()
+                case 1:
+                    ImportView(
+                        selectedAudioFile: $selectedAudioFile,
+                        selectedTab: $selectedTab,
+                        shouldAutoPlay: $shouldAutoPlay
+                    )
+                case 2:
+                    PlayerView(
+                        audioFile: selectedAudioFile,
+                        allAudioFiles: allAudioFiles,
+                        shouldAutoPlay: $shouldAutoPlay,
+                        onSelectAudioFile: { file in
+                            selectedAudioFile = file
+                        },
+                        onPlaybackStateChange: { playing in
+                            isPlaying = playing
+                        }
+                    )
+                case 3:
+                    SettingsView()
+                default:
+                    DashboardView()
+                }
+            }
+            .navigationTitle(navigationTitle)
+        }
+        .tint(Color(red: 0.435, green: 0.173, blue: 0.871))
+        .preferredColorScheme(colorScheme)
+        .onAppear(perform: setupThemeObservers)
+    }
+    
+    private var navigationTitle: String {
+        switch selectedTab {
+        case 0: return "Dashboard"
+        case 1: return "Import"
+        case 2: return "Player"
+        case 3: return "Settings"
+        default: return "Mix Doctor"
+        }
+    }
+    
+    @ViewBuilder
+    private func sidebarButton(title: String, icon: String, tag: Int) -> some View {
+        Button(action: { selectedTab = tag }) {
+            HStack {
+                Label(title, systemImage: icon)
+                Spacer()
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(colorScheme == .dark ? .white : Color(red: 0.435, green: 0.173, blue: 0.871))
+        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
+        .background(
+            selectedTab == tag 
+                ? RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(red: 0.435, green: 0.173, blue: 0.871).opacity(colorScheme == .dark ? 0.3 : 0.15))
+                : nil
+        )
+        .listRowBackground(Color.clear)
+        .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
+    }
+    #endif
+    
+    // MARK: - iOS/iPadOS View
+    
+    private var iOSView: some View {
         TabView(selection: $selectedTab) {
             DashboardView()
                 .tabItem {
@@ -69,27 +165,31 @@ struct ContentView: View {
         }
         .tint(Color(red: 0.435, green: 0.173, blue: 0.871))
         .preferredColorScheme(colorScheme)
-        .onAppear {
-            // Load theme from iCloud
+        .onAppear(perform: setupThemeObservers)
+    }
+    
+    // MARK: - Helper Methods
+    
+    private func setupThemeObservers() {
+        // Load theme from iCloud
+        theme = NSUbiquitousKeyValueStore.default.string(forKey: "theme") ?? "system"
+        
+        // Listen for iCloud theme changes from other devices
+        NotificationCenter.default.addObserver(
+            forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
+            object: NSUbiquitousKeyValueStore.default,
+            queue: .main
+        ) { _ in
             theme = NSUbiquitousKeyValueStore.default.string(forKey: "theme") ?? "system"
-            
-            // Listen for iCloud theme changes from other devices
-            NotificationCenter.default.addObserver(
-                forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
-                object: NSUbiquitousKeyValueStore.default,
-                queue: .main
-            ) { _ in
-                theme = NSUbiquitousKeyValueStore.default.string(forKey: "theme") ?? "system"
-            }
-            
-            // Listen for local theme changes within this app
-            NotificationCenter.default.addObserver(
-                forName: NSNotification.Name("ThemeDidChange"),
-                object: nil,
-                queue: .main
-            ) { _ in
-                theme = NSUbiquitousKeyValueStore.default.string(forKey: "theme") ?? "system"
-            }
+        }
+        
+        // Listen for local theme changes within this app
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("ThemeDidChange"),
+            object: nil,
+            queue: .main
+        ) { _ in
+            theme = NSUbiquitousKeyValueStore.default.string(forKey: "theme") ?? "system"
         }
     }
 }

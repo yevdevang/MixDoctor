@@ -145,6 +145,7 @@ struct StatCard: View {
 
 struct AudioFileRow: View {
     let audioFile: AudioFile
+    var onDelete: (() -> Void)? = nil
     
     @State private var fileExists: Bool = true
     @State private var isDownloading: Bool = false
@@ -240,6 +241,25 @@ struct AudioFileRow: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            
+            #if targetEnvironment(macCatalyst)
+            // Trash button on Mac
+            if let onDelete = onDelete {
+                Button {
+                    onDelete()
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.red)
+                        .frame(width: 36, height: 36)
+                        .background(
+                            Circle()
+                                .fill(Color.red.opacity(0.1))
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+            #endif
             
             // Analyze icon button
             ZStack {

@@ -25,4 +25,7 @@ enum AppConstants {
 // MARK: - Notification Names
 extension Notification.Name {
     static let audioFileDeleted = Notification.Name("audioFileDeleted")
+    static let iCloudSyncCompleted = Notification.Name("iCloudSyncCompleted")
+    static let iCloudFilesChanged = Notification.Name("iCloudFilesChanged")
+    static let iCloudSyncToggled = Notification.Name("iCloudSyncToggled")
 }

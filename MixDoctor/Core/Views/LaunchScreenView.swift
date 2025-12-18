@@ -30,7 +30,11 @@ struct LaunchScreenView: View {
                 Image("mix-doctor-bg")
                     .resizable()
                     .aspectRatio(contentMode: .fit)
+                    #if targetEnvironment(macCatalyst)
+                    .frame(width: 180, height: 180)
+                    #else
                     .frame(width: 120, height: 120)
+                    #endif
                     .clipShape(RoundedRectangle(cornerRadius: 27, style: .continuous))
                     .scaleEffect(isAnimating ? 1.0 : 0.5)
                     .opacity(isAnimating ? 1.0 : 0.0)
@@ -38,7 +42,11 @@ struct LaunchScreenView: View {
                 
                 // App name
                 Text("MixDoctor")
+                    #if targetEnvironment(macCatalyst)
+                    .font(.system(size: 48, weight: .bold))
+                    #else
                     .font(.system(size: 32, weight: .bold))
+                    #endif
                     .foregroundStyle(
                         LinearGradient(
                             colors: [
@@ -98,7 +106,11 @@ struct LaunchScreenView: View {
             HStack(spacing: 0) {
                 ForEach(Array(text.enumerated()), id: \.offset) { index, character in
                     Text(String(character))
+                        #if targetEnvironment(macCatalyst)
+                        .font(.system(size: 25.5, weight: .medium))
+                        #else
                         .font(.system(size: 17, weight: .medium))
+                        #endif
                         .foregroundStyle(gradientForIndex(index))
                         .offset(y: letterOffsets.indices.contains(index) ? letterOffsets[index] : -50)
                         .opacity(letterOpacities.indices.contains(index) ? letterOpacities[index] : 0)

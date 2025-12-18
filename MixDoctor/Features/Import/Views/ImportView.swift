@@ -7,9 +7,14 @@ struct ImportView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var viewModel: ImportViewModel?
     @State private var isShowingDocumentPicker = false
+    @State private var isDropTargeted = false
     @Binding var selectedAudioFile: AudioFile?
     @Binding var selectedTab: Int
     @Binding var shouldAutoPlay: Bool
+    #if targetEnvironment(macCatalyst)
+    @State private var fileToDelete: AudioFile?
+    @State private var showDeleteConfirmation = false
+    #endif
 
     var body: some View {
         NavigationStack {
@@ -24,15 +29,29 @@ struct ImportView: View {
                         }
                 }
             }
+            .fileImporter(
+                isPresented: $isShowingDocumentPicker,
+                allowedContentTypes: [.audio],
+                allowsMultipleSelection: true
+            ) { result in
+                handleFileImport(result)
+            }
+            #if targetEnvironment(macCatalyst)
+            .navigationTitle("")
+            #else
             .navigationTitle("Import Audio")
+            #endif
             .navigationBarTitleDisplayMode(.inline)
         }
-        .fileImporter(
-            isPresented: $isShowingDocumentPicker,
-            allowedContentTypes: [.audio],
-            allowsMultipleSelection: true
-        ) { result in
-            handleFileImport(result)
+        .onAppear {
+            #if targetEnvironment(macCatalyst)
+            let appearance = UINavigationBarAppearance()
+            appearance.configureWithTransparentBackground()
+            appearance.shadowColor = nil
+            UINavigationBar.appearance().standardAppearance = appearance
+            UINavigationBar.appearance().scrollEdgeAppearance = appearance
+            UINavigationBar.appearance().compactAppearance = appearance
+            #endif
         }
         .alert("Import Error", isPresented: errorBinding) {
             Button("OK", role: .cancel) { }
@@ -44,7 +63,28 @@ struct ImportView: View {
         } message: {
             Text(viewModel?.infoMessage ?? "")
         }
+        #if targetEnvironment(macCatalyst)
+        .alert("Delete File", isPresented: $showDeleteConfirmation) {
+            Button("Cancel", role: .cancel) {
+                fileToDelete = nil
+            }
+            Button("Delete", role: .destructive) {
+                if let viewModel = viewModel,
+                   let file = fileToDelete,
+                   let index = viewModel.importedFiles.firstIndex(where: { $0.id == file.id }) {
+                    deleteFiles(at: IndexSet(integer: index), viewModel: viewModel)
+                }
+                fileToDelete = nil
+            }
+        } message: {
+            if let file = fileToDelete {
+                Text("Are you sure you want to delete '\(file.fileName)'? This will remove it from all your devices.")
+            }
+        }
+        .background(Color.backgroundPrimary.ignoresSafeArea(edges: [.top, .horizontal]))
+        #else
         .background(Color.backgroundPrimary.ignoresSafeArea())
+        #endif
     }
 
     // MARK: - Subviews
@@ -65,47 +105,93 @@ struct ImportView: View {
                 importedFilesList(viewModel: viewModel)
             }
         }
-        .task {
-            if viewModel.importedFiles.isEmpty {
-                viewModel.loadImports()
-                // Automatically scan for orphaned files when Import tab loads empty
-                Task {
-                    await viewModel.scanForOrphanedFiles()
+        .background(
+            ZStack {
+                // Invisible full-coverage drop target - only active when dragging
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onDrop(of: [.audio], isTargeted: $isDropTargeted) { providers in
+                        handleDrop(providers: providers)
+                        return true
+                    }
+                
+                // Visual drop zone overlay when dragging
+                if isDropTargeted {
+                    RoundedRectangle(cornerRadius: 16)
+                        .strokeBorder(
+                            Color.primaryAccent,
+                            style: StrokeStyle(
+                                lineWidth: 3,
+                                dash: [10, 5]
+                            )
+                        )
+                        .background(
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(Color.primaryAccent.opacity(0.1))
+                        )
+                        .padding(8)
+                        .allowsHitTesting(false)
+                        .transition(.opacity)
                 }
+            }
+        )
+        .animation(.easeInOut(duration: 0.2), value: isDropTargeted)
+        .task {
+            // Always load imports and check for orphans on appear
+            viewModel.loadImports()
+            
+            // Check for orphaned files (files deleted on other devices)
+            Task(priority: .userInitiated) {
+                await viewModel.scanForOrphanedFiles()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .audioFileDeleted)) { _ in
             // Reload files when a file is deleted from Dashboard
             viewModel.loadImports()
+            // Also check for orphans
+            Task {
+                await viewModel.scanForOrphanedFiles()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .iCloudFilesChanged)) { _ in
+            // When iCloud files change, check for orphaned records
+            Task(priority: .userInitiated) {
+                await viewModel.cleanupOrphanedRecords()
+            }
         }
     }
 
     private var dropZoneView: some View {
-        VStack(spacing: 24) {
+        HStack {
             Spacer()
+            
+            VStack(spacing: 24) {
+                Spacer()
 
-            Image(systemName: "waveform.circle.fill")
-                .font(.system(size: 80))
-                .foregroundStyle(Color.primaryAccent)
+                Image(systemName: "waveform.circle.fill")
+                    .font(.system(size: 80))
+                    .foregroundStyle(Color.primaryAccent)
 
-            VStack(spacing: 8) {
-                Text("Import Audio Files")
-                    .font(.title2.weight(.semibold)) 
-
-                
-            }
-
-            HStack(spacing: 16) {
-                Button {
-                    isShowingDocumentPicker = true
-                } label: {
-                    Label("Browse Files", systemImage: "folder")
-                        .frame(maxWidth: 200)
+                VStack(spacing: 8) {
+                    Text("Import Audio Files")
+                        .font(.title2.weight(.semibold))
+                    
+                    Text("Drag & drop or browse files")
+                        .font(.subheadline)
+                        .foregroundStyle(Color.secondaryText)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                
-                // Sync button to recover orphaned files
+
+                HStack(spacing: 16) {
+                    Button {
+                        isShowingDocumentPicker = true
+                    } label: {
+                        Label("Browse Files", systemImage: "folder")
+                            .frame(maxWidth: 200)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    
+                    // Sync button to recover orphaned files
 //                if let viewModel {
 //                    Button {
 //                        Task {
@@ -119,9 +205,15 @@ struct ImportView: View {
 //                    .controlSize(.large)
 //                    .disabled(viewModel.isImporting)
 //                }
-            }
+                }
 
-            supportedFormatsView
+                supportedFormatsView
+                
+                Spacer()
+            }
+            .frame(maxWidth: 500)
+            
+            Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
@@ -130,53 +222,109 @@ struct ImportView: View {
     private func importedFilesList(viewModel: ImportViewModel) -> some View {
         @Bindable var viewModel = viewModel
 
-        return List {
-            Section {
-                ForEach(viewModel.importedFiles) { file in
-                    ImportedFileRow(
-                        audioFile: file,
-                        onPlayTapped: {
-                            selectedAudioFile = file
-                            shouldAutoPlay = true
-                            selectedTab = 2 // Navigate to Player tab
-                        }
-                    )
-                }
-                .onDelete { indexSet in
-                    deleteFiles(at: indexSet, viewModel: viewModel)
-                }
-            } header: {
-                HStack(alignment: .center) {
-                    Text("\(viewModel.importedFiles.count) \(viewModel.importedFiles.count == 1 ? "Song" : "Songs")")
-                        .textCase(.none)
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-                    Spacer()
-                    
-                    // Scan for orphaned files button
-                    Button {
-                        Task {
-                            await viewModel.scanForOrphanedFiles()
-                        }
-                    } label: {
-                        Image(systemName: "arrow.clockwise.icloud")
+        return VStack(spacing: 0) {
+            #if targetEnvironment(macCatalyst)
+            // Import More button at the top on Mac
+            HStack {
+                Text("\(viewModel.importedFiles.count) \(viewModel.importedFiles.count == 1 ? "Song" : "Songs")")
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                
+                Spacer()
+                
+                Button {
+                    Task {
+                        await viewModel.scanForOrphanedFiles()
                     }
-                    .font(.subheadline)
-                    .disabled(viewModel.isImporting)
-                    
-                    Button("Import More") {
-                        isShowingDocumentPicker = true
-                    }
-                    .font(.subheadline)
-                    .disabled(viewModel.isImporting)
+                } label: {
+                    Label("Sync", systemImage: "arrow.clockwise.icloud")
                 }
-                .padding(.vertical, 4)
+                .buttonStyle(.bordered)
+                .disabled(viewModel.isImporting)
+                
+                Button {
+                    isShowingDocumentPicker = true
+                } label: {
+                    Label("Import More", systemImage: "plus.circle.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(viewModel.isImporting)
             }
-        }
-        .listStyle(.insetGrouped)
-        .overlay {
-            if viewModel.importedFiles.isEmpty {
-                EmptyImportState()
+            .padding()
+            #endif
+            
+            List {
+                Section {
+                    ForEach(viewModel.importedFiles) { file in
+                        ImportedFileRow(
+                            audioFile: file,
+                            onPlayTapped: {
+                                selectedAudioFile = file
+                                shouldAutoPlay = true
+                                selectedTab = 2 // Navigate to Player tab
+                            },
+                            onDelete: {
+                                #if targetEnvironment(macCatalyst)
+                                fileToDelete = file
+                                showDeleteConfirmation = true
+                                #else
+                                if let index = viewModel.importedFiles.firstIndex(where: { $0.id == file.id }) {
+                                    deleteFiles(at: IndexSet(integer: index), viewModel: viewModel)
+                                }
+                                #endif
+                            }
+                        )
+                        #if targetEnvironment(macCatalyst)
+                        .listRowBackground(Color.clear)
+                        #endif
+                    }
+                    .onDelete { indexSet in
+                        deleteFiles(at: indexSet, viewModel: viewModel)
+                    }
+                    
+                    // Spacer row to make list take full height and accept drops
+                    Color.clear
+                        .frame(maxWidth: .infinity, minHeight: 100)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                } header: {
+                    #if !targetEnvironment(macCatalyst)
+                    HStack(alignment: .center) {
+                        Text("\(viewModel.importedFiles.count) \(viewModel.importedFiles.count == 1 ? "Song" : "Songs")")
+                            .textCase(.none)
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        
+                        // Scan for orphaned files button
+                        Button {
+                            Task {
+                                await viewModel.scanForOrphanedFiles()
+                            }
+                        } label: {
+                            Image(systemName: "arrow.clockwise.icloud")
+                        }
+                        .font(.subheadline)
+                        .disabled(viewModel.isImporting)
+                        
+                        Button("Import More") {
+                            isShowingDocumentPicker = true
+                        }
+                        .font(.subheadline)
+                        .disabled(viewModel.isImporting)
+                    }
+                    .padding(.vertical, 4)
+                    #endif
+                }
+            }
+            .listStyle(.insetGrouped)
+            #if targetEnvironment(macCatalyst)
+            .scrollContentBackground(.hidden)
+            #endif
+            .overlay {
+                if viewModel.importedFiles.isEmpty {
+                    EmptyImportState()
+                }
             }
         }
     }
@@ -201,27 +349,40 @@ struct ImportView: View {
 
     private func importProgressView(progress: Double) -> some View {
         VStack(spacing: 12) {
+            HStack(spacing: 12) {
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .scaleEffect(0.8)
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Importing files…")
+                        .font(.headline)
+                    
+                    if progress > 0 {
+                        Text("\(Int(progress * 100))% complete")
+                            .font(.caption)
+                            .foregroundStyle(Color.secondaryText)
+                    }
+                }
+                
+                Spacer()
+            }
+            
             if progress > 0 {
-                ProgressView(value: progress, total: 1) {
-                    Text("Importing files…")
-                        .font(.headline)
-                }
-                .progressViewStyle(.linear)
-
-                Text("\(Int(progress * 100))% complete")
-                    .font(.caption)
-                    .foregroundStyle(Color.secondaryText)
+                ProgressView(value: progress, total: 1)
+                    .progressViewStyle(.linear)
+                    .tint(.accentColor)
             } else {
-                ProgressView {
-                    Text("Importing files…")
-                        .font(.headline)
-                }
-                .progressViewStyle(.linear)
+                ProgressView()
+                    .progressViewStyle(.linear)
+                    .tint(.accentColor)
             }
         }
         .padding()
         .frame(maxWidth: .infinity)
+        #if !targetEnvironment(macCatalyst)
         .background(Color.backgroundSecondary)
+        #endif
     }
 
     // MARK: - Actions
@@ -234,11 +395,48 @@ struct ImportView: View {
         viewModel = newViewModel
     }
 
+    private func handleDrop(providers: [NSItemProvider]) -> Bool {
+        guard let viewModel else { return false }
+        
+        
+        Task {
+            var urls: [URL] = []
+            
+            for provider in providers {
+                if provider.hasItemConformingToTypeIdentifier(UTType.audio.identifier) {
+                    do {
+                        let url = try await provider.loadItem(forTypeIdentifier: UTType.audio.identifier, options: nil) as? URL
+                        if let url = url {
+                            urls.append(url)
+                        }
+                    } catch {
+                    }
+                }
+            }
+            
+            if !urls.isEmpty {
+                await viewModel.importFiles(urls)
+                
+                // Select the first file if nothing is selected
+                if !viewModel.importedFiles.isEmpty && selectedAudioFile == nil {
+                    selectedAudioFile = viewModel.importedFiles.first
+                }
+            }
+        }
+        
+        return true
+    }
+    
     private func handleFileImport(_ result: Result<[URL], Error>) {
         guard let viewModel else { return }
 
+        
         switch result {
         case .success(let urls):
+            for (index, url) in urls.enumerated() {
+                url.stopAccessingSecurityScopedResource()
+            }
+            
             Task {
                 await viewModel.importFiles(urls)
                 
@@ -251,6 +449,7 @@ struct ImportView: View {
             viewModel.errorMessage = error.localizedDescription
             viewModel.showError = true
         }
+        
     }
 
     private func deleteFiles(at offsets: IndexSet, viewModel: ImportViewModel) {
@@ -280,6 +479,7 @@ struct ImportView: View {
 private struct ImportedFileRow: View {
     let audioFile: AudioFile
     let onPlayTapped: () -> Void
+    var onDelete: (() -> Void)? = nil
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
@@ -298,6 +498,25 @@ private struct ImportedFileRow: View {
             
             Spacer(minLength: 8)
             
+            #if targetEnvironment(macCatalyst)
+            // Trash button on Mac
+            if let onDelete = onDelete {
+                Button {
+                    onDelete()
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 16))
+                        .foregroundStyle(.red)
+                        .frame(width: 36, height: 36)
+                        .background(
+                            Circle()
+                                .fill(Color.red.opacity(0.1))
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+            #endif
+            
             Button(action: onPlayTapped) {
                 Image(systemName: "play.circle.fill")
                     .font(.system(size: 36))
@@ -306,7 +525,6 @@ private struct ImportedFileRow: View {
             .buttonStyle(.plain)
         }
         .padding(.vertical, 8)
-        .contentShape(Rectangle())
     }
 
     private func secondsText(duration: TimeInterval) -> String {
