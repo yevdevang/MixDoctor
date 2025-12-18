@@ -407,6 +407,9 @@ struct ImportView: View {
                     do {
                         let url = try await provider.loadItem(forTypeIdentifier: UTType.audio.identifier, options: nil) as? URL
                         if let url = url {
+                            // CRITICAL: Start accessing security-scoped resource immediately
+                            // for drag-and-drop on MacCatalyst
+                            _ = url.startAccessingSecurityScopedResource()
                             urls.append(url)
                         }
                     } catch {
@@ -433,8 +436,9 @@ struct ImportView: View {
         
         switch result {
         case .success(let urls):
-            for (index, url) in urls.enumerated() {
-                url.stopAccessingSecurityScopedResource()
+            // Start accessing security-scoped resources for file picker
+            for url in urls {
+                _ = url.startAccessingSecurityScopedResource()
             }
             
             Task {
