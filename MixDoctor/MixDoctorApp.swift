@@ -197,10 +197,19 @@ struct MixDoctorApp: App {
                 }
                 
                 #if targetEnvironment(macCatalyst)
-                // Hide window title on Mac
-                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                   let titlebar = windowScene.titlebar {
-                    titlebar.titleVisibility = .hidden
+                // Hide window title on Mac and disable window resizing
+                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+                    if let titlebar = windowScene.titlebar {
+                        titlebar.titleVisibility = .hidden
+                    }
+                    
+                    // Disable window resizing by setting min/max to same size
+                    if let sizeRestrictions = windowScene.sizeRestrictions {
+                        let fixedWidth: CGFloat = 1920
+                        let fixedHeight: CGFloat = 1280
+                        sizeRestrictions.minimumSize = CGSize(width: fixedWidth, height: fixedHeight)
+                        sizeRestrictions.maximumSize = CGSize(width: fixedWidth, height: fixedHeight)
+                    }
                 }
                 #endif
             }

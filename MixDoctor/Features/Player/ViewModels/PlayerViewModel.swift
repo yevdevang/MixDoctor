@@ -56,8 +56,13 @@ final class PlayerViewModel {
     
     init(audioFile: AudioFile) {
         self.audioFile = audioFile
-        setupAudioEngine()
+        // Note: setupAudioEngine() is now async and called from initializeAsync()
         generateWaveform()
+    }
+    
+    /// Initialize audio engine asynchronously (must be called after init)
+    func initializeAsync() async {
+        await setupAudioEngine()
     }
     
     deinit {
@@ -68,15 +73,20 @@ final class PlayerViewModel {
     
     // MARK: - Setup
     
-    private func setupAudioEngine() {
+    private func setupAudioEngine() async {
         
         do {
+            // CRITICAL: Ensure iCloud file is downloaded before accessing
+            // This prevents "file not found" errors for iCloud files
+            let iCloudService = iCloudStorageService.shared
+            try await iCloudService.ensureFileIsDownloaded(at: audioFile.fileURL)
+            
             // Check if file exists
             let fileManager = FileManager.default
             let fileExists = fileManager.fileExists(atPath: audioFile.fileURL.path)
             
             guard fileExists else {
-                let errorMsg = "Audio file does not exist at path: \(audioFile.fileURL.path)"
+                let errorMsg = "Audio file does not exist at path: \(audioFile.fileURL.path)\nFile: \(audioFile.fileName)"
                 loadError = errorMsg
                 return
             }

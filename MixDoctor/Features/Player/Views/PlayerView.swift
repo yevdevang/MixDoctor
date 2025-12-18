@@ -39,6 +39,7 @@ struct PlayerView: View {
                         .task {
                             if let file = audioFile {
                                 let newViewModel = PlayerViewModel(audioFile: file)
+                                await newViewModel.initializeAsync()
                                 viewModel = newViewModel
                             }
                         }
@@ -73,14 +74,17 @@ struct PlayerView: View {
                 // Stop current playback if any
                 viewModel?.stop()
                 // Create new view model with selected audio file
-                let newViewModel = PlayerViewModel(audioFile: newFile)
-                viewModel = newViewModel
-                // Auto-play if flag is set
-                if shouldAutoPlay {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        newViewModel.play()
+                Task {
+                    let newViewModel = PlayerViewModel(audioFile: newFile)
+                    await newViewModel.initializeAsync()
+                    viewModel = newViewModel
+                    // Auto-play if flag is set
+                    if shouldAutoPlay {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            newViewModel.play()
+                        }
+                        shouldAutoPlay = false // Reset flag
                     }
-                    shouldAutoPlay = false // Reset flag
                 }
             }
         }
