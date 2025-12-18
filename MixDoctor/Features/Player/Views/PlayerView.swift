@@ -53,6 +53,15 @@ struct PlayerView: View {
             #endif
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
+                #if targetEnvironment(macCatalyst)
+                let appearance = UINavigationBarAppearance()
+                appearance.configureWithTransparentBackground()
+                appearance.shadowColor = nil
+                UINavigationBar.appearance().standardAppearance = appearance
+                UINavigationBar.appearance().scrollEdgeAppearance = appearance
+                UINavigationBar.appearance().compactAppearance = appearance
+                #endif
+                
                 // Auto-select first file if none is selected but files exist
                 if audioFile == nil && !allAudioFiles.isEmpty {
                     onSelectAudioFile(allAudioFiles[0])
@@ -94,6 +103,9 @@ struct PlayerView: View {
                 }
             }
         }
+        #if targetEnvironment(macCatalyst)
+        .background(Color.backgroundPrimary.ignoresSafeArea(edges: [.top, .horizontal]))
+        #endif
     }
     
     // MARK: - Content Views

@@ -118,9 +118,10 @@ struct MixDoctorApp: App {
         UINavigationBar.appearance().scrollEdgeAppearance = navBarAppearance
         UINavigationBar.appearance().compactAppearance = navBarAppearance
         
-        // Tab bar fonts
+        // Tab bar fonts and styling
         let tabBarAppearance = UITabBarAppearance()
         tabBarAppearance.configureWithDefaultBackground()
+        
         let tabBarItemAppearance = UITabBarItemAppearance()
         tabBarItemAppearance.normal.titleTextAttributes = [
             .font: UIFont.systemFont(ofSize: 10 * fontScale)

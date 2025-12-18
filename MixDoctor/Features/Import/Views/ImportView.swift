@@ -43,6 +43,16 @@ struct ImportView: View {
             #endif
             .navigationBarTitleDisplayMode(.inline)
         }
+        .onAppear {
+            #if targetEnvironment(macCatalyst)
+            let appearance = UINavigationBarAppearance()
+            appearance.configureWithTransparentBackground()
+            appearance.shadowColor = nil
+            UINavigationBar.appearance().standardAppearance = appearance
+            UINavigationBar.appearance().scrollEdgeAppearance = appearance
+            UINavigationBar.appearance().compactAppearance = appearance
+            #endif
+        }
         .alert("Import Error", isPresented: errorBinding) {
             Button("OK", role: .cancel) { }
         } message: {
@@ -71,8 +81,10 @@ struct ImportView: View {
                 Text("Are you sure you want to delete '\(file.fileName)'? This will remove it from all your devices.")
             }
         }
-        #endif
+        .background(Color.backgroundPrimary.ignoresSafeArea(edges: [.top, .horizontal]))
+        #else
         .background(Color.backgroundPrimary.ignoresSafeArea())
+        #endif
     }
 
     // MARK: - Subviews
