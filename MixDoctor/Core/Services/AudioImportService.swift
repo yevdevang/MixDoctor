@@ -73,16 +73,19 @@ final class AudioImportService {
     
     func importAudioFile(from url: URL, modelContext: ModelContext? = nil) async throws -> AudioFile {
         
-        guard url.startAccessingSecurityScopedResource() else {
-            throw AudioImportError.accessDenied
-        }
+        // Try to start accessing security-scoped resource
+        // Note: This may return false if already accessed by caller, which is OK
+        let didStart = url.startAccessingSecurityScopedResource()
         defer {
-            url.stopAccessingSecurityScopedResource()
+            if didStart {
+                url.stopAccessingSecurityScopedResource()
+            }
         }
         
         print("🚀 AudioImportService.importAudioFile: Starting import of \(url.lastPathComponent)")
         print("   Source path: \(url.path)")
         print("   Full URL: \(url.absoluteString)")
+        print("   Security-scoped resource: \(didStart ? "started" : "already accessed or not needed")")
         
         // CRITICAL FIRST CHECK: Try to actually read file data BEFORE anything else
         // This catches files that appear to exist but aren't actually downloaded
