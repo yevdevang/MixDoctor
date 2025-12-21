@@ -14,7 +14,6 @@ import SwiftData
 // Import core models and services
 import SwiftUI
 
-@MainActor
 public class AudioKitService: ObservableObject {
     public static let shared = AudioKitService()
     
@@ -32,8 +31,16 @@ public class AudioKitService: ObservableObject {
     
     // MARK: - File-Based Audio Analysis
     
+    /// Static analysis function that runs completely isolated from main actor
+    /// This is crucial for MacCatalyst to avoid UI blocking
+    public static func analyzeAudioFileIsolated(url: URL) async throws -> AnalysisResult {
+        // This runs completely isolated - no access to shared state
+        return try await AudioKitService.shared.performAudioKitAnalysis(url: url)
+    }
+    
     /// Analyze audio file and return comprehensive analysis for display
-    public func getDetailedAnalysis(for url: URL) async throws -> AnalysisResult {
+    /// Must be nonisolated to avoid blocking main thread on MacCatalyst
+    nonisolated public func getDetailedAnalysis(for url: URL) async throws -> AnalysisResult {
         
         // Check if analysis already exists in iCloud Drive to avoid re-analyzing
         let fileName = url.lastPathComponent
@@ -50,8 +57,9 @@ public class AudioKitService: ObservableObject {
         }
         
         
-        isAnalyzing = true
-        defer { isAnalyzing = false }
+        // Don't update @Published on main thread - let caller handle UI updates
+        // await MainActor.run { isAnalyzing = true }
+        // defer { Task { @MainActor in isAnalyzing = false } }
         
         let result = try await performAudioKitAnalysis(url: url)
         
@@ -65,27 +73,35 @@ public class AudioKitService: ObservableObject {
     }
     
     
-    private func performAudioKitAnalysis(url: URL) async throws -> AnalysisResult {
-        // Load audio file for AudioKit analysis
-        guard let audioFile = try? AVAudioFile(forReading: url) else {
-            throw AudioKitError.fileLoadFailed
-        }
-        
-        // Calculate duration from AudioKit/AVFoundation
-        let duration = Double(audioFile.length) / audioFile.processingFormat.sampleRate
-        let actualSampleRate = audioFile.processingFormat.sampleRate
-        
-        // Read audio data into buffer for AudioKit processing
-        let frameCount = AVAudioFrameCount(audioFile.length)
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: audioFile.processingFormat, frameCapacity: frameCount) else {
-            throw AudioKitError.processingFailed
-        }
-        
-        try audioFile.read(into: buffer)
+    nonisolated private func performAudioKitAnalysis(url: URL) async throws -> AnalysisResult {
+        // Perform all file I/O on a background thread to avoid blocking
+        let (buffer, duration, actualSampleRate, fileName) = try await Task.detached(priority: .userInitiated) {
+            // Load audio file for AudioKit analysis
+            guard let audioFile = try? AVAudioFile(forReading: url) else {
+                throw AudioKitError.fileLoadFailed
+            }
+            
+            // Calculate duration from AudioKit/AVFoundation
+            let duration = Double(audioFile.length) / audioFile.processingFormat.sampleRate
+            let actualSampleRate = audioFile.processingFormat.sampleRate
+            
+            // Read audio data into buffer for AudioKit processing (BLOCKING I/O)
+            let frameCount = AVAudioFrameCount(audioFile.length)
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: audioFile.processingFormat, frameCapacity: frameCount) else {
+                throw AudioKitError.processingFailed
+            }
+            
+            // This is the blocking operation - do it on background thread
+            try audioFile.read(into: buffer)
+            
+            let fileName = url.lastPathComponent
+            return (buffer, duration, actualSampleRate, fileName)
+        }.value
 
-        // Perform AudioKit-based analysis with actual sample rate and filename
-        let fileName = url.lastPathComponent
-        let analysisResult = await performAudioKitBufferAnalysis(buffer, duration: duration, sampleRate: actualSampleRate, fileName: fileName)
+        // Perform AudioKit-based analysis on background thread (CPU-intensive DSP)
+        let analysisResult = await Task.detached(priority: .userInitiated) {
+            await self.performAudioKitBufferAnalysis(buffer, duration: duration, sampleRate: actualSampleRate, fileName: fileName)
+        }.value
         
         // Create AnalysisResult with AudioKit data
         // Note: audioFile parameter is AVAudioFile, but AnalysisResult expects MixDoctor.AudioFile
@@ -156,8 +172,8 @@ public class AudioKitService: ObservableObject {
         do {
             
             // Get subscription status
-            let subscriptionService = SubscriptionService.shared
-            let isProUser = subscriptionService.isProUser
+            let subscriptionService = await SubscriptionService.shared
+            let isProUser = await subscriptionService.isProUser
             
             // Prepare comprehensive professional metrics for Claude
             let metrics = AudioMetricsForClaude(
@@ -227,7 +243,10 @@ public class AudioKitService: ObservableObject {
                 isProUser: isProUser
             )
             
-            let claudeResponse = try await ClaudeAPIService.shared.analyzeAudioMetrics(metrics)
+            // Claude API call - ensure it's off main thread
+            let claudeResponse = try await Task.detached(priority: .userInitiated) {
+                try await ClaudeAPIService.shared.analyzeAudioMetrics(metrics)
+            }.value
             
             // UNMIXED DETECTION DISABLED - always show score
             // Simple arrangements shouldn't be penalized
@@ -259,7 +278,7 @@ public class AudioKitService: ObservableObject {
     
     // MARK: - AudioKit Analysis Implementation
     
-    private func performAudioKitBufferAnalysis(_ buffer: AVAudioPCMBuffer, duration: TimeInterval, sampleRate: Double, fileName: String) async -> AudioKitAnalysisResult {
+    nonisolated private func performAudioKitBufferAnalysis(_ buffer: AVAudioPCMBuffer, duration: TimeInterval, sampleRate: Double, fileName: String) async -> AudioKitAnalysisResult {
         // AudioKit-based buffer analysis
         
         guard let leftData = buffer.floatChannelData?[0] else {
@@ -340,7 +359,7 @@ public class AudioKitService: ObservableObject {
     
     // MARK: - AudioKit Analysis Methods
     
-    private func performAudioKitFFT(_ data: UnsafePointer<Float>, frameCount: Int, sampleRate: Double) -> AudioKitFFTResult {
+    nonisolated private func performAudioKitFFT(_ data: UnsafePointer<Float>, frameCount: Int, sampleRate: Double) -> AudioKitFFTResult {
         // 🧪 TEST MODE: Generate test signal instead of using real audio
         _ = Array(UnsafeBufferPointer(start: data, count: frameCount))
         
@@ -477,7 +496,7 @@ public class AudioKitService: ObservableObject {
         )
     }
     
-    private func performAudioKitAmplitudeAnalysis(_ data: UnsafePointer<Float>, frameCount: Int) -> AudioKitAmplitudeResult {
+    nonisolated private func performAudioKitAmplitudeAnalysis(_ data: UnsafePointer<Float>, frameCount: Int) -> AudioKitAmplitudeResult {
         // Convert pointer to array for processing
         let samples = Array(UnsafeBufferPointer(start: data, count: frameCount))
         
@@ -539,7 +558,7 @@ public class AudioKitService: ObservableObject {
         )
     }
     
-    private func performAudioKitStereoAnalysis(_ leftData: UnsafePointer<Float>, _ rightData: UnsafePointer<Float>?, frameCount: Int) -> AudioKitStereoResult {
+    nonisolated private func performAudioKitStereoAnalysis(_ leftData: UnsafePointer<Float>, _ rightData: UnsafePointer<Float>?, frameCount: Int) -> AudioKitStereoResult {
         // Handle mono files - return neutral stereo result
         guard let rightData = rightData else {
             return AudioKitStereoResult(
@@ -588,7 +607,7 @@ public class AudioKitService: ObservableObject {
         )
     }
     
-    private func performAudioKitDynamicAnalysis(_ data: UnsafePointer<Float>, frameCount: Int) -> AudioKitDynamicResult {
+    nonisolated private func performAudioKitDynamicAnalysis(_ data: UnsafePointer<Float>, frameCount: Int) -> AudioKitDynamicResult {
         // Convert pointer to array for processing
         let samples = Array(UnsafeBufferPointer(start: data, count: frameCount))
         
@@ -627,7 +646,7 @@ public class AudioKitService: ObservableObject {
     
     // MARK: - AudioKit Helper Methods
     
-    private func analyzeFrequencyBand(_ samples: [Float], lowFreq: Double, highFreq: Double) -> Double {
+    nonisolated private func analyzeFrequencyBand(_ samples: [Float], lowFreq: Double, highFreq: Double) -> Double {
         guard !samples.isEmpty && lowFreq < highFreq else { return 0.0 }
         
         // Determine appropriate FFT size
@@ -1865,12 +1884,12 @@ enum AudioKitError: Error {
     
     // MARK: - Analysis Helper Methods
     
-    private func performFFTAnalysis(_ data: UnsafePointer<Float>, frameCount: Int) -> [Float] {
+    nonisolated private func performFFTAnalysis(_ data: UnsafePointer<Float>, frameCount: Int) -> [Float] {
         let samples = Array(UnsafeBufferPointer(start: data, count: frameCount))
         return performFFTAnalysis(samples)
     }
     
-    private func performFFTAnalysis(_ samples: [Float]) -> [Float] {
+    nonisolated private func performFFTAnalysis(_ samples: [Float]) -> [Float] {
         guard !samples.isEmpty else { return [] }
         
         // Use smaller FFT for better temporal resolution and more variation
@@ -1980,7 +1999,7 @@ enum AudioKitError: Error {
         return octaveSmoothed
     }
     
-    private func analyzeFrequencyBalance(from spectrum: [Float]) -> FrequencyBalance {
+    nonisolated private func analyzeFrequencyBalance(from spectrum: [Float]) -> FrequencyBalance {
         // Analyze frequency distribution in bass, mid, treble ranges
         // This would use AudioKit's frequency analysis
         return FrequencyBalance(bass: 0.0, mid: 0.0, treble: 0.0)
@@ -2019,7 +2038,7 @@ enum AudioKitError: Error {
     // MARK: - LUFS Calculation (EBU R128 Standard)
     
     /// Calculate LUFS (Loudness Units relative to Full Scale) according to EBU R128 standard
-    private func calculateLUFS(_ samples: [Float]) -> Float {
+    nonisolated private func calculateLUFS(_ samples: [Float]) -> Float {
         // Apply high-pass filter (shelving filter at 38 Hz)
         let filteredSamples = applyHighPassFilter(samples, cutoffFreq: 38.0, sampleRate: 44100.0)
         
@@ -2062,7 +2081,7 @@ enum AudioKitError: Error {
     }
     
     /// Apply high-pass filter for EBU R128 pre-filtering
-    private func applyHighPassFilter(_ samples: [Float], cutoffFreq: Float, sampleRate: Float) -> [Float] {
+    nonisolated private func applyHighPassFilter(_ samples: [Float], cutoffFreq: Float, sampleRate: Float) -> [Float] {
         // Simple high-pass filter implementation
         // For production use, consider using a proper shelving filter
         let rc = 1.0 / (2.0 * Float.pi * cutoffFreq)
@@ -2084,7 +2103,7 @@ enum AudioKitError: Error {
     }
     
     /// Apply RLB weighting filter for EBU R128
-    private func applyWeightingFilter(_ samples: [Float], sampleRate: Float) -> [Float] {
+    nonisolated private func applyWeightingFilter(_ samples: [Float], sampleRate: Float) -> [Float] {
         // Simplified RLB weighting filter
         // This is a basic implementation; professional implementations use more complex filtering
         return samples.map { $0 * 1.0 } // For now, return unmodified (can be enhanced)
@@ -2093,7 +2112,7 @@ enum AudioKitError: Error {
     // MARK: - Instrument Balance Analysis
     
     /// Analyze instrument balance across frequency spectrum
-    private func analyzeInstrumentBalance(_ data: UnsafePointer<Float>, frameCount: Int) -> InstrumentBalanceResult {
+    nonisolated private func analyzeInstrumentBalance(_ data: UnsafePointer<Float>, frameCount: Int) -> InstrumentBalanceResult {
         let _ = Array(UnsafeBufferPointer(start: data, count: frameCount))
         
         // Perform FFT analysis
@@ -2290,7 +2309,7 @@ enum AudioKitError: Error {
     // MARK: - Professional Mastering Analysis Functions
     
     /// Comprehensive spectral balance analysis for mastering
-    private func analyzeSpectralBalance(_ data: UnsafePointer<Float>, frameCount: Int) -> SpectralBalanceResult {
+    nonisolated private func analyzeSpectralBalance(_ data: UnsafePointer<Float>, frameCount: Int) -> SpectralBalanceResult {
         let samples = Array(UnsafeBufferPointer(start: data, count: frameCount))
         
         let sampleRate: Double = 44100.0
@@ -2428,7 +2447,7 @@ enum AudioKitError: Error {
     /// Downsample FFT spectrum using LINEAR spacing and PEAK detection
     /// This preserves actual frequency peaks without logarithmic smoothing
     /// Stereo correlation and imaging analysis for mastering
-    private func analyzeStereoCorrelation(_ leftData: UnsafePointer<Float>, _ rightData: UnsafePointer<Float>, frameCount: Int) -> StereoCorrelationResult {
+    nonisolated private func analyzeStereoCorrelation(_ leftData: UnsafePointer<Float>, _ rightData: UnsafePointer<Float>, frameCount: Int) -> StereoCorrelationResult {
         let leftSamples = Array(UnsafeBufferPointer(start: leftData, count: frameCount))
         let rightSamples = Array(UnsafeBufferPointer(start: rightData, count: frameCount))
         
@@ -2523,7 +2542,7 @@ enum AudioKitError: Error {
     }
     
     /// Comprehensive dynamic range analysis for mastering
-    private func analyzeDynamicRange(_ leftData: UnsafePointer<Float>, _ rightData: UnsafePointer<Float>, frameCount: Int) -> DynamicRangeAnalysis {
+    nonisolated private func analyzeDynamicRange(_ leftData: UnsafePointer<Float>, _ rightData: UnsafePointer<Float>, frameCount: Int) -> DynamicRangeAnalysis {
         let leftSamples = Array(UnsafeBufferPointer(start: leftData, count: frameCount))
         let rightSamples = Array(UnsafeBufferPointer(start: rightData, count: frameCount))
         
@@ -2613,7 +2632,7 @@ enum AudioKitError: Error {
     }
     
     /// Peak-to-average ratio analysis for mastering
-    private func analyzePeakToAverage(_ leftData: UnsafePointer<Float>, _ rightData: UnsafePointer<Float>, frameCount: Int) -> PeakToAverageResult {
+    nonisolated private func analyzePeakToAverage(_ leftData: UnsafePointer<Float>, _ rightData: UnsafePointer<Float>, frameCount: Int) -> PeakToAverageResult {
         let leftSamples = Array(UnsafeBufferPointer(start: leftData, count: frameCount))
         let rightSamples = Array(UnsafeBufferPointer(start: rightData, count: frameCount))
         

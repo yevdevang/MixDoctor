@@ -73,9 +73,9 @@ struct ResultsView: View {
         }) {
             PaywallView(
                 onPurchaseComplete: {
-                    Task {
-                        await performAnalysis()
-                    }
+                    // Don't auto-analyze after subscription
+                    // Just dismiss the paywall
+                    showPaywall = false
                 },
                 onDismiss: {
                     showPaywall = false
@@ -96,8 +96,7 @@ struct ResultsView: View {
             ScoreGuideView()
         }
         .task {
-            
-            // Simply load the existing result since analysis should be done before navigation
+            // Load existing result immediately (already in memory, no I/O)
             if let existingResult = audioFile.analysisResult {
                 analysisResult = existingResult
             } else {
@@ -105,6 +104,7 @@ struct ResultsView: View {
                 if !subscriptionService.canPerformAnalysis() {
                     showPaywall = true
                 } else {
+                    // Run analysis on background thread
                     await performAnalysis()
                 }
             }
@@ -1540,11 +1540,14 @@ struct ResultsView: View {
                 audioFile.analysisHistory.append(existingResult)
             }
             
-            // Perform the analysis on the specific file
-            let result = try await analysisService.getDetailedAnalysis(for: audioFile.fileURL)
+            // Perform the analysis completely off the main thread to prevent UI freezing
+            let fileURL = audioFile.fileURL
+            let result = try await Task.detached(priority: .userInitiated) {
+                try await AudioKitService.shared.getDetailedAnalysis(for: fileURL)
+            }.value
             
             
-            // Increment usage count for free users
+            // Increment usage count for free users (back on main thread)
             subscriptionService.incrementAnalysisCount()
             
             // Update the local state
@@ -1554,13 +1557,19 @@ struct ResultsView: View {
             audioFile.analysisResult = result
             audioFile.dateAnalyzed = Date()
             
-            // Save to SwiftData
-            try modelContext.save()
-            
-            // Save to iCloud Drive as JSON for cross-device sync
-            do {
-                try AnalysisResultPersistence.shared.saveAnalysisResult(result, forAudioFile: audioFile.fileName)
-            } catch {
+            // Save to SwiftData and iCloud Drive on background thread to avoid freezing
+            let fileName = audioFile.fileName
+            Task.detached(priority: .utility) {
+                // Save to SwiftData
+                try? await MainActor.run {
+                    try self.modelContext.save()
+                }
+                
+                // Save to iCloud Drive as JSON for cross-device sync (disk I/O)
+                do {
+                    try AnalysisResultPersistence.shared.saveAnalysisResult(result, forAudioFile: fileName)
+                } catch {
+                }
             }
             
         } catch {
@@ -1574,17 +1583,22 @@ struct ResultsView: View {
         // Delete the actual audio file from storage (iCloud or local)
         // Using iCloudStorageService ensures proper eviction and cross-device sync
         let fileURL = audioFile.fileURL
-        do {
-            try iCloudStorageService.shared.deleteAudioFile(at: fileURL)
-            print("🗑️ Deleted file: \(audioFile.fileName)")
-        } catch {
-            print("❌ Failed to delete file \(audioFile.fileName): \(error.localizedDescription)")
+        let fileName = audioFile.fileName
+        
+        // Perform file deletion on background thread to avoid UI freezing
+        Task.detached(priority: .utility) {
+            do {
+                try iCloudStorageService.shared.deleteAudioFile(at: fileURL)
+                print("🗑️ Deleted file: \(fileName)")
+            } catch {
+                print("❌ Failed to delete file \(fileName): \(error.localizedDescription)")
+            }
+            
+            // Delete the analysis result JSON from iCloud Drive
+            AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: fileName)
         }
         
-        // Delete the analysis result JSON from iCloud Drive
-        AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: audioFile.fileName)
-        
-        // Delete the SwiftData record (CloudKit will sync this deletion)
+        // Delete the SwiftData record immediately (CloudKit will sync this deletion)
         modelContext.delete(audioFile)
         try? modelContext.save()
         dismiss()
@@ -1613,10 +1627,53 @@ struct ResultsView: View {
 
 // MARK: - Animated Gradient Loader
 
+// Simple loader for MacCatalyst - no complex animations
+struct SimpleAnalysisLoader: View {
+    let fileName: String
+    
+    var body: some View {
+        ZStack {
+            // Solid background - no animations
+            Color(red: 0.435, green: 0.173, blue: 0.871)
+                .ignoresSafeArea()
+            
+            VStack(spacing: 30) {
+                // System progress indicator - native and lightweight
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .scaleEffect(2.0)
+                    .tint(.white)
+                
+                VStack(spacing: 12) {
+                    Text("Analyzing Audio")
+                        .font(.title.bold())
+                        .foregroundColor(.white)
+                    
+                    Text("Please wait while we analyze your mix...")
+                        .font(.body)
+                        .foregroundColor(.white.opacity(0.9))
+                        .multilineTextAlignment(.center)
+                    
+                    Text(fileName)
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.7))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 40)
+                        .lineLimit(2)
+                }
+            }
+            .padding(40)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
 struct AnimatedGradientLoader: View {
     let fileName: String
     
     @State private var animationOffset: CGFloat = 0
+    @State private var pulseScale: CGFloat = 1.0
+    @State private var dotScale: [CGFloat] = [1.0, 1.0, 1.0]
     
     var body: some View {
         ZStack {
@@ -1633,13 +1690,9 @@ struct AnimatedGradientLoader: View {
             )
             .hueRotation(.degrees(animationOffset))
             .ignoresSafeArea()
-            .onAppear {
-                withAnimation(
-                    .linear(duration: 3.0)
-                    .repeatForever(autoreverses: false)
-                ) {
-                    animationOffset = 360
-                }
+            .task {
+                // Use task instead of onAppear for async animations
+                await startAnimations()
             }
             
             // Content overlay
@@ -1649,12 +1702,7 @@ struct AnimatedGradientLoader: View {
                     Circle()
                         .fill(Color.white.opacity(0.2))
                         .frame(width: 120, height: 120)
-                        .scaleEffect(animationOffset > 0 ? 1.2 : 1.0)
-                        .animation(
-                            .easeInOut(duration: 1.5)
-                            .repeatForever(autoreverses: true),
-                            value: animationOffset
-                        )
+                        .scaleEffect(pulseScale)
                     
                     Circle()
                         .fill(Color.white.opacity(0.3))
@@ -1680,6 +1728,7 @@ struct AnimatedGradientLoader: View {
                         .foregroundColor(.white.opacity(0.7))
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 32)
+                        .lineLimit(2)
                 }
                 
                 // Loading indicator dots
@@ -1688,13 +1737,7 @@ struct AnimatedGradientLoader: View {
                         Circle()
                             .fill(Color.white)
                             .frame(width: 8, height: 8)
-                            .scaleEffect(animationOffset > 0 ? 1.0 : 0.5)
-                            .animation(
-                                .easeInOut(duration: 0.6)
-                                .repeatForever()
-                                .delay(Double(index) * 0.2),
-                                value: animationOffset
-                            )
+                            .scaleEffect(dotScale[index])
                     }
                 }
                 .padding(.top, 8)
@@ -1702,6 +1745,37 @@ struct AnimatedGradientLoader: View {
             .padding(32)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Prevent user interaction but allow animations
+        .allowsHitTesting(false)
+    }
+    
+    private func startAnimations() async {
+        // Start gradient rotation
+        withAnimation(
+            .linear(duration: 3.0)
+            .repeatForever(autoreverses: false)
+        ) {
+            animationOffset = 360
+        }
+        
+        // Start pulse animation
+        withAnimation(
+            .easeInOut(duration: 1.5)
+            .repeatForever(autoreverses: true)
+        ) {
+            pulseScale = 1.2
+        }
+        
+        // Start dot animations with delays
+        for index in 0..<3 {
+            try? await Task.sleep(nanoseconds: UInt64(index) * 200_000_000) // 0.2s delay per dot
+            withAnimation(
+                .easeInOut(duration: 0.6)
+                .repeatForever(autoreverses: true)
+            ) {
+                dotScale[index] = 0.5
+            }
+        }
     }
 }
 

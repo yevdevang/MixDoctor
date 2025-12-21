@@ -139,17 +139,23 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
         let result = try await Purchases.shared.purchase(package: package)
         customerInfo = result.customerInfo
         
+        print("💳 Purchase result received")
+        
         // Check if user has active pro entitlement
         let hasProEntitlement = result.customerInfo.entitlements["pro"]?.isActive == true
+        
+       
         
         // Check if currently in trial period
         if let proEntitlement = result.customerInfo.entitlements["pro"],
            proEntitlement.isActive,
            proEntitlement.periodType == .trial {
+            print("   - Setting isInTrialPeriod = true")
             isInTrialPeriod = true
             isProUser = false // Treat trial users as free tier for analysis limits
             willRenew = proEntitlement.willRenew
         } else if hasProEntitlement {
+            print("   - Setting isProUser = true")
             isInTrialPeriod = false
             isProUser = true // Paid subscribers get monthly limit
             // Update renewal status
@@ -160,6 +166,8 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
             remainingProAnalyses = proMonthlyLimit
             proAnalysisResetDate = Calendar.current.date(byAdding: .month, value: 1, to: Date())
             saveProAnalysisState()
+        } else {
+            print("   - ⚠️ No valid entitlement detected!")
         }
         
         return result.customerInfo

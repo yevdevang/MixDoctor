@@ -51,17 +51,21 @@ struct ContentView: View {
             .navigationTitle("Mix Doctor")
             .navigationSplitViewColumnWidth(min: 200, ideal: 250, max: 300)
         } detail: {
-            // Main content area
+            // Main content area - use id to preserve view identity and add animation
             Group {
                 switch selectedTab {
                 case 0:
                     DashboardView()
+                        .id("dashboard")
+                        .transition(.opacity.animation(.easeInOut(duration: 0.15)))
                 case 1:
                     ImportView(
                         selectedAudioFile: $selectedAudioFile,
                         selectedTab: $selectedTab,
                         shouldAutoPlay: $shouldAutoPlay
                     )
+                    .id("import")
+                    .transition(.opacity.animation(.easeInOut(duration: 0.15)))
                 case 2:
                     PlayerView(
                         audioFile: selectedAudioFile,
@@ -74,12 +78,19 @@ struct ContentView: View {
                             isPlaying = playing
                         }
                     )
+                    .id("player")
+                    .transition(.opacity.animation(.easeInOut(duration: 0.15)))
                 case 3:
                     SettingsView()
+                        .id("settings")
+                        .transition(.opacity.animation(.easeInOut(duration: 0.15)))
                 default:
                     DashboardView()
+                        .id("dashboard")
+                        .transition(.opacity.animation(.easeInOut(duration: 0.15)))
                 }
             }
+            .animation(.easeInOut(duration: 0.15), value: selectedTab)
             .navigationTitle(navigationTitle)
         }
         .tint(Color(red: 0.435, green: 0.173, blue: 0.871))
@@ -99,7 +110,11 @@ struct ContentView: View {
     
     @ViewBuilder
     private func sidebarButton(title: String, icon: String, tag: Int) -> some View {
-        Button(action: { selectedTab = tag }) {
+        Button(action: {
+            // Debounce tab selection to prevent rapid switching
+            guard selectedTab != tag else { return }
+            selectedTab = tag
+        }) {
             HStack {
                 Label(title, systemImage: icon)
                 Spacer()

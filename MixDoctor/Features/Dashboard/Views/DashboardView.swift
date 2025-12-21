@@ -14,12 +14,20 @@ import UIKit
 
 struct DashboardView: View {
     @Environment(\.modelContext) private var modelContext
+    
+#if targetEnvironment(macCatalyst)
+    // MacCatalyst: Use manual loading to prevent UI blocking
+    @State private var audioFiles: [AudioFile] = []
+    @State private var isLoadingFiles = false
+#else
+    // iOS: Use @Query (works fine on iOS)
     @Query(sort: \AudioFile.dateImported, order: .reverse) private var audioFiles: [AudioFile]
+#endif
     
     @StateObject private var iCloudMonitor = iCloudSyncMonitor.shared
     private let analysisService = AudioKitService.shared
     private let subscriptionService = SubscriptionService.shared
-
+    
     @State private var searchText = ""
     @State private var filterOption: FilterOption = .all
     @State private var sortOption: SortOption = .date
@@ -29,11 +37,19 @@ struct DashboardView: View {
     @State private var navigateToFile: AudioFile?
     @State private var hasPerformedInitialSync = false // Track if we've done initial sync
     @State private var isScanning = false // Prevent concurrent scans
-    #if targetEnvironment(macCatalyst)
+    @State private var cachedFilteredFiles: [AudioFile] = [] // Cache filtered results
+    @State private var lastFilterHash = 0 // Track filter state changes
+    @State private var syncDebounceTask: Task<Void, Never>? // Debounce sync operations
+    
+    // Cached statistics to prevent blocking SwiftData access during rendering
+    @State private var cachedAnalyzedCount: Int = 0
+    @State private var cachedIssuesCount: Int = 0
+    @State private var cachedAverageScore: Double = 0.0
+#if targetEnvironment(macCatalyst)
     @State private var fileToDelete: AudioFile?
     @State private var showDeleteConfirmation = false
-    #endif
-
+#endif
+    
     enum FilterOption: String, CaseIterable {
         case all = "All"
         case analyzed = "Analyzed"
@@ -46,8 +62,21 @@ struct DashboardView: View {
         case name = "Sort by Name"
         case score = "Sort by Score"
     }
-
+    
     var filteredFiles: [AudioFile] {
+        // Calculate hash of current filter state
+        var hasher = Hasher()
+        hasher.combine(searchText)
+        hasher.combine(filterOption)
+        hasher.combine(sortOption)
+        hasher.combine(audioFiles.count)
+        let currentHash = hasher.finalize()
+
+        // Use cached version if filters haven't changed
+        if currentHash == lastFilterHash && !cachedFilteredFiles.isEmpty {
+            return cachedFilteredFiles
+        }
+
         var files = audioFiles
 
         // Apply search filter
@@ -69,7 +98,7 @@ struct DashboardView: View {
                 return hasActualIssues(result: result)
             }
         }
-        
+
         // Apply sorting
         switch sortOption {
         case .date:
@@ -84,226 +113,264 @@ struct DashboardView: View {
             }
         }
 
+        // Cache the result (non-blocking)
+        cachedFilteredFiles = files
+        lastFilterHash = currentHash
+
         return files
     }
-
+    
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                // iCloud sync status banner
-                if iCloudMonitor.isSyncing {
-                    HStack(spacing: 12) {
-                        // Animated sync icon
-                        ProgressView()
-                            .tint(Color(red: 0.435, green: 0.173, blue: 0.871))
-                        
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Syncing with iCloud")
-                                .font(.subheadline)
-                                .fontWeight(.medium)
-                                .foregroundStyle(.primary)
-                            
-                            Text("Checking for new files and updates...")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        
-                        Spacer()
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    .background(
-                        LinearGradient(
-                            colors: [
-                                Color(red: 0.435, green: 0.173, blue: 0.871).opacity(0.08),
-                                Color(red: 0.435, green: 0.173, blue: 0.871).opacity(0.04)
-                            ],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .overlay(
-                        Rectangle()
-                            .frame(height: 1)
-                            .foregroundStyle(Color(red: 0.435, green: 0.173, blue: 0.871).opacity(0.2)),
-                        alignment: .bottom
-                    )
-                }
-                
-                if audioFiles.isEmpty {
-                    emptyStateView
-                } else {
-                    // Statistics cards
-                    statisticsView
-
-                    // Filter picker
-                    filterPicker
-
-                    // Files list
-                    filesList
-                }
+        baseView
+    }
+    
+    private var baseView: some View {
+        contentStack
+            .tint(Color(red: 0.435, green: 0.173, blue: 0.871))
+#if targetEnvironment(macCatalyst)
+            .task { await initializeViewMacCatalyst() }
+#else
+            .onAppear {
+                setupAppearance()
+                performInitialSync()
             }
-            #if targetEnvironment(macCatalyst)
-            .navigationTitle("")
-            #else
-            .navigationTitle("Dashboard")
-            #endif
-            .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $searchText, prompt: "Search audio files")
-            .toolbar {
-                // iCloud sync button
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button {
-                        Task {
-                            // First cleanup orphaned records
-                            await checkAndDownloadMissingFiles()
-                            // Then sync and scan
-                            await iCloudMonitor.syncNow()
-                            await scanAndImportFromiCloud()
-                            await loadMissingAnalysisResults()
-                        }
-                    } label: {
-                        if iCloudMonitor.isSyncing {
-                            ProgressView()
-                                .tint(Color(red: 0.435, green: 0.173, blue: 0.871))
-                        } else {
-                            Label("Sync iCloud", systemImage: "icloud.and.arrow.down")
-                        }
+#endif
+            .onChange(of: iCloudMonitor.isSyncing) { old, new in
+                handleSyncStateChange(oldValue: old, newValue: new)
+            }
+    }
+    
+    private var contentStack: some View {
+        NavigationStack {
+            dashboardContent
+#if targetEnvironment(macCatalyst)
+                .alert("Delete File", isPresented: $showDeleteConfirmation) {
+                    Button("Cancel", role: .cancel) {
+                        fileToDelete = nil
                     }
-                    .disabled(iCloudMonitor.isSyncing)
-                    .foregroundStyle(Color(red: 0.435, green: 0.173, blue: 0.871))
-                }
-                
-                ToolbarItem(placement: .primaryAction) {
-                    Menu {
-                        Button(action: { sortOption = .date }) {
-                            Label("Sort by Date", systemImage: "calendar")
-                            if sortOption == .date {
-                                Image(systemName: "checkmark")
-                            }
+                    Button("Delete", role: .destructive) {
+                        if let file = fileToDelete,
+                           let index = filteredFiles.firstIndex(where: { $0.id == file.id }) {
+                            deleteFiles(at: IndexSet(integer: index))
                         }
-                        Button(action: { sortOption = .name }) {
-                            Label("Sort by Name", systemImage: "textformat")
-                            if sortOption == .name {
-                                Image(systemName: "checkmark")
-                            }
-                        }
-                        Button(action: { sortOption = .score }) {
-                            Label("Sort by Score", systemImage: "star")
-                            if sortOption == .score {
-                                Image(systemName: "checkmark")
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
+                        fileToDelete = nil
+                    }
+                } message: {
+                    if let file = fileToDelete {
+                        Text("Are you sure you want to delete '\(file.fileName)'? This will remove it from all your devices.")
                     }
                 }
+#endif
+        }
+    }
+    
+    // MARK: - Helper Methods
+
+    /// Debounce sync operations to prevent rapid consecutive calls
+    private func debouncedSync(priority: TaskPriority = .utility) {
+        // Cancel any pending sync task
+        syncDebounceTask?.cancel()
+
+        // Schedule a new sync task with a short delay
+        syncDebounceTask = Task(priority: priority) {
+            // Wait a short period to debounce rapid notifications
+            try? await Task.sleep(nanoseconds: 300_000_000) // 300ms
+
+            // Check if we were cancelled
+            guard !Task.isCancelled else { return }
+
+            // Perform the sync operations
+            await checkAndDownloadMissingFiles()
+            await scanAndImportFromiCloud()
+        }
+    }
+
+#if targetEnvironment(macCatalyst)
+    @MainActor
+    private func initializeViewMacCatalyst() async {
+        // Small delay to let UI render first and prevent blocking tab switch
+        try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
+        setupAppearance()
+        performInitialSync()
+    }
+#endif
+    
+    private func setupAppearance() {
+#if canImport(UIKit)
+        let appearance = UINavigationBarAppearance()
+#if targetEnvironment(macCatalyst)
+        appearance.configureWithTransparentBackground()
+        appearance.shadowColor = nil
+#else
+        appearance.configureWithDefaultBackground()
+#endif
+        appearance.largeTitleTextAttributes = [.foregroundColor: UIColor(red: 0.435, green: 0.173, blue: 0.871, alpha: 1.0)]
+        appearance.titleTextAttributes = [.foregroundColor: UIColor(red: 0.435, green: 0.173, blue: 0.871, alpha: 1.0)]
+        
+        UINavigationBar.appearance().standardAppearance = appearance
+        UINavigationBar.appearance().scrollEdgeAppearance = appearance
+        UINavigationBar.appearance().compactAppearance = appearance
+#endif
+    }
+    
+    private func performInitialSync() {
+#if targetEnvironment(macCatalyst)
+        Task(priority: .userInitiated) {
+            await loadAudioFiles()
+        }
+#endif
+        
+        Task(priority: .userInitiated) {
+            if !audioFiles.isEmpty {
+                await checkAndDownloadMissingFiles()
             }
         }
-        .tint(Color(red: 0.435, green: 0.173, blue: 0.871))
-        .onAppear {
-            #if canImport(UIKit)
-            // Set navigation title color to purple
-            let appearance = UINavigationBarAppearance()
-            #if targetEnvironment(macCatalyst)
-            appearance.configureWithTransparentBackground()
-            appearance.shadowColor = nil
-            #else
-            appearance.configureWithDefaultBackground()
-            #endif
-            appearance.largeTitleTextAttributes = [.foregroundColor: UIColor(red: 0.435, green: 0.173, blue: 0.871, alpha: 1.0)]
-            appearance.titleTextAttributes = [.foregroundColor: UIColor(red: 0.435, green: 0.173, blue: 0.871, alpha: 1.0)]
+        
+        guard !hasPerformedInitialSync else { return }
+        hasPerformedInitialSync = true
+        
+        Task(priority: .utility) {
+            await removeDuplicateFiles()
             
-            UINavigationBar.appearance().standardAppearance = appearance
-            UINavigationBar.appearance().scrollEdgeAppearance = appearance
-            UINavigationBar.appearance().compactAppearance = appearance
-            #endif
-            
-            // ALWAYS run orphan cleanup on appear (not just first time)
-            // This ensures deleted files are removed immediately when switching back to Dashboard
-            Task(priority: .userInitiated) {
-                if !audioFiles.isEmpty {
-                    await checkAndDownloadMissingFiles()
-                }
+            if !audioFiles.isEmpty {
+#if targetEnvironment(macCatalyst)
+                await checkAndDownloadMissingFiles()
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+#endif
+                await checkAndDownloadMissingFiles()
             }
             
-            // Only run heavy operations once on first appear
-            guard !hasPerformedInitialSync else { return }
-            hasPerformedInitialSync = true
-            
-            // Perform initial sync in background with lower priority
+            await scanAndImportFromiCloud()
+            await loadMissingAnalysisResults()
+        }
+    }
+    
+    private func handleSyncStateChange(oldValue: Bool, newValue: Bool) {
+        if oldValue == true && newValue == false {
             Task(priority: .utility) {
-                // First, remove any duplicate entries
-                await removeDuplicateFiles()
-                
-                // Only check for missing files if we have files in the database
-                if !audioFiles.isEmpty {
-                    // On MacCatalyst, aggressively check for orphaned records first
-                    #if targetEnvironment(macCatalyst)
-                    await checkAndDownloadMissingFiles()
-                    // Small delay to let iCloud settle
-                    try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
-                    #endif
-                    
-                    await checkAndDownloadMissingFiles()
-                }
-                
-                // Scan for new files in iCloud
+                await checkAndDownloadMissingFiles()
                 await scanAndImportFromiCloud()
-                
-                // Load analysis results for files that need them
                 await loadMissingAnalysisResults()
             }
         }
-        .onChange(of: iCloudMonitor.isSyncing) { oldValue, newValue in
-            // When sync finishes (goes from true to false), check for new files and cleanup
-            if oldValue == true && newValue == false {
-                Task(priority: .utility) {
-                    // First clean up any orphaned records from deleted files
-                    await checkAndDownloadMissingFiles()
-                    
-                    // Then scan for new files
-                    await scanAndImportFromiCloud()
-                    await loadMissingAnalysisResults()
-                }
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .iCloudSyncCompleted)) { _ in
-            // When iCloud sync completes, check for orphaned records AND scan for new files
-            Task(priority: .utility) {
-                await checkAndDownloadMissingFiles()
-                await scanAndImportFromiCloud()
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .iCloudFilesChanged)) { _ in
-            // When iCloud files change, immediately check for orphaned records AND scan for new files
-            Task(priority: .userInitiated) {
-                await checkAndDownloadMissingFiles()
-                await scanAndImportFromiCloud()
-            }
-        }
-        #if targetEnvironment(macCatalyst)
-        .alert("Delete File", isPresented: $showDeleteConfirmation) {
-            Button("Cancel", role: .cancel) {
-                fileToDelete = nil
-            }
-            Button("Delete", role: .destructive) {
-                if let file = fileToDelete,
-                   let index = filteredFiles.firstIndex(where: { $0.id == file.id }) {
-                    deleteFiles(at: IndexSet(integer: index))
-                }
-                fileToDelete = nil
-            }
-        } message: {
-            if let file = fileToDelete {
-                Text("Are you sure you want to delete '\(file.fileName)'? This will remove it from all your devices.")
-            }
-        }
-        #endif
     }
-
+    
+    private var dashboardContent: some View {
+        VStack(spacing: 0) {
+            // iCloud sync status banner
+            if iCloudMonitor.isSyncing {
+                HStack(spacing: 12) {
+                    // Animated sync icon
+                    ProgressView()
+                        .tint(Color(red: 0.435, green: 0.173, blue: 0.871))
+                    
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Syncing with iCloud")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .foregroundStyle(.primary)
+                        
+                        Text("Checking for new files and updates...")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.435, green: 0.173, blue: 0.871).opacity(0.08),
+                            Color(red: 0.435, green: 0.173, blue: 0.871).opacity(0.04)
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .overlay(
+                    Rectangle()
+                        .frame(height: 1)
+                        .foregroundStyle(Color(red: 0.435, green: 0.173, blue: 0.871).opacity(0.2)),
+                    alignment: .bottom
+                )
+            }
+            
+            if audioFiles.isEmpty {
+                emptyStateView
+            } else {
+                // Statistics cards
+                statisticsView
+                
+                // Filter picker
+                filterPicker
+                
+                // Files list
+                filesList
+            }
+        }
+#if targetEnvironment(macCatalyst)
+        .navigationTitle("")
+#else
+        .navigationTitle("Dashboard")
+#endif
+        .navigationBarTitleDisplayMode(.inline)
+        .searchable(text: $searchText, prompt: "Search audio files")
+        .toolbar {
+            // iCloud sync button
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    Task(priority: .userInitiated) {
+                        // First cleanup orphaned records
+                        await checkAndDownloadMissingFiles()
+                        // Then sync and scan
+                        await iCloudMonitor.syncNow()
+                        await scanAndImportFromiCloud()
+                        await loadMissingAnalysisResults()
+                    }
+                } label: {
+                    if iCloudMonitor.isSyncing {
+                        ProgressView()
+                            .tint(Color(red: 0.435, green: 0.173, blue: 0.871))
+                    } else {
+                        Label("Sync iCloud", systemImage: "icloud.and.arrow.down")
+                    }
+                }
+                .disabled(iCloudMonitor.isSyncing)
+                .foregroundStyle(Color(red: 0.435, green: 0.173, blue: 0.871))
+            }
+            
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Button(action: { sortOption = .date }) {
+                        Label("Sort by Date", systemImage: "calendar")
+                        if sortOption == .date {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                    Button(action: { sortOption = .name }) {
+                        Label("Sort by Name", systemImage: "textformat")
+                        if sortOption == .name {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                    Button(action: { sortOption = .score }) {
+                        Label("Sort by Score", systemImage: "star")
+                        if sortOption == .score {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+            }
+        }
+    }
+    
+    
     // MARK: - Statistics View
-
+    
     private var statisticsView: some View {
         LazyVGrid(columns: [
             GridItem(.flexible(), spacing: 12),
@@ -315,21 +382,21 @@ struct DashboardView: View {
                 icon: "music.note.list",
                 color: .blue
             )
-
+            
             StatCard(
                 title: "Analyzed",
                 value: "\(analyzedCount)",
                 icon: "checkmark.circle.fill",
                 color: .green
             )
-
+            
             StatCard(
                 title: "Issues Found",
                 value: "\(issuesCount)",
                 icon: "exclamationmark.triangle.fill",
                 color: .orange
             )
-
+            
             StatCard(
                 title: "Avg Score",
                 value: String(format: "%.0f", averageScore),
@@ -338,23 +405,22 @@ struct DashboardView: View {
             )
         }
         .padding()
-        #if !targetEnvironment(macCatalyst)
+#if !targetEnvironment(macCatalyst)
         .background(Color.backgroundSecondary)
-        #endif
+#endif
     }
-
+    
+    // Use cached values instead of computed properties to prevent blocking SwiftData access
     private var analyzedCount: Int {
-        audioFiles.filter { $0.analysisResult != nil }.count
+        cachedAnalyzedCount
     }
-
+    
     private var issuesCount: Int {
-        audioFiles.compactMap { $0.analysisResult }.filter { hasActualIssues(result: $0) }.count
+        cachedIssuesCount
     }
-
+    
     private var averageScore: Double {
-        let scores = audioFiles.compactMap { $0.analysisResult?.overallScore }
-        guard !scores.isEmpty else { return 0 }
-        return scores.reduce(0, +) / Double(scores.count)
+        cachedAverageScore
     }
     
     // Helper function to detect actual issues based on score and metrics
@@ -368,17 +434,17 @@ struct DashboardView: View {
         let hasPhaseIssues = result.phaseCoherence < 0.7
         let hasStereoIssues = result.stereoWidthScore < 30 || result.stereoWidthScore > 90
         let hasFreqIssues = (result.lowEndBalance > 60 || result.lowEndBalance < 15) ||
-                           (result.midBalance < 25 || result.midBalance > 55) ||
-                           (result.highBalance < 10 || result.highBalance > 45)
+        (result.midBalance < 25 || result.midBalance > 55) ||
+        (result.highBalance < 10 || result.highBalance > 45)
         let hasDynamicIssues = result.dynamicRange < 8
         let hasLevelIssues = result.peakLevel > -1 || result.loudnessLUFS > -10 || result.loudnessLUFS < -30
         
-        return hasPhaseIssues || hasStereoIssues || hasFreqIssues || hasDynamicIssues || hasLevelIssues || 
-               result.hasClipping || result.hasInstrumentBalanceIssues
+        return hasPhaseIssues || hasStereoIssues || hasFreqIssues || hasDynamicIssues || hasLevelIssues ||
+        result.hasClipping || result.hasInstrumentBalanceIssues
     }
-
+    
     // MARK: - Filter Picker
-
+    
     private var filterPicker: some View {
         Picker("Filter", selection: $filterOption) {
             ForEach(FilterOption.allCases, id: \.self) { option in
@@ -388,16 +454,16 @@ struct DashboardView: View {
         .pickerStyle(.segmented)
         .padding()
         .onAppear {
-            #if canImport(UIKit)
+#if canImport(UIKit)
             UISegmentedControl.appearance().selectedSegmentTintColor = UIColor(red: 0.435, green: 0.173, blue: 0.871, alpha: 1.0)
             UISegmentedControl.appearance().setTitleTextAttributes([.foregroundColor: UIColor.white], for: .selected)
             UISegmentedControl.appearance().setTitleTextAttributes([.foregroundColor: UIColor(red: 0.435, green: 0.173, blue: 0.871, alpha: 1.0)], for: .normal)
-            #endif
+#endif
         }
     }
-
+    
     // MARK: - Files List
-
+    
     private var filesList: some View {
         List {
             ForEach(filteredFiles) { file in
@@ -407,27 +473,29 @@ struct DashboardView: View {
                     AudioFileRow(
                         audioFile: file,
                         onDelete: {
-                            #if targetEnvironment(macCatalyst)
+#if targetEnvironment(macCatalyst)
                             fileToDelete = file
                             showDeleteConfirmation = true
-                            #else
+#else
                             if let index = filteredFiles.firstIndex(where: { $0.id == file.id }) {
                                 deleteFiles(at: IndexSet(integer: index))
                             }
-                            #endif
-                        }
+#endif
+                        },
+                        isAnalyzing: isAnalyzing && analyzingFile?.id == file.id
                     )
                 }
                 .buttonStyle(PlainButtonStyle())
-                #if targetEnvironment(macCatalyst)
+                .disabled(isAnalyzing && analyzingFile?.id == file.id)
+#if targetEnvironment(macCatalyst)
                 .listRowBackground(Color.clear)
-                #endif
+#endif
             }
             .onDelete(perform: deleteFiles)
         }
-        #if targetEnvironment(macCatalyst)
+#if targetEnvironment(macCatalyst)
         .scrollContentBackground(.hidden)
-        #endif
+#endif
         .refreshable {
             await iCloudMonitor.syncNow()
             await scanAndImportFromiCloud()
@@ -436,15 +504,17 @@ struct DashboardView: View {
         .navigationDestination(item: $navigateToFile) { file in
             ResultsView(audioFile: file)
         }
+#if !targetEnvironment(macCatalyst)
         .fullScreenCover(isPresented: $isAnalyzing) {
             if let file = analyzingFile {
                 AnimatedGradientLoader(fileName: file.fileName)
             }
         }
+#endif
     }
-
+    
     // MARK: - Empty State
-
+    
     private var emptyStateView: some View {
         GeometryReader { geometry in
             ScrollView {
@@ -473,88 +543,259 @@ struct DashboardView: View {
             }
         }
     }
-
+    
+    // MARK: - Data Loading
+    
+#if targetEnvironment(macCatalyst)
+    /// Load audio files asynchronously to prevent blocking UI (MacCatalyst only)
+    private func loadAudioFiles() async {
+        await MainActor.run {
+            isLoadingFiles = true
+        }
+        
+        // Fetch directly on main thread - SwiftData is already optimized
+        await MainActor.run {
+            // Create descriptor
+            let descriptor = FetchDescriptor<AudioFile>(
+                sortBy: [SortDescriptor(\.dateImported, order: .reverse)]
+            )
+            
+            // Fetch on main thread
+            let files = (try? modelContext.fetch(descriptor)) ?? []
+            
+            // Update UI and calculate statistics immediately
+            audioFiles = files
+            cachedFilteredFiles = files
+            isLoadingFiles = false
+            
+            // Calculate statistics immediately while we have safe access to relationships
+            cachedAnalyzedCount = files.filter { $0.analysisResult != nil }.count
+            let results = files.compactMap { $0.analysisResult }
+            cachedIssuesCount = results.filter { hasActualIssues(result: $0) }.count
+            let scores = results.compactMap { $0.overallScore }
+            cachedAverageScore = scores.isEmpty ? 0.0 : scores.reduce(0, +) / Double(scores.count)
+        }
+    }
+    
+    /// Reload audio files after changes (non-blocking, MacCatalyst only)
+    private func reloadAudioFiles() {
+        Task.detached(priority: .utility) {
+            await self.loadAudioFiles()
+        }
+    }
+#endif
+    
     // MARK: - Actions
     
     private func handleAudioFileSelection(_ file: AudioFile) {
-        Task {
-            // Check if file already has analysis
-            if file.analysisResult != nil {
-                // Navigate directly to results
-                navigateToFile = file
-                return
+        // Show loader IMMEDIATELY - this is the ONLY thing that happens synchronously
+        isAnalyzing = true
+        
+        // Capture values that won't block
+        let subscriptionSvc = subscriptionService
+        let context = modelContext
+
+#if targetEnvironment(macCatalyst)
+        // MacCatalyst: Move ALL logic into background task with low priority
+        Task(priority: .utility) {
+            // Yield immediately to let UI update
+            await Task.yield()
+            
+            // Get file ID in background to avoid potential fault
+            let fileID = await MainActor.run { file.id }
+            
+            // Set analyzingFile after yield
+            await MainActor.run {
+                self.analyzingFile = file
             }
             
-            // Check if user can perform analysis
-            guard subscriptionService.canPerformAnalysis() else {
-                // Show paywall or error
-                // For now, navigate to results view which will handle the paywall
-                navigateToFile = file
-                return
-            }
+            // Fetch the file in background to check if it has analysis
+            let descriptor = FetchDescriptor<AudioFile>(
+                predicate: #Predicate<AudioFile> { $0.id == fileID }
+            )
             
-            // Start analysis with loader
-            analyzingFile = file
-            isAnalyzing = true
-            
-            #if targetEnvironment(macCatalyst)
-            // On MacCatalyst, give more time for fullScreenCover to present
-            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
-            #endif
-            
-            do {
-                
-                // Perform the analysis
-                let result = try await analysisService.getDetailedAnalysis(for: file.fileURL)
-                
-                
-                // Increment usage count for free users
-                subscriptionService.incrementAnalysisCount()
-                
-                // Save to the AudioFile model
-                file.analysisResult = result
-                file.dateAnalyzed = Date()
-                
-                // Save to SwiftData
-                try modelContext.save()
-                
-                // Save to iCloud Drive as JSON for cross-device sync
-                do {
-                    try AnalysisResultPersistence.shared.saveAnalysisResult(result, forAudioFile: file.fileName)
-                } catch {
+            guard let audioFile = try? context.fetch(descriptor).first else {
+                await MainActor.run {
+                    self.isAnalyzing = false
+                    self.analyzingFile = nil
                 }
-                
-                
-                #if targetEnvironment(macCatalyst)
-                #endif
-                
-                // Hide loader and navigate
-                isAnalyzing = false
-                analyzingFile = nil
-                
-                #if targetEnvironment(macCatalyst)
-                // Small delay to let the fullScreenCover dismiss smoothly
-                try? await Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
-                #endif
-                
-                navigateToFile = file
-                
+                return
+            }
+            
+            // Check if already analyzed (now safe off main thread)
+            if audioFile.analysisResult != nil {
+                await MainActor.run {
+                    self.isAnalyzing = false
+                    self.analyzingFile = nil
+                    self.navigateToFile = audioFile
+                }
+                return
+            }
+            
+            // Check subscription (now safe off main thread)
+            guard subscriptionSvc.canPerformAnalysis() else {
+                await MainActor.run {
+                    self.isAnalyzing = false
+                    self.analyzingFile = nil
+                    self.navigateToFile = audioFile
+                }
+                return
+            }
+            
+            // Get filename for analysis
+            let fileName = audioFile.fileName
+
+            do {
+                // Run analysis on low-priority background thread to keep UI responsive
+                let result = try await Task.detached(priority: .utility) {
+                    // Construct fileURL inside background task to avoid blocking main thread
+                    let audioDir = iCloudStorageService.shared.getAudioFilesDirectory()
+                    let fileURL = audioDir.appendingPathComponent(fileName)
+                    return try await AudioKitService.analyzeAudioFileIsolated(url: fileURL)
+                }.value
+
+                // Save to iCloud Drive (background)
+                Task.detached(priority: .background) {
+                    try? AnalysisResultPersistence.shared.saveAnalysisResult(result, forAudioFile: fileName)
+                }
+
+                // Now update UI and SwiftData on main actor
+                await MainActor.run {
+                    // Increment usage count
+                    subscriptionSvc.incrementAnalysisCount()
+
+                    // Save to the AudioFile model
+                    audioFile.analysisResult = result
+                    audioFile.dateAnalyzed = Date()
+
+                    // Save to SwiftData
+                    try? context.save()
+
+                    // Reload the list
+                    Task(priority: .utility) {
+                        await self.loadAudioFiles()
+                        // Statistics will be updated by loadAudioFiles
+                    }
+
+                    // Hide loader and navigate
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        self.isAnalyzing = false
+                    }
+                    self.analyzingFile = nil
+                    self.navigateToFile = audioFile
+                }
+
             } catch {
-                #if targetEnvironment(macCatalyst)
-                #endif
-                
-                isAnalyzing = false
-                analyzingFile = nil
-                
-                #if targetEnvironment(macCatalyst)
-                // Small delay to let the fullScreenCover dismiss smoothly
-                try? await Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
-                #endif
-                
-                // Still navigate to show error in ResultsView
-                navigateToFile = file
+                // Hide loader and navigate to show error (all on main actor)
+                await MainActor.run {
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        self.isAnalyzing = false
+                    }
+                    self.analyzingFile = nil
+                    // Find file again for navigation
+                    let descriptor = FetchDescriptor<AudioFile>(
+                        predicate: #Predicate<AudioFile> { $0.id == fileID }
+                    )
+                    self.navigateToFile = try? context.fetch(descriptor).first
+                }
             }
         }
+#else
+        // iOS: Move ALL logic into background task with low priority
+        Task.detached(priority: .utility) {
+            // Get file ID in background to avoid potential fault
+            let fileID = await MainActor.run { file.id }
+            
+            // Set analyzingFile after we're in background
+            await MainActor.run {
+                self.analyzingFile = file
+            }
+            
+            // Fetch the file in background to check if it has analysis
+            let descriptor = FetchDescriptor<AudioFile>(
+                predicate: #Predicate<AudioFile> { $0.id == fileID }
+            )
+            
+            guard let audioFile = try? context.fetch(descriptor).first else {
+                await MainActor.run {
+                    self.isAnalyzing = false
+                    self.analyzingFile = nil
+                }
+                return
+            }
+            
+            // Check if already analyzed (now safe off main thread)
+            if audioFile.analysisResult != nil {
+                await MainActor.run {
+                    self.isAnalyzing = false
+                    self.analyzingFile = nil
+                    self.navigateToFile = audioFile
+                }
+                return
+            }
+            
+            // Check subscription (now safe off main thread)
+            guard subscriptionSvc.canPerformAnalysis() else {
+                await MainActor.run {
+                    self.isAnalyzing = false
+                    self.analyzingFile = nil
+                    self.navigateToFile = audioFile
+                }
+                return
+            }
+            
+            // Get filename for analysis
+            let fileName = audioFile.fileName
+            
+            do {
+                // Construct fileURL inside background task to avoid blocking main thread
+                let audioDir = iCloudStorageService.shared.getAudioFilesDirectory()
+                let fileURL = audioDir.appendingPathComponent(fileName)
+                
+                // This runs completely off main thread
+                let result = try await AudioKitService.analyzeAudioFileIsolated(url: fileURL)
+
+                // Save to iCloud Drive (background)
+                Task.detached(priority: .background) {
+                    try? AnalysisResultPersistence.shared.saveAnalysisResult(result, forAudioFile: fileName)
+                }
+
+                // Now update UI and SwiftData on main actor
+                await MainActor.run {
+                    // Increment usage count
+                    subscriptionSvc.incrementAnalysisCount()
+
+                    // Save to the AudioFile model
+                    audioFile.analysisResult = result
+                    audioFile.dateAnalyzed = Date()
+
+                    // Save to SwiftData
+                    try? context.save()
+
+                    // Hide loader and navigate
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        self.isAnalyzing = false
+                    }
+                    self.analyzingFile = nil
+                    self.navigateToFile = audioFile
+                }
+
+            } catch {
+                // Hide loader and navigate to show error (all on main actor)
+                await MainActor.run {
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        self.isAnalyzing = false
+                    }
+                    self.analyzingFile = nil
+                    // Find file again for navigation
+                    let descriptor = FetchDescriptor<AudioFile>(
+                        predicate: #Predicate<AudioFile> { $0.id == fileID }
+                    )
+                    self.navigateToFile = try? context.fetch(descriptor).first
+                }
+            }
+        }
+#endif
     }
     
     private func checkAndDownloadMissingFiles() async {
@@ -571,9 +812,9 @@ struct DashboardView: View {
                 // Check if it's in iCloud but not downloaded, or truly deleted
                 do {
                     let values = try fileURL.resourceValues(forKeys: [
-                        .isUbiquitousItemKey,
-                        .ubiquitousItemDownloadingStatusKey,
-                        .ubiquitousItemIsUploadedKey
+                        URLResourceKey.isUbiquitousItemKey,
+                        URLResourceKey.ubiquitousItemDownloadingStatusKey,
+                        URLResourceKey.ubiquitousItemIsUploadedKey
                     ])
                     
                     let isICloud = values.isUbiquitousItem ?? false
@@ -664,9 +905,17 @@ struct DashboardView: View {
             return
         }
         
-        isScanning = true
-        defer { isScanning = false }
+        await MainActor.run {
+            isScanning = true
+        }
+        defer {
+            Task { @MainActor in
+                isScanning = false
+            }
+        }
         
+        // Yield to let UI update before starting heavy work
+        await Task.yield()
         
         let service = iCloudStorageService.shared
         let audioDir = service.getAudioFilesDirectory()
@@ -675,7 +924,7 @@ struct DashboardView: View {
         do {
             let files = try FileManager.default.contentsOfDirectory(
                 at: audioDir,
-                includingPropertiesForKeys: [.fileSizeKey, .isDirectoryKey],
+                includingPropertiesForKeys: [URLResourceKey.fileSizeKey, URLResourceKey.isDirectoryKey],
                 options: [.skipsHiddenFiles]
             )
             
@@ -683,7 +932,7 @@ struct DashboardView: View {
             // Filter audio files - use all supported formats from AppConstants
             let audioFiles = files.filter { fileURL in
                 // Skip directories
-                if let isDirectory = try? fileURL.resourceValues(forKeys: [.isDirectoryKey]).isDirectory, isDirectory {
+                if let isDirectory = try? fileURL.resourceValues(forKeys: [URLResourceKey.isDirectoryKey]).isDirectory, isDirectory {
                     return false
                 }
                 return AppConstants.supportedAudioFormats.contains(fileURL.pathExtension.lowercased())
@@ -723,11 +972,11 @@ struct DashboardView: View {
                     let values = try fileURL.resourceValues(forKeys: [URLResourceKey.ubiquitousItemDownloadingStatusKey])
                     if values.ubiquitousItemDownloadingStatus == .notDownloaded {
                         try FileManager.default.startDownloadingUbiquitousItem(at: fileURL)
-                        #if targetEnvironment(macCatalyst)
+#if targetEnvironment(macCatalyst)
                         try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s on Mac
-                        #else
+#else
                         try? await Task.sleep(nanoseconds: 2_000_000_000) // 2s on iOS
-                        #endif
+#endif
                     }
                 } catch {
                 }
@@ -766,6 +1015,14 @@ struct DashboardView: View {
                     
                     // IMPORTANT: Save immediately to prevent duplicates from concurrent scans
                     try modelContext.save()
+                    
+                    // Yield to prevent blocking UI during bulk imports
+                    await Task.yield()
+                    
+#if targetEnvironment(macCatalyst)
+                    // Reload the list
+                    await MainActor.run { reloadAudioFiles() }
+#endif
                     
                     // Try to load analysis result from iCloud Drive
                     if let analysisResult = AnalysisResultPersistence.shared.loadAnalysisResult(forAudioFile: fileName) {
@@ -831,7 +1088,7 @@ struct DashboardView: View {
         } else {
         }
     }
-
+    
     private func deleteFiles(at offsets: IndexSet) {
         
         for index in offsets {
@@ -844,10 +1101,10 @@ struct DashboardView: View {
                 try iCloudStorageService.shared.deleteAudioFile(at: fileURL)
             } catch {
             }
-        
+            
             // Delete the analysis result JSON from iCloud Drive
             AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: file.fileName)
-        
+            
             // Delete the SwiftData record (CloudKit will sync this deletion)
             modelContext.delete(file)
         }
@@ -860,27 +1117,29 @@ struct DashboardView: View {
         // Notify other views that files were deleted
         NotificationCenter.default.post(name: .audioFileDeleted, object: nil)
     }
-}
 
-#Preview {
-    let config = ModelConfiguration(isStoredInMemoryOnly: true)
-    let container = try! ModelContainer(for: AudioFile.self, configurations: config)
-    let context = container.mainContext
     
-    // Create sample data
-    for i in 1...5 {
-        let audioFile = AudioFile(
-            fileName: "Track \(i).wav",
-            fileURL: URL(fileURLWithPath: "/tmp/track\(i).wav"),
-            duration: Double.random(in: 120...300),
-            sampleRate: 44100,
-            bitDepth: 24,
-            numberOfChannels: 2,
-            fileSize: Int64.random(in: 10_000_000...50_000_000)
-        )
-        context.insert(audioFile)
-    }
     
-    return DashboardView()
-        .modelContainer(container)
+//    #Preview {
+//        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+//        let container = try! ModelContainer(for: AudioFile.self, configurations: config)
+//        let context = container.mainContext
+//        
+//        // Create sample data
+//        for i in 1...5 {
+//            let audioFile = AudioFile(
+//                fileName: "Track \(i).wav",
+//                fileURL: URL(fileURLWithPath: "/tmp/track\(i).wav"),
+//                duration: Double.random(in: 120...300),
+//                sampleRate: 44100,
+//                bitDepth: 24,
+//                numberOfChannels: 2,
+//                fileSize: Int64.random(in: 10_000_000...50_000_000)
+//            )
+//            context.insert(audioFile)
+//        }
+//        
+//        return DashboardView()
+//            .modelContainer(container)
+//    }
 }

@@ -275,17 +275,26 @@ struct PaywallView: View {
         do {
             let customerInfo = try await subscriptionService.purchase(package: package)
             
+            
             // Wait a bit for state to propagate (especially on MacCatalyst)
             try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
             
             // Force refresh customer info to ensure latest state
             await subscriptionService.updateCustomerInfo()
             
-            // Wait for UI state to update
-            try? await Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
+            // Wait longer for UI state to update                                                                                                                                    
+            try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
             
-            // Verify purchase was successful
-            if customerInfo.entitlements["pro"]?.isActive == true || subscriptionService.isProUser || subscriptionService.isInTrialPeriod {
+            print("   - subscriptionService.isProUser: \(subscriptionService.isProUser)")
+            print("   - subscriptionService.isInTrialPeriod: \(subscriptionService.isInTrialPeriod)")
+            
+            // Verify purchase was successful (trial or paid)
+            let hasActiveEntitlement = customerInfo.entitlements["pro"]?.isActive == true
+            let isProOrTrial = subscriptionService.isProUser || subscriptionService.isInTrialPeriod
+            
+            print("   - Will dismiss: \(hasActiveEntitlement || isProOrTrial)")
+            
+            if hasActiveEntitlement || isProOrTrial {
                 // Ensure we're on main actor for UI updates
                 await MainActor.run {
                     isPurchasing = false

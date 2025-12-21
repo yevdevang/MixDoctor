@@ -146,6 +146,7 @@ struct StatCard: View {
 struct AudioFileRow: View {
     let audioFile: AudioFile
     var onDelete: (() -> Void)? = nil
+    var isAnalyzing: Bool = false
     
     @State private var fileExists: Bool = true
     @State private var isDownloading: Bool = false
@@ -228,8 +229,17 @@ struct AudioFileRow: View {
 
             Spacer()
 
-            // Score badge
-            if let result = audioFile.analysisResult {
+            // Analyzing indicator or Score badge
+            if isAnalyzing {
+                VStack(spacing: 4) {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                    Text("Analyzing")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.trailing, 8)
+            } else if let result = audioFile.analysisResult {
                 VStack(spacing: 2) {
                     Text("\(Int(result.overallScore))")
                         .font(.title3)
