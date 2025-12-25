@@ -6,6 +6,8 @@ This document provides detailed information about token usage and associated cos
 
 ⚠️ **IMPORTANT:** This app uses **Claude API**, not OpenAI. Previous versions of this document incorrectly referenced OpenAI pricing.
 
+⚠️ **CRITICAL UPDATE (Dec 25, 2025):** Free users get **3 total analyses (lifetime)**, not 3 per month. This dramatically reduces free tier costs.
+
 ---
 
 ## Token Usage Per Analysis
@@ -39,11 +41,11 @@ You are an expert audio engineer and mixing specialist...
 }
 ```
 
-**Total Input:** ~**400-450 tokens per analysis**
+**Total Input:** ~**1,000 tokens per analysis** (includes system prompt)
 
 ---
 
-### Output Tokens (Received from OpenAI)
+### Output Tokens (Received from Claude API)
 
 The response structure contains:
 
@@ -66,13 +68,27 @@ The response structure contains:
 }
 ```
 
-**Total Output:** ~**570-880 tokens per analysis**
+**Total Output:** ~**400 tokens per analysis**
 
-**Average tokens per analysis:** ~**1,250 tokens** (450 input + 800 output)
+**Average tokens per analysis:** ~**1,400 tokens** (1,000 input + 400 output)
 
 ---
 
 ## Cost Analysis
+
+### 🎯 Current Model Configuration (from ClaudeAPIService.swift)
+
+```swift
+private func determineModel(isProUser: Bool) -> String {
+    return isProUser ? "claude-sonnet-4-5-20250929" : "claude-haiku-4-5-20251001"
+}
+```
+
+- **Free Users:** `claude-haiku-4-5-20251001` (fastest, cheapest)
+- **Pro Users:** `claude-sonnet-4-5-20250929` (smartest, more expensive)
+- **Trial Users:** `claude-sonnet-4-5-20250929` (premium experience)
+
+---
 
 ### Claude Sonnet 4.5 Pricing (Pro Users & Trial)
 
@@ -108,16 +124,32 @@ The response structure contains:
 
 ---
 
-## Monthly Cost Projections
+## Cost Projections
 
-| User Type             | Analyses/Month | Model             | Cost/User/Month |
-| --------------------- | -------------- | ----------------- | --------------- |
-| **Free User**         | 3              | Claude Haiku 4.5  | $0.009          |
-| **Trial User**        | 3              | Claude Sonnet 4.5 | $0.027          |
-| **Pro (Light Usage)** | 20             | Claude Sonnet 4.5 | $0.18           |
-| **Pro (Moderate)**    | 50             | Claude Sonnet 4.5 | $0.45           |
-| **Pro (Heavy)**       | 100            | Claude Sonnet 4.5 | $0.90           |
-| **Pro (Power User)**  | 500            | Claude Sonnet 4.5 | $4.50           |
+### Free Tier (3 Analyses TOTAL - Lifetime Limit)
+
+| User Type     | Analyses | Model             | Cost/User (Lifetime) |
+| ------------- | -------- | ----------------- | -------------------- |
+| **Free User** | 3        | Claude Haiku 4.5  | **$0.009**           |
+
+✅ **Free tier cost is negligible:** Each free user costs less than **1 cent** for their lifetime usage.
+
+### Trial Period (3-Day Trial with Sonnet Access)
+
+| User Type      | Analyses | Model             | Cost/User |
+| -------------- | -------- | ----------------- | --------- |
+| **Trial User** | 3        | Claude Sonnet 4.5 | **$0.027** |
+
+⚠️ Note: Trial users also have a 3-analysis limit but use the premium Sonnet model.
+
+### Pro Users (Monthly Subscription)
+
+| Usage Level          | Analyses/Month | Model             | Cost/User/Month |
+| -------------------- | -------------- | ----------------- | --------------- |
+| **Pro (Light)**      | 20             | Claude Sonnet 4.5 | $0.18           |
+| **Pro (Moderate)**   | 50 (limit)     | Claude Sonnet 4.5 | $0.45           |
+| **Pro (Heavy)**      | 100            | Claude Sonnet 4.5 | $0.90           |
+| **Pro (Power User)** | 200            | Claude Sonnet 4.5 | $1.80           |
 
 ---
 
@@ -149,10 +181,11 @@ The response structure contains:
 
 ### ✅ Healthy Margins
 
-- **Free tier cost is negligible:** $0.009/user/month (3 analyses with Claude Haiku 4.5)
+- **Free tier cost is negligible:** $0.009/user **lifetime** (3 total analyses with Claude Haiku 4.5)
 - **Trial period cost is minimal:** $0.027/user for 3 analyses with Claude Sonnet 4.5
-- **Pro users are profitable:** Even heavy users (100+ analyses) remain highly profitable
-- **Break-even point is very high:** Users would need to perform 443-665 analyses/month to exceed subscription revenue
+- **Pro users are highly profitable:** 50 analyses/month costs only $0.45 vs $5.99 revenue
+- **Break-even point is very high:** Users would need 665+ analyses/month to exceed subscription revenue
+- **Free tier has no ongoing cost:** Once a user exhausts their 3 analyses, they cost $0
 
 ### ✅ Sustainable Pricing
 
@@ -169,13 +202,114 @@ Your current pricing structure ($5.99/month or $47.88/year) provides:
 
 ---
 
+## 🛡️ Budget Protection Strategies
+
+### Current Safeguards ✅
+
+1. **Hard Limits Enforced:**
+   - Free users: 3 analyses lifetime (enforced in `SubscriptionService.swift`)
+   - Pro users: 50 analyses/month (enforced server-side)
+   - These limits **prevent runaway API costs**
+
+2. **Model Segregation:**
+   - Free tier uses cheaper Haiku model ($0.003/analysis)
+   - Pro tier uses premium Sonnet model ($0.009/analysis)
+
+3. **No Auto-Retry:** Failed analyses don't automatically retry, preventing cost loops
+
+### Recommended Additional Safeguards
+
+#### 🚨 HIGH PRIORITY: Monthly Budget Alerts
+
+Implement budget monitoring in your Claude API dashboard:
+
+```swift
+// Pseudocode for monthly budget tracking
+class BudgetMonitor {
+    let monthlyBudgetLimit = 1000.0  // $1,000/month
+    let alertThreshold = 0.8         // Alert at 80%
+    
+    func checkBudgetBeforeAnalysis() async throws {
+        let currentSpend = await fetchMonthlySpend()
+        if currentSpend > monthlyBudgetLimit {
+            throw APIError.budgetExceeded
+        }
+        if currentSpend > monthlyBudgetLimit * alertThreshold {
+            await sendAlertToAdmin()
+        }
+    }
+}
+```
+
+#### 🔧 Recommended Implementation Steps:
+
+1. **Set Claude API Budget Cap:**
+   - Go to Anthropic Console → Billing → Budget Limits
+   - Set monthly limit (e.g., $1,000)
+   - Enable email alerts at 50%, 75%, 90%
+
+2. **Add Server-Side Cost Tracking:**
+   - Log each API call cost to database
+   - Daily cron job to calculate running total
+   - Disable API calls if budget exceeded
+
+3. **Implement Rate Limiting:**
+   ```swift
+   // Prevent abuse: max 10 analyses per user per day
+   private let dailyAnalysisLimit = 10
+   private let dailyAnalysisKey = "dailyAnalysisCount_"
+   ```
+
+4. **Add Emergency Kill Switch:**
+   ```swift
+   // Remote config flag to disable all AI analysis
+   if RemoteConfig.shared.isAIAnalysisDisabled {
+       throw APIError.serviceTemporarilyDisabled
+   }
+   ```
+
+---
+
 ## Cost Optimization Opportunities
 
-1. **Prompt Caching (HIGH PRIORITY):** Implement Claude's prompt caching to save 90% on input tokens (~$0.0027 per cached request)
-2. **Prompt Optimization:** Reducing system prompt from ~1,000 to ~700 tokens could save ~30% on input costs
-3. **Response Format:** Limiting recommendation count to 3 (instead of 5) could save ~100 output tokens
-4. **Model Selection:** Continue using Claude Haiku 4.5 for free tier to minimize costs
-5. **Batch Processing:** For non-urgent analyses, use Claude's batch API for 50% cost savings
+1. ✅ **Model Selection (IMPLEMENTED):** Using Claude Haiku 4.5 for free tier saves 67% vs Sonnet
+2. ⏳ **Prompt Caching (NOT YET IMPLEMENTED):** Could save 90% on input tokens (~$0.0027 per cached request)
+   - Currently disabled in code: `// DISABLED CACHING - use fresh prompt every time`
+   - Re-enable to save ~$0.006 per analysis
+3. **Response Format:** Limiting recommendations to 3 (instead of 5) could save ~100 output tokens
+4. **Batch Processing:** For non-urgent analyses, use Claude's batch API for 50% cost savings
+
+---
+
+## 💰 What You Need to Budget
+
+### Realistic Monthly Cost Scenarios
+
+Assuming the following user distribution:
+
+| User Type        | Count | Analyses Each | Model          | Cost Each | **Total Cost** |
+| ---------------- | ----- | ------------- | -------------- | --------- | -------------- |
+| Free (lifetime)  | 1,000 | 3 (one-time)  | Haiku 4.5      | $0.009    | **$9.00**      |
+| Trial (3 days)   | 100   | 3             | Sonnet 4.5     | $0.027    | **$2.70**      |
+| Pro (light)      | 50    | 20/month      | Sonnet 4.5     | $0.18     | **$9.00**      |
+| Pro (moderate)   | 20    | 50/month      | Sonnet 4.5     | $0.45     | **$9.00**      |
+| **MONTHLY TOTAL**|       |               |                |           | **~$30/month** |
+
+### Monthly Budget Recommendation
+
+- **Conservative budget:** $100/month (covers 3x growth)
+- **Comfortable budget:** $250/month (covers 8x growth + spikes)
+- **Safe budget:** $500/month (covers 16x growth)
+
+### Revenue vs Cost (Healthy Margins)
+
+With 70 paying Pro users at $5.99/month:
+
+- **Revenue:** 70 × $5.99 = **$419.30/month**
+- **Claude API Cost:** ~$18.00/month (for Pro users only)
+- **Profit Margin:** **95.7%** 🎉
+
+**Conclusion:** Even with just 70 paid subscribers, you're highly profitable. The 3-analysis lifetime limit for free users means they're essentially a one-time $0.009 cost.
 
 ---
 
@@ -193,7 +327,7 @@ Your current pricing structure ($5.99/month or $47.88/year) provides:
 
 ## Last Updated
 
-November 26, 2025
+December 25, 2025 (Complete reanalysis with accurate free tier limits)
 
 ## Pricing Source
 
