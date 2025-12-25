@@ -243,8 +243,19 @@ final class iCloudSyncMonitor: ObservableObject {
         print("🔍 iCloudSyncMonitor: Checking directory for files...")
         print("📂 Directory path: \(directory.path)")
         
+        // Run the heavy directory scan work off the main actor to
+        // avoid blocking UI while still updating published state
+        Task.detached(priority: .utility) {
+            await iCloudSyncMonitor.performDirectoryCheck(in: directory)
+        }
+    }
+    
+    /// Performs the actual directory scan and download work on a background
+    /// executor. UI-related state (`isSyncing`, `syncProgress`) is updated
+    /// via `MainActor.run` to keep SwiftUI happy without blocking the main thread.
+    private static func performDirectoryCheck(in directory: URL) async {
         do {
-            // List all files in directory
+            // List all files in directory (background thread)
             let files = try FileManager.default.contentsOfDirectory(
                 at: directory,
                 includingPropertiesForKeys: [.ubiquitousItemDownloadingStatusKey, .nameKey, .isUbiquitousItemKey],
@@ -255,11 +266,17 @@ final class iCloudSyncMonitor: ObservableObject {
             
             guard !files.isEmpty else {
                 print("📂 No files to sync")
+                await MainActor.run {
+                    shared.isSyncing = false
+                    shared.syncProgress = 0.0
+                }
                 return
             }
             
-            isSyncing = true
-            syncProgress = 0.0
+            await MainActor.run {
+                shared.isSyncing = true
+                shared.syncProgress = 0.0
+            }
             
             for (index, fileURL) in files.enumerated() {
                 let fileName = fileURL.lastPathComponent
@@ -282,7 +299,7 @@ final class iCloudSyncMonitor: ObservableObject {
                         print("⬇️ Downloading: \(fileName)")
                         do {
                             try FileManager.default.startDownloadingUbiquitousItem(at: fileURL)
-                            await waitForDownload(url: fileURL)
+                            await waitForDownloadBackground(url: fileURL)
                             print("✅ Downloaded: \(fileName)")
                         } catch {
                             print("❌ Failed to download \(fileName): \(error.localizedDescription)")
@@ -292,11 +309,16 @@ final class iCloudSyncMonitor: ObservableObject {
                     }
                 }
                 
-                syncProgress = Double(index + 1) / Double(files.count)
+                let progress = Double(index + 1) / Double(files.count)
+                await MainActor.run {
+                    shared.syncProgress = progress
+                }
             }
             
-            isSyncing = false
-            syncProgress = 1.0
+            await MainActor.run {
+                shared.isSyncing = false
+                shared.syncProgress = 1.0
+            }
             
             print("✅ Directory check complete - posting notifications")
             
@@ -308,7 +330,37 @@ final class iCloudSyncMonitor: ObservableObject {
             
         } catch {
             print("❌ Error checking directory: \(error.localizedDescription)")
-            isSyncing = false
+            await MainActor.run {
+                shared.isSyncing = false
+            }
+        }
+    }
+    
+    /// Background version of `waitForDownload` that does not rely on the
+    /// `@MainActor` isolation of the monitor type.
+    private static func waitForDownloadBackground(url: URL, maxAttempts: Int = 30) async {
+        #if targetEnvironment(macCatalyst)
+        // On Mac Catalyst, files download much faster, reduce wait time
+        let pollInterval: UInt64 = 200_000_000 // 0.2 seconds
+        let attempts = 15 // 3 seconds max
+        #else
+        let pollInterval: UInt64 = 1_000_000_000 // 1 second
+        let attempts = maxAttempts
+        #endif
+        
+        for _ in 0..<attempts {
+            do {
+                let values = try url.resourceValues(forKeys: [.ubiquitousItemDownloadingStatusKey])
+                let status = values.ubiquitousItemDownloadingStatus
+                
+                if status == .current {
+                    return
+                }
+            } catch {
+            }
+            
+            // Wait before checking again
+            try? await Task.sleep(nanoseconds: pollInterval)
         }
     }
 }

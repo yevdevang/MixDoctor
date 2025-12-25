@@ -137,17 +137,23 @@ struct ImportView: View {
         )
         .animation(.easeInOut(duration: 0.2), value: isDropTargeted)
         .task {
-            // Always load imports and check for orphans on appear
-            viewModel.loadImports()
-            
-            // Check for orphaned files (files deleted on other devices)
-            Task(priority: .userInitiated) {
+            // Run loading operations on background thread to avoid blocking UI during tab switch
+            await Task.detached(priority: .userInitiated) {
+                await MainActor.run {
+                    viewModel.loadImports()
+                }
+                
+                // Check for orphaned files (files deleted on other devices)
                 await viewModel.scanForOrphanedFiles()
-            }
+            }.value
         }
         .onReceive(NotificationCenter.default.publisher(for: .audioFileDeleted)) { _ in
-            // Reload files when a file is deleted from Dashboard
-            viewModel.loadImports()
+            // Reload files when a file is deleted from Dashboard (non-blocking)
+            Task.detached(priority: .utility) {
+                await MainActor.run {
+                    viewModel.loadImports()
+                }
+            }
             // Also check for orphans
             Task {
                 await viewModel.scanForOrphanedFiles()

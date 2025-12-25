@@ -260,8 +260,10 @@ struct SettingsView: View {
                 .presentationContentInteraction(.scrolls)
             }
             .task {
-                // Refresh subscription status when view appears
-                await subscriptionService.updateCustomerInfo()
+                // Refresh subscription status when view appears (non-blocking)
+                Task.detached(priority: .utility) {
+                    await subscriptionService.updateCustomerInfo()
+                }
             }
         }
     }
@@ -270,10 +272,11 @@ struct SettingsView: View {
     
     private func loadStorageInfo() async {
         isLoadingStorage = true
-        do {
-            storageInfo = try FileManagementService.shared.calculateStorageUsage()
-        } catch {
-        }
+        // Run storage calculation on background thread to avoid UI freezing
+        let info = await Task.detached(priority: .utility) {
+            try? FileManagementService.shared.calculateStorageUsage()
+        }.value
+        storageInfo = info
         isLoadingStorage = false
     }
     
