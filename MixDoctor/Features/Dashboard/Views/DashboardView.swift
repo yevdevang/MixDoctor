@@ -504,13 +504,19 @@ struct DashboardView: View {
         .navigationDestination(item: $navigateToFile) { file in
             ResultsView(audioFile: file)
         }
-#if !targetEnvironment(macCatalyst)
         .fullScreenCover(isPresented: $isAnalyzing) {
             if let file = analyzingFile {
+#if targetEnvironment(macCatalyst)
+                // MacCatalyst: Ensure animations run on main thread
                 AnimatedGradientLoader(fileName: file.fileName)
+                    .task { @MainActor in
+                        // Force main thread for MacCatalyst animations
+                    }
+#else
+                AnimatedGradientLoader(fileName: file.fileName)
+#endif
             }
         }
-#endif
     }
     
     // MARK: - Empty State
@@ -735,7 +741,7 @@ struct DashboardView: View {
             }
             
             // Check subscription (now safe off main thread)
-            guard subscriptionSvc.canPerformAnalysis() else {
+            guard await subscriptionSvc.canPerformAnalysis() else {
                 await MainActor.run {
                     self.isAnalyzing = false
                     self.analyzingFile = nil
