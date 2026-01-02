@@ -29,7 +29,7 @@ struct PaywallView: View {
                 Color(red: 0xef/255, green: 0xe8/255, blue: 0xfd/255)
                     .ignoresSafeArea()
                 
-                ScrollView {
+                ScrollView(.vertical, showsIndicators: true) {
                     VStack(spacing: 40) {
                         // Header
                         headerSection
@@ -56,7 +56,8 @@ struct PaywallView: View {
                     }
                     .padding(.horizontal, 24)
                     .padding(.top, 20)
-                    .padding(.bottom, 40)
+                    .padding(.bottom, 60) // Increased bottom padding to ensure footer is fully visible
+                    .frame(maxWidth: .infinity) // Ensure full width
                 }
             }
             .navigationTitle("Upgrade to Pro")
@@ -96,12 +97,6 @@ struct PaywallView: View {
     
     private var headerSection: some View {
         VStack(spacing: 20) {
-            Image("mix-doctor-bg")
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 120, height: 120)
-                .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-            
             Text("Unlock Pro Features")
                 .font(.largeTitle.bold())
                 .foregroundColor(.black)

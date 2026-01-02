@@ -594,9 +594,6 @@ struct DashboardView: View {
     // MARK: - Actions
     
     private func handleAudioFileSelection(_ file: AudioFile) {
-        // Show loader IMMEDIATELY - this is the ONLY thing that happens synchronously
-        isAnalyzing = true
-        
         // Capture values that won't block
         let subscriptionSvc = subscriptionService
         let context = modelContext
@@ -610,32 +607,27 @@ struct DashboardView: View {
             // Get file ID in background to avoid potential fault
             let fileID = await MainActor.run { file.id }
             
-            // Set analyzingFile after yield
-            await MainActor.run {
-                self.analyzingFile = file
-            }
-            
             // Fetch the file in background to check if it has analysis
             let descriptor = FetchDescriptor<AudioFile>(
                 predicate: #Predicate<AudioFile> { $0.id == fileID }
             )
             
             guard let audioFile = try? context.fetch(descriptor).first else {
+                return
+            }
+            
+            // Check if already analyzed - navigate directly without showing loader
+            if audioFile.analysisResult != nil {
                 await MainActor.run {
-                    self.isAnalyzing = false
-                    self.analyzingFile = nil
+                    self.navigateToFile = audioFile
                 }
                 return
             }
             
-            // Check if already analyzed (now safe off main thread)
-            if audioFile.analysisResult != nil {
-                await MainActor.run {
-                    self.isAnalyzing = false
-                    self.analyzingFile = nil
-                    self.navigateToFile = audioFile
-                }
-                return
+            // File needs analysis - show loader now
+            await MainActor.run {
+                self.isAnalyzing = true
+                self.analyzingFile = file
             }
             
             // Check subscription (now safe off main thread)
@@ -712,32 +704,27 @@ struct DashboardView: View {
             // Get file ID in background to avoid potential fault
             let fileID = await MainActor.run { file.id }
             
-            // Set analyzingFile after we're in background
-            await MainActor.run {
-                self.analyzingFile = file
-            }
-            
             // Fetch the file in background to check if it has analysis
             let descriptor = FetchDescriptor<AudioFile>(
                 predicate: #Predicate<AudioFile> { $0.id == fileID }
             )
             
             guard let audioFile = try? context.fetch(descriptor).first else {
+                return
+            }
+            
+            // Check if already analyzed - navigate directly without showing loader
+            if audioFile.analysisResult != nil {
                 await MainActor.run {
-                    self.isAnalyzing = false
-                    self.analyzingFile = nil
+                    self.navigateToFile = audioFile
                 }
                 return
             }
             
-            // Check if already analyzed (now safe off main thread)
-            if audioFile.analysisResult != nil {
-                await MainActor.run {
-                    self.isAnalyzing = false
-                    self.analyzingFile = nil
-                    self.navigateToFile = audioFile
-                }
-                return
+            // File needs analysis - show loader now
+            await MainActor.run {
+                self.isAnalyzing = true
+                self.analyzingFile = file
             }
             
             // Check subscription (now safe off main thread)

@@ -260,12 +260,40 @@ public class AudioKitService: ObservableObject {
             
             
         } catch {
-            if let claudeError = error as? URLError {
+            // Log the specific error for debugging
+            if let claudeError = error as? ClaudeAPIError {
+                print("❌ Claude API Error: \(claudeError.localizedDescription)")
+            } else if let urlError = error as? URLError {
+                print("❌ Network Error: \(urlError.localizedDescription)")
+            } else {
+                print("❌ Analysis Error: \(error.localizedDescription)")
             }
             
             // API failed - show error message, still mark as professional
             result.isProfessionallyMixed = true
-            result.aiSummary = "Something went wrong. Try later."
+            
+            // Provide more specific error messages based on error type
+            if let claudeError = error as? ClaudeAPIError {
+                switch claudeError {
+                case .apiError(let code, _):
+                    if code == 401 {
+                        result.aiSummary = "API authentication failed. Please check your API key configuration."
+                    } else if code == 429 {
+                        result.aiSummary = "Rate limit exceeded. Please try again in a moment."
+                    } else {
+                        result.aiSummary = "API error occurred. Please try again later."
+                    }
+                case .parseError:
+                    result.aiSummary = "Failed to parse analysis response. Please try again."
+                case .networkError:
+                    result.aiSummary = "Network error. Please check your connection and try again."
+                case .invalidResponse:
+                    result.aiSummary = "Invalid response from server. Please try again."
+                }
+            } else {
+                result.aiSummary = "Something went wrong. Please try again later."
+            }
+            
             result.aiRecommendations = []
             result.isReadyForMastering = false
             result.overallScore = 0.0  // Hide score
