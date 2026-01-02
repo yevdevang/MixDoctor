@@ -92,15 +92,15 @@ class ClaudeAPIService {
             // Specific error messages for common issues
             switch httpResponse.statusCode {
             case 401:
-                break
+                print("❌ Claude API Error 401: Unauthorized - Check API key configuration")
             case 429:
-                break
+                print("❌ Claude API Error 429: Rate limit exceeded - Too many requests")
             case 400:
-                break
+                print("❌ Claude API Error 400: Bad request - Invalid request format")
             case 500, 502, 503:
-                break
+                print("❌ Claude API Error \(httpResponse.statusCode): Server error - Try again later")
             default:
-                break
+                print("❌ Claude API Error \(httpResponse.statusCode): \(errorMessage)")
             }
             
             throw ClaudeAPIError.apiError(httpResponse.statusCode, errorMessage)
@@ -110,6 +110,7 @@ class ClaudeAPIService {
         
         // 🔍 DEBUG: Print the raw JSON response
         if let jsonString = String(data: data, encoding: .utf8) {
+            print("📥 CLAUDE API RAW JSON RESPONSE:\n\(jsonString.prefix(500))\n")
         }
         
         return try parseClaudeResponse(data)
@@ -1142,6 +1143,7 @@ class ClaudeAPIService {
                 if let firstNumber = numbers.first, let parsedScore = Int(firstNumber) {
                     score = parsedScore
                 } else {
+                    print("⚠️ WARNING: Failed to parse score from line: \(trimmedLine)")
                 }
                 continue
             }
@@ -1218,10 +1220,19 @@ class ClaudeAPIService {
         print("📊 PARSED RESULTS:")
         print("  Score: \(score ?? -1)")
         print("  Analysis length: \(finalAnalysis.count) chars")
-        print("  Analysis: \(finalAnalysis)")
+        if finalAnalysis.isEmpty {
+            print("  ⚠️ WARNING: Analysis text is empty after parsing")
+        } else {
+            print("  Analysis: \(finalAnalysis)")
+        }
         print("  Recommendations count: \(recommendations.count)")
         for (i, rec) in recommendations.enumerated() {
             print("    \(i+1). \(rec)")
+        }
+        
+        // Warn if score parsing failed
+        if score == nil {
+            print("⚠️ WARNING: Score not found in Claude response, using fallback value 50")
         }
         
         // Determine if ready for mastering: few or no recommendations AND good score
@@ -1229,7 +1240,7 @@ class ClaudeAPIService {
         
         return ClaudeAnalysisResponse(
             score: score ?? 50,
-            summary: finalAnalysis,
+            summary: finalAnalysis.isEmpty ? "Analysis completed successfully." : finalAnalysis,
             recommendations: recommendations,
             isReadyForMastering: isReadyForMastering
         )

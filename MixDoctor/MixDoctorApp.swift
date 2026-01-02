@@ -197,18 +197,46 @@ struct MixDoctorApp: App {
                 }
                 
                 #if targetEnvironment(macCatalyst)
-                // Hide window title on Mac and disable window resizing
+                // Hide window title on Mac and enable responsive window resizing
                 if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
                     if let titlebar = windowScene.titlebar {
                         titlebar.titleVisibility = .hidden
                     }
                     
-                    // Disable window resizing by setting min/max to same size
+                    // Get screen size for window sizing
+                    let screenSize = windowScene.screen.bounds.size
+                    let screenWidth = screenSize.width
+                    let screenHeight = screenSize.height
+                    
+                    // Set minimum and maximum sizes for responsive window sizing
+                    // Minimum width is fixed at 1800 as requested
                     if let sizeRestrictions = windowScene.sizeRestrictions {
-                        let fixedWidth: CGFloat = 1920
-                        let fixedHeight: CGFloat = 1280
-                        sizeRestrictions.minimumSize = CGSize(width: fixedWidth, height: fixedHeight)
-                        sizeRestrictions.maximumSize = CGSize(width: fixedWidth, height: fixedHeight)
+                        // Fixed minimum width of 1800, ensure it doesn't exceed screen size
+                        let minimumWidth: CGFloat = min(1800, screenWidth * 0.98)
+                        let minimumHeight: CGFloat = 900
+                        
+                        // Maximum sizes: allow full screen expansion (green button + ALT+SHIFT)
+                        // Set to screen dimensions to allow full screen
+                        let maximumWidth: CGFloat = screenWidth
+                        let maximumHeight: CGFloat = screenHeight
+                        
+                        sizeRestrictions.minimumSize = CGSize(width: minimumWidth, height: minimumHeight)
+                        sizeRestrictions.maximumSize = CGSize(width: maximumWidth, height: maximumHeight)
+                    }
+                    
+                    // Set initial window size to fit entire screen on launch
+                    if let window = windowScene.windows.first {
+                        // Make window fill entire screen - use full screen dimensions
+                        let windowWidth = screenWidth
+                        let windowHeight = screenHeight
+                        
+                        // Position window at origin (0,0) to fill entire screen
+                        window.frame = CGRect(
+                            x: 0,
+                            y: 0,
+                            width: windowWidth,
+                            height: windowHeight
+                        )
                     }
                 }
                 #endif
