@@ -133,11 +133,24 @@ struct DashboardView: View {
             .onAppear {
                 setupAppearance()
                 performInitialSync()
+                updateStatistics()
+            }
+            .onChange(of: audioFiles.count) { old, new in
+                updateStatistics()
             }
 #endif
             .onChange(of: iCloudMonitor.isSyncing) { old, new in
                 handleSyncStateChange(oldValue: old, newValue: new)
             }
+#if !targetEnvironment(macCatalyst)
+            .onChange(of: audioFiles.count) { old, new in
+                updateStatistics()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .audioFileDeleted)) { _ in
+                // Update statistics when files are deleted
+                updateStatistics()
+            }
+#endif
     }
     
     private var contentStack: some View {
@@ -165,6 +178,19 @@ struct DashboardView: View {
     }
     
     // MARK: - Helper Methods
+    
+    /// Update cached statistics from audioFiles (works on both iOS and MacCatalyst)
+    private func updateStatistics() {
+        // Calculate statistics safely
+        let files = audioFiles
+        cachedAnalyzedCount = files.filter { $0.analysisResult != nil }.count
+        
+        let results = files.compactMap { $0.analysisResult }
+        cachedIssuesCount = results.filter { hasActualIssues(result: $0) }.count
+        
+        let scores = results.compactMap { $0.overallScore }
+        cachedAverageScore = scores.isEmpty ? 0.0 : scores.reduce(0, +) / Double(scores.count)
+    }
 
     /// Debounce sync operations to prevent rapid consecutive calls
     private func debouncedSync(priority: TaskPriority = .utility) {
@@ -192,6 +218,7 @@ struct DashboardView: View {
         try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
         setupAppearance()
         performInitialSync()
+        // Statistics will be updated by loadAudioFiles() in performInitialSync
     }
 #endif
     
@@ -251,6 +278,11 @@ struct DashboardView: View {
                 await checkAndDownloadMissingFiles()
                 await scanAndImportFromiCloud()
                 await loadMissingAnalysisResults()
+#if !targetEnvironment(macCatalyst)
+                await MainActor.run {
+                    updateStatistics()
+                }
+#endif
             }
         }
     }
@@ -569,17 +601,13 @@ struct DashboardView: View {
             // Fetch on main thread
             let files = (try? modelContext.fetch(descriptor)) ?? []
             
-            // Update UI and calculate statistics immediately
+            // Update UI
             audioFiles = files
             cachedFilteredFiles = files
             isLoadingFiles = false
             
-            // Calculate statistics immediately while we have safe access to relationships
-            cachedAnalyzedCount = files.filter { $0.analysisResult != nil }.count
-            let results = files.compactMap { $0.analysisResult }
-            cachedIssuesCount = results.filter { hasActualIssues(result: $0) }.count
-            let scores = results.compactMap { $0.overallScore }
-            cachedAverageScore = scores.isEmpty ? 0.0 : scores.reduce(0, +) / Double(scores.count)
+            // Update statistics
+            updateStatistics()
         }
     }
     
@@ -669,7 +697,7 @@ struct DashboardView: View {
                     // Save to SwiftData
                     try? context.save()
 
-                    // Reload the list
+                    // Reload the list and update statistics
                     Task(priority: .utility) {
                         await self.loadAudioFiles()
                         // Statistics will be updated by loadAudioFiles
@@ -764,6 +792,9 @@ struct DashboardView: View {
 
                     // Save to SwiftData
                     try? context.save()
+
+                    // Update statistics after analysis
+                    self.updateStatistics()
 
                     // Hide loader and navigate
                     withAnimation(.easeOut(duration: 0.3)) {
@@ -1031,6 +1062,12 @@ struct DashboardView: View {
             }
             
             if imported > 0 {
+#if !targetEnvironment(macCatalyst)
+                // Update statistics after importing new files
+                await MainActor.run {
+                    updateStatistics()
+                }
+#endif
             }
         } catch {
         }
@@ -1076,6 +1113,13 @@ struct DashboardView: View {
                 }
                 if clearedCount > 0 {
                 }
+                
+                // Update statistics after loading/clearing analysis results
+#if !targetEnvironment(macCatalyst)
+                await MainActor.run {
+                    updateStatistics()
+                }
+#endif
             } catch {
             }
         } else {
@@ -1106,6 +1150,15 @@ struct DashboardView: View {
             try modelContext.save()
         } catch {
         }
+        
+        // Update statistics after deletion
+#if targetEnvironment(macCatalyst)
+        Task(priority: .utility) {
+            await loadAudioFiles()
+        }
+#else
+        updateStatistics()
+#endif
         
         // Notify other views that files were deleted
         NotificationCenter.default.post(name: .audioFileDeleted, object: nil)
