@@ -4,14 +4,39 @@ import UIKit
 #endif
 
 extension Color {
-    // Purple accent color
+    // Purple accent color - adapts to color scheme
+    // Light mode: #6f2cde (RGB: 111, 44, 222)
+    // Dark mode: Brighter version for better readability
     static var avidPink: Color {
-        Color(red: 0.435, green: 0.173, blue: 0.871) // #6f2cde
+        #if canImport(UIKit)
+        Color(UIColor { traitCollection in
+            if traitCollection.userInterfaceStyle == .dark {
+                // Dark mode: Brighter purple - RGB(140, 80, 240) or #8c50f0
+                return UIColor(red: 0.55, green: 0.31, blue: 0.94, alpha: 1.0)
+            } else {
+                // Light mode: Original purple - RGB(111, 44, 222) or #6f2cde
+                return UIColor(red: 0.435, green: 0.173, blue: 0.871, alpha: 1.0)
+            }
+        })
+        #else
+        Color(red: 0.435, green: 0.173, blue: 0.871)
+        #endif
     }
     
     // Use purple as primary accent
     static var primaryAccent: Color {
         avidPink
+    }
+    
+    // Helper function for explicit color scheme control (if needed)
+    static func appPurple(for colorScheme: ColorScheme) -> Color {
+        if colorScheme == .dark {
+            // Dark mode: Brighter purple for better readability
+            return Color(red: 0.55, green: 0.31, blue: 0.94) // #8c50f0
+        } else {
+            // Light mode: Original purple
+            return Color(red: 0.435, green: 0.173, blue: 0.871) // #6f2cde
+        }
     }
     
     #if canImport(UIKit)

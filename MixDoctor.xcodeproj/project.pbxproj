@@ -11,6 +11,7 @@
 		CB349E7A2EAD23B200290982 /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = CB349E792EAD23B200290982 /* RevenueCat */; };
 		CB349E7C2EAD23B200290982 /* RevenueCatUI in Frameworks */ = {isa = PBXBuildFile; productRef = CB349E7B2EAD23B200290982 /* RevenueCatUI */; };
 		CB3CC5492EB77F92004992E5 /* AudioKit in Frameworks */ = {isa = PBXBuildFile; productRef = CB3CC5482EB77F92004992E5 /* AudioKit */; };
+		CB7AD16A2F194E120076DCB0 /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = CB7AD1692F194E120076DCB0 /* FirebaseAnalytics */; };
 		CB9E75802EAA939A001E440E /* OpenAI in Frameworks */ = {isa = PBXBuildFile; productRef = CB9E757F2EAA939A001E440E /* OpenAI */; };
 /* End PBXBuildFile section */
 
@@ -63,6 +64,7 @@
 			files = (
 				CB349E7C2EAD23B200290982 /* RevenueCatUI in Frameworks */,
 				CB349E782EAD23B200290982 /* ReceiptParser in Frameworks */,
+				CB7AD16A2F194E120076DCB0 /* FirebaseAnalytics in Frameworks */,
 				CB3CC5492EB77F92004992E5 /* AudioKit in Frameworks */,
 				CB9E75802EAA939A001E440E /* OpenAI in Frameworks */,
 				CB349E7A2EAD23B200290982 /* RevenueCat in Frameworks */,
@@ -132,6 +134,7 @@
 				CB349E792EAD23B200290982 /* RevenueCat */,
 				CB349E7B2EAD23B200290982 /* RevenueCatUI */,
 				CB3CC5482EB77F92004992E5 /* AudioKit */,
+				CB7AD1692F194E120076DCB0 /* FirebaseAnalytics */,
 			);
 			productName = MixDoctor;
 			productReference = CB7EADB52EA2A91500AE28CF /* MixDoctor.app */;
@@ -219,6 +222,7 @@
 				CB9E757E2EAA939A001E440E /* XCRemoteSwiftPackageReference "OpenAI" */,
 				CB349E762EAD23B200290982 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */,
 				CB3CC5472EB77F92004992E5 /* XCRemoteSwiftPackageReference "AudioKit" */,
+				CB7AD1682F194E120076DCB0 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = CB7EADB62EA2A91500AE28CF /* Products */;
@@ -678,6 +682,14 @@
 				minimumVersion = 5.6.5;
 			};
 		};
+		CB7AD1682F194E120076DCB0 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.8.0;
+			};
+		};
 		CB9E757E2EAA939A001E440E /* XCRemoteSwiftPackageReference "OpenAI" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/MacPaw/OpenAI.git";
@@ -708,6 +720,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = CB3CC5472EB77F92004992E5 /* XCRemoteSwiftPackageReference "AudioKit" */;
 			productName = AudioKit;
+		};
+		CB7AD1692F194E120076DCB0 /* FirebaseAnalytics */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CB7AD1682F194E120076DCB0 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAnalytics;
 		};
 		CB9E757F2EAA939A001E440E /* OpenAI */ = {
 			isa = XCSwiftPackageProductDependency;

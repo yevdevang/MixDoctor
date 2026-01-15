@@ -18,7 +18,7 @@ struct PrivacyView: View {
                         .font(.largeTitle.bold())
                         .padding(.bottom, 8)
                     
-                    Text("Last updated: November 26, 2025")
+                    Text("Last updated: January 2025")
                         .font(.caption)
                         .foregroundColor(.gray)
                         .padding(.bottom, 16)
@@ -37,7 +37,7 @@ struct PrivacyView: View {
                         • Usage Data: App features used, analysis history, and subscription status
                         • Audio Files: Temporary access to audio files you upload for analysis
                         • Device Information: Device type, OS version, and app version
-                        • Analytics: Anonymous usage statistics to improve our service
+                        • Analytics: Anonymous usage statistics and app events through Firebase Analytics to improve our service
                         """
                     )
                     
@@ -73,8 +73,9 @@ struct PrivacyView: View {
                         • RevenueCat: For subscription management and payment processing
                         • Anthropic Claude: For AI-powered audio analysis
                         • Apple CloudKit: For iCloud synchronization
+                        • Firebase Analytics (Google): For app analytics and usage statistics
                         
-                        These services have their own privacy policies and handle data according to their respective terms.
+                        These services have their own privacy policies and handle data according to their respective terms. Firebase Analytics collects anonymous usage data to help us understand how users interact with the app. You can learn more about Firebase Analytics privacy practices at: https://firebase.google.com/support/privacy
                         """
                     )
                     
@@ -126,7 +127,7 @@ struct PrivacyView: View {
                         dismiss()
                     } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(Color(red: 0.435, green: 0.173, blue: 0.871))
+                            .foregroundColor(.primaryAccent)
                     }
                 }
             }

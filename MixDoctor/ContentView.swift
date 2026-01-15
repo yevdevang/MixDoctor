@@ -93,7 +93,7 @@ struct ContentView: View {
             .animation(.easeInOut(duration: 0.15), value: selectedTab)
             .navigationTitle(navigationTitle)
         }
-        .tint(Color(red: 0.435, green: 0.173, blue: 0.871))
+        .tint(.primaryAccent)
         .preferredColorScheme(colorScheme)
         .onAppear(perform: setupThemeObservers)
     }
@@ -122,13 +122,13 @@ struct ContentView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(colorScheme == .dark ? .white : Color(red: 0.435, green: 0.173, blue: 0.871))
+        .foregroundStyle(colorScheme == .dark ? .white : Color.primaryAccent)
         .padding(.vertical, 6)
         .padding(.horizontal, 8)
         .background(
             selectedTab == tag 
                 ? RoundedRectangle(cornerRadius: 8)
-                    .fill(Color(red: 0.435, green: 0.173, blue: 0.871).opacity(colorScheme == .dark ? 0.3 : 0.15))
+                    .fill(Color.primaryAccent.opacity(colorScheme == .dark ? 0.3 : 0.15))
                 : nil
         )
         .listRowBackground(Color.clear)
@@ -178,7 +178,7 @@ struct ContentView: View {
                 }
                 .tag(3)
         }
-        .tint(Color(red: 0.435, green: 0.173, blue: 0.871))
+        .tint(.primaryAccent)
         .preferredColorScheme(colorScheme)
         .onAppear(perform: setupThemeObservers)
     }

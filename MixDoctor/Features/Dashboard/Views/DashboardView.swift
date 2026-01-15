@@ -8,6 +8,7 @@
 import SwiftUI
 import SwiftData
 import AVFoundation
+import FirebaseAnalytics
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -25,8 +26,8 @@ struct DashboardView: View {
 #endif
     
     @StateObject private var iCloudMonitor = iCloudSyncMonitor.shared
+    @ObservedObject private var subscriptionService = SubscriptionService.shared
     private let analysisService = AudioKitService.shared
-    private let subscriptionService = SubscriptionService.shared
     
     @State private var searchText = ""
     @State private var filterOption: FilterOption = .all
@@ -40,6 +41,7 @@ struct DashboardView: View {
     @State private var cachedFilteredFiles: [AudioFile] = [] // Cache filtered results
     @State private var lastFilterHash = 0 // Track filter state changes
     @State private var syncDebounceTask: Task<Void, Never>? // Debounce sync operations
+    @State private var hasLoggedDashboardView = false // Track if dashboard view event has been logged
     
     // Cached statistics to prevent blocking SwiftData access during rendering
     @State private var cachedAnalyzedCount: Int = 0
@@ -126,7 +128,7 @@ struct DashboardView: View {
     
     private var baseView: some View {
         contentStack
-            .tint(Color(red: 0.435, green: 0.173, blue: 0.871))
+            .tint(.primaryAccent)
 #if targetEnvironment(macCatalyst)
             .task { await initializeViewMacCatalyst() }
 #else
@@ -134,6 +136,12 @@ struct DashboardView: View {
                 setupAppearance()
                 performInitialSync()
                 updateStatistics()
+                
+                // Log Firebase Analytics event
+                if !hasLoggedDashboardView {
+                    Analytics.logEvent("dashboard_viewed", parameters: nil)
+                    hasLoggedDashboardView = true
+                }
             }
             .onChange(of: audioFiles.count) { old, new in
                 updateStatistics()
@@ -219,6 +227,12 @@ struct DashboardView: View {
         setupAppearance()
         performInitialSync()
         // Statistics will be updated by loadAudioFiles() in performInitialSync
+        
+        // Log Firebase Analytics event
+        if !hasLoggedDashboardView {
+            Analytics.logEvent("dashboard_viewed", parameters: nil)
+            hasLoggedDashboardView = true
+        }
     }
 #endif
     
@@ -231,8 +245,8 @@ struct DashboardView: View {
 #else
         appearance.configureWithDefaultBackground()
 #endif
-        appearance.largeTitleTextAttributes = [.foregroundColor: UIColor(red: 0.435, green: 0.173, blue: 0.871, alpha: 1.0)]
-        appearance.titleTextAttributes = [.foregroundColor: UIColor(red: 0.435, green: 0.173, blue: 0.871, alpha: 1.0)]
+        appearance.largeTitleTextAttributes = [.foregroundColor: UIColor(Color.primaryAccent)]
+        appearance.titleTextAttributes = [.foregroundColor: UIColor(Color.primaryAccent)]
         
         UINavigationBar.appearance().standardAppearance = appearance
         UINavigationBar.appearance().scrollEdgeAppearance = appearance
@@ -294,7 +308,7 @@ struct DashboardView: View {
                 HStack(spacing: 12) {
                     // Animated sync icon
                     ProgressView()
-                        .tint(Color(red: 0.435, green: 0.173, blue: 0.871))
+                        .tint(.primaryAccent)
                     
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Syncing with iCloud")
@@ -314,8 +328,8 @@ struct DashboardView: View {
                 .background(
                     LinearGradient(
                         colors: [
-                            Color(red: 0.435, green: 0.173, blue: 0.871).opacity(0.08),
-                            Color(red: 0.435, green: 0.173, blue: 0.871).opacity(0.04)
+                            Color.primaryAccent.opacity(0.08),
+                            Color.primaryAccent.opacity(0.04)
                         ],
                         startPoint: .leading,
                         endPoint: .trailing
@@ -324,7 +338,7 @@ struct DashboardView: View {
                 .overlay(
                     Rectangle()
                         .frame(height: 1)
-                        .foregroundStyle(Color(red: 0.435, green: 0.173, blue: 0.871).opacity(0.2)),
+                        .foregroundStyle(Color.primaryAccent.opacity(0.2)),
                     alignment: .bottom
                 )
             }
@@ -364,13 +378,13 @@ struct DashboardView: View {
                 } label: {
                     if iCloudMonitor.isSyncing {
                         ProgressView()
-                            .tint(Color(red: 0.435, green: 0.173, blue: 0.871))
+                            .tint(.primaryAccent)
                     } else {
                         Label("Sync iCloud", systemImage: "icloud.and.arrow.down")
                     }
                 }
                 .disabled(iCloudMonitor.isSyncing)
-                .foregroundStyle(Color(red: 0.435, green: 0.173, blue: 0.871))
+                .foregroundStyle(Color.primaryAccent)
             }
             
             ToolbarItem(placement: .primaryAction) {
@@ -417,7 +431,7 @@ struct DashboardView: View {
             
             StatCard(
                 title: "Analyzed",
-                value: "\(analyzedCount)",
+                value: analyzedDisplayValue,
                 icon: "checkmark.circle.fill",
                 color: .green
             )
@@ -455,6 +469,19 @@ struct DashboardView: View {
         cachedAverageScore
     }
     
+    // Display value for "Analyzed" card - shows analysis count for free and Pro users
+    private var analyzedDisplayValue: String {
+        if subscriptionService.isProUser {
+            // For Pro users, show remaining analyses (X/50)
+            let usedAnalyses = 50 - subscriptionService.remainingProAnalyses
+            return "\(usedAnalyses)/50"
+        } else {
+            // Show analysis count (X/3) for free users
+            let usedAnalyses = 3 - subscriptionService.remainingFreeAnalyses
+            return "\(usedAnalyses)/3"
+        }
+    }
+    
     // Helper function to detect actual issues based on score and metrics
     private func hasActualIssues(result: AnalysisResult) -> Bool {
         // If score is high (85+), likely no significant issues (matches Professional Commercial threshold)
@@ -487,9 +514,24 @@ struct DashboardView: View {
         .padding()
         .onAppear {
 #if canImport(UIKit)
-            UISegmentedControl.appearance().selectedSegmentTintColor = UIColor(red: 0.435, green: 0.173, blue: 0.871, alpha: 1.0)
+            // Selected segment: Use dynamic purple (brighter in dark mode)
+            UISegmentedControl.appearance().selectedSegmentTintColor = UIColor(Color.primaryAccent)
+            
+            // Selected text: Always white for contrast
             UISegmentedControl.appearance().setTitleTextAttributes([.foregroundColor: UIColor.white], for: .selected)
-            UISegmentedControl.appearance().setTitleTextAttributes([.foregroundColor: UIColor(red: 0.435, green: 0.173, blue: 0.871, alpha: 1.0)], for: .normal)
+            
+            // Unselected text: Brighter purple/lavender for better readability in both modes
+            UISegmentedControl.appearance().setTitleTextAttributes([
+                .foregroundColor: UIColor { traitCollection in
+                    if traitCollection.userInterfaceStyle == .dark {
+                        // Dark mode: Much brighter purple/lavender for better readability
+                        return UIColor(red: 0.7, green: 0.5, blue: 0.95, alpha: 1.0) // #b380f2 - brighter lavender
+                    } else {
+                        // Light mode: Also brighter purple for better readability
+                        return UIColor(red: 0.6, green: 0.35, blue: 0.9, alpha: 1.0) // #9933e6 - brighter purple
+                    }
+                }
+            ], for: .normal)
 #endif
         }
     }
@@ -689,6 +731,12 @@ struct DashboardView: View {
                 await MainActor.run {
                     // Increment usage count
                     subscriptionSvc.incrementAnalysisCount()
+                    
+                    // Log free analysis count event
+                    let remainingFree = subscriptionSvc.remainingFreeAnalyses
+                    Analytics.logEvent("free_analysis_count", parameters: [
+                        "remaining": String(remainingFree)
+                    ])
 
                     // Save to the AudioFile model
                     audioFile.analysisResult = result
@@ -696,6 +744,11 @@ struct DashboardView: View {
 
                     // Save to SwiftData
                     try? context.save()
+                    
+                    // Log analysis completed event
+                    Analytics.logEvent("analysis_completed", parameters: [
+                        "overall_score": String(format: "%.1f", result.overallScore)
+                    ])
 
                     // Reload the list and update statistics
                     Task(priority: .utility) {
@@ -785,6 +838,12 @@ struct DashboardView: View {
                 await MainActor.run {
                     // Increment usage count
                     subscriptionSvc.incrementAnalysisCount()
+                    
+                    // Log free analysis count event
+                    let remainingFree = subscriptionSvc.remainingFreeAnalyses
+                    Analytics.logEvent("free_analysis_count", parameters: [
+                        "remaining": String(remainingFree)
+                    ])
 
                     // Save to the AudioFile model
                     audioFile.analysisResult = result
@@ -792,6 +851,11 @@ struct DashboardView: View {
 
                     // Save to SwiftData
                     try? context.save()
+                    
+                    // Log analysis completed event
+                    Analytics.logEvent("analysis_completed", parameters: [
+                        "overall_score": String(format: "%.1f", result.overallScore)
+                    ])
 
                     // Update statistics after analysis
                     self.updateStatistics()
@@ -891,35 +955,96 @@ struct DashboardView: View {
     }
     
     /// Remove duplicate entries from the database (keeps oldest import)
+    /// Also checks for duplicates by file size + duration to catch cases where filenames differ
     private func removeDuplicateFiles() async {
+        // Fetch all files to check for duplicates
+        let descriptor = FetchDescriptor<AudioFile>()
+        guard let allFiles = try? modelContext.fetch(descriptor) else {
+            return
+        }
         
-        // Group files by fileName
+        // Group files by fileName first
         var filesByName: [String: [AudioFile]] = [:]
-        for file in audioFiles {
+        for file in allFiles {
             filesByName[file.fileName, default: []].append(file)
         }
         
-        var duplicatesRemoved = 0
+        var duplicatesToDelete: Set<AudioFile> = []
         
+        // First pass: Remove duplicates with same filename (keep oldest)
         for (fileName, files) in filesByName where files.count > 1 {
-            
             // Sort by import date (oldest first) and keep the first one
             let sorted = files.sorted { $0.dateImported < $1.dateImported }
             let toKeep = sorted.first!
             let toDelete = sorted.dropFirst()
             
-            for duplicate in toDelete {
-                modelContext.delete(duplicate)
-                duplicatesRemoved += 1
+            // Verify the file to keep actually exists
+            let keepFileExists = FileManager.default.fileExists(atPath: toKeep.fileURL.path)
+            if !keepFileExists {
+                // If the file to keep doesn't exist, keep the first one that does exist
+                if let firstExisting = sorted.first(where: { FileManager.default.fileExists(atPath: $0.fileURL.path) }) {
+                    // Delete all others including the non-existent "toKeep"
+                    for file in sorted where file.id != firstExisting.id {
+                        duplicatesToDelete.insert(file)
+                    }
+                } else {
+                    // None exist, delete all but the oldest
+                    duplicatesToDelete.formUnion(toDelete)
+                }
+            } else {
+                // File to keep exists, delete the rest
+                duplicatesToDelete.formUnion(toDelete)
             }
         }
         
-        if duplicatesRemoved > 0 {
+        // Second pass: Check for duplicates with same file size + duration but different names
+        // This catches cases where CloudKit sync created duplicates with slightly different metadata
+        var checkedFiles: Set<AudioFile> = []
+        for file in allFiles {
+            if duplicatesToDelete.contains(file) || checkedFiles.contains(file) {
+                continue
+            }
+            
+            // Find files with same size and duration (within 1 second tolerance)
+            let potentialDuplicates = allFiles.filter { otherFile in
+                !duplicatesToDelete.contains(otherFile) &&
+                !checkedFiles.contains(otherFile) &&
+                otherFile.id != file.id &&
+                otherFile.fileSize == file.fileSize &&
+                otherFile.fileSize > 0 && // Only check if size is valid
+                abs(otherFile.duration - file.duration) < 1.0
+            }
+            
+            if !potentialDuplicates.isEmpty {
+                // Check if files point to the same physical file
+                let fileURL = file.fileURL
+                for duplicate in potentialDuplicates {
+                    let duplicateURL = duplicate.fileURL
+                    // Compare standardized URLs to see if they point to the same file
+                    if fileURL.standardizedFileURL == duplicateURL.standardizedFileURL {
+                        // Same physical file - keep the older one
+                        if file.dateImported < duplicate.dateImported {
+                            duplicatesToDelete.insert(duplicate)
+                        } else {
+                            duplicatesToDelete.insert(file)
+                        }
+                    }
+                }
+            }
+            
+            checkedFiles.insert(file)
+        }
+        
+        // Delete all identified duplicates
+        if !duplicatesToDelete.isEmpty {
+            for duplicate in duplicatesToDelete {
+                modelContext.delete(duplicate)
+            }
+            
             do {
                 try modelContext.save()
             } catch {
             }
-        } else {
         }
     }
     
@@ -940,6 +1065,10 @@ struct DashboardView: View {
         
         // Yield to let UI update before starting heavy work
         await Task.yield()
+        
+        // Small delay to allow CloudKit to sync records from other devices
+        // This helps prevent duplicates when files were imported on another device
+        try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second delay
         
         let service = iCloudStorageService.shared
         let audioDir = service.getAudioFilesDirectory()
@@ -976,22 +1105,7 @@ struct DashboardView: View {
                 // Check if already imported by comparing stored filename
                 let fileName = fileURL.lastPathComponent
                 
-                
-                let descriptor = FetchDescriptor<AudioFile>(
-                    predicate: #Predicate<AudioFile> { $0.fileName == fileName }
-                )
-                
-                // If exact filename match exists, skip this file
-                do {
-                    let existing = try modelContext.fetch(descriptor)
-                    if !existing.isEmpty {
-                        continue
-                    } else {
-                    }
-                } catch {
-                }
-                
-                // Download if needed (with shorter timeout on Mac Catalyst)
+                // Download if needed first (with shorter timeout on Mac Catalyst)
                 do {
                     let values = try fileURL.resourceValues(forKeys: [URLResourceKey.ubiquitousItemDownloadingStatusKey])
                     if values.ubiquitousItemDownloadingStatus == .notDownloaded {
@@ -1005,12 +1119,76 @@ struct DashboardView: View {
                 } catch {
                 }
                 
+                // Get file metadata BEFORE checking duplicates (needed for better duplicate detection)
+                let fileAttributes: [FileAttributeKey: Any]
+                let duration: TimeInterval
+                let fileSize: Int64
+                
+                do {
+                    fileAttributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
+                    fileSize = fileAttributes[.size] as? Int64 ?? 0
+                    
+                    let asset = AVURLAsset(url: fileURL)
+                    duration = try await asset.load(.duration).seconds
+                } catch {
+                    // Skip file if we can't read metadata
+                    continue
+                }
+                
+                // Enhanced duplicate check: Check by filename AND file size + duration
+                // This catches duplicates even if CloudKit hasn't synced yet
+                let descriptorByName = FetchDescriptor<AudioFile>(
+                    predicate: #Predicate<AudioFile> { $0.fileName == fileName }
+                )
+                
+                var isDuplicate = false
+                do {
+                    let existingByName = try modelContext.fetch(descriptorByName)
+                    
+                    // Check if any existing file matches by name AND (size + duration)
+                    for existingFile in existingByName {
+                        let sameFileName = existingFile.fileName == fileName
+                        let sameFileSize = existingFile.fileSize == fileSize
+                        let similarDuration = abs(existingFile.duration - duration) < 1.0
+                        
+                        // If name matches, it's definitely a duplicate
+                        // Also check if file physically exists to avoid stale records
+                        if sameFileName {
+                            let fileExists = FileManager.default.fileExists(atPath: existingFile.fileURL.path)
+                            if fileExists {
+                                isDuplicate = true
+                                break
+                            } else {
+                                // Stale record - file doesn't exist, remove it
+                                modelContext.delete(existingFile)
+                                try? modelContext.save()
+                            }
+                        } else if sameFileSize && similarDuration && fileSize > 0 {
+                            // Same size and duration but different name - might be a duplicate
+                            // Check if the existing file's physical file matches this one
+                            let existingFileExists = FileManager.default.fileExists(atPath: existingFile.fileURL.path)
+                            if existingFileExists {
+                                // Compare file URLs to see if they point to the same file
+                                let existingURL = existingFile.fileURL
+                                if existingURL.standardizedFileURL == fileURL.standardizedFileURL {
+                                    isDuplicate = true
+                                    break
+                                }
+                            }
+                        }
+                    }
+                } catch {
+                    // If fetch fails, continue anyway (better to import than skip)
+                }
+                
+                // Skip if duplicate found
+                if isDuplicate {
+                    continue
+                }
+                
                 // Import the file
                 do {
-                    let asset = AVURLAsset(url: fileURL)
-                    let duration = try await asset.load(.duration).seconds
-                    let tracks = try await asset.loadTracks(withMediaType: .audio)
-                    
+                    let tracks = try await AVURLAsset(url: fileURL).loadTracks(withMediaType: .audio)
                     guard let track = tracks.first else { continue }
                     
                     let formatDescriptions = try await track.load(.formatDescriptions)
@@ -1019,11 +1197,6 @@ struct DashboardView: View {
                     let basicDescription = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription)
                     let sampleRate = basicDescription?.pointee.mSampleRate ?? 44100.0
                     let channels = Int(basicDescription?.pointee.mChannelsPerFrame ?? 2)
-                    
-                    let fileAttributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
-                    let fileSize = fileAttributes[.size] as? Int64 ?? 0
-                    
-                    let fileName = fileURL.lastPathComponent
                     
                     let audioFile = AudioFile(
                         fileName: fileName,
@@ -1039,6 +1212,11 @@ struct DashboardView: View {
                     
                     // IMPORTANT: Save immediately to prevent duplicates from concurrent scans
                     try modelContext.save()
+                    
+                    // Log file imported event
+                    Analytics.logEvent("file_imported", parameters: [
+                        "file_name": fileName
+                    ])
                     
                     // Yield to prevent blocking UI during bulk imports
                     await Task.yield()

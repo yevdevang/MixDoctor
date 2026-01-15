@@ -96,7 +96,7 @@ struct TermsView: View {
                         dismiss()
                     } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(Color(red: 0.435, green: 0.173, blue: 0.871))
+                            .foregroundColor(.primaryAccent)
                     }
                 }
             }

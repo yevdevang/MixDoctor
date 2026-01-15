@@ -9,6 +9,7 @@ import Foundation
 import RevenueCat
 import SwiftUI
 import Combine
+import FirebaseAnalytics
 
 @MainActor
 public final class SubscriptionService: NSObject, ObservableObject, PurchasesDelegate {
@@ -20,6 +21,7 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
     @Published var willRenew: Bool = true
     @Published var currentOffering: Offering?
     @Published var customerInfo: CustomerInfo?
+    @Published var remainingProAnalyses: Int = 50
      
     // Free tier limits
     private let freeAnalysisLimit = 3
@@ -35,7 +37,6 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
     // Total analysis tracking (for rating prompts)
     private let totalAnalysisCountKey = "totalAnalysisCount"
     
-    var remainingProAnalyses: Int = 50
     var proAnalysisResetDate: Date?
     
     var remainingFreeAnalyses: Int {
@@ -154,6 +155,9 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
             isInTrialPeriod = true
             isProUser = false // Treat trial users as free tier for analysis limits
             willRenew = proEntitlement.willRenew
+            
+            // Log trial started event
+            Analytics.logEvent("trial_started", parameters: nil)
         } else if hasProEntitlement {
             print("   - Setting isProUser = true")
             isInTrialPeriod = false

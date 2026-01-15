@@ -277,7 +277,7 @@ struct AudioFileRow: View {
                     .fill(
                         LinearGradient(
                             colors: [
-                                Color(red: 0.435, green: 0.173, blue: 0.871),
+                                Color.primaryAccent,
                                 Color(red: 0.6, green: 0.3, blue: 0.95)
                             ],
                             startPoint: .topLeading,

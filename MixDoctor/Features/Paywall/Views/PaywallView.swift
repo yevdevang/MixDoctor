@@ -8,6 +8,7 @@
 import SwiftUI
 import RevenueCat
 import StoreKit
+import FirebaseAnalytics
 
 struct PaywallView: View {
     @Environment(\.dismiss) private var dismiss
@@ -97,6 +98,9 @@ struct PaywallView: View {
             }
             .task {
                 await loadOfferings()
+                
+                // Log paywall shown event
+                Analytics.logEvent("paywall_shown", parameters: nil)
             }
             .sheet(isPresented: $showTerms) {
                 TermsView()
@@ -181,6 +185,11 @@ struct PaywallView: View {
     private var purchaseButton: some View {
         VStack(spacing: 8) {
             Button {
+                // Log upgrade button tapped event
+                Analytics.logEvent("upgrade_button_tapped", parameters: [
+                    "package_type": selectedPackage?.packageType == .annual ? "annual" : "monthly"
+                ])
+                
                 Task {
                     await purchase()
                 }
@@ -239,11 +248,11 @@ struct PaywallView: View {
                     
                     Text("Payment starts after \(days)-day free trial")
                         .font(.caption.weight(.semibold))
-                        .foregroundColor(.primary)
+                        .foregroundColor(.gray)
                 } else {
                     Text("Payment starts immediately")
                         .font(.caption.weight(.semibold))
-                        .foregroundColor(.primary)
+                        .foregroundColor(.gray)
                 }
             }
         }
@@ -330,6 +339,13 @@ struct PaywallView: View {
             // Verify purchase was successful (trial or paid)
             let hasActiveEntitlement = customerInfo.entitlements["pro"]?.isActive == true
             let isProOrTrial = subscriptionService.isProUser || subscriptionService.isInTrialPeriod
+            
+            // Log trial started event if user is in trial period
+            if subscriptionService.isInTrialPeriod {
+                Analytics.logEvent("trial_started", parameters: [
+                    "package_type": package.packageType == .annual ? "annual" : "monthly"
+                ])
+            }
             
             print("   - Will dismiss: \(hasActiveEntitlement || isProOrTrial)")
             
@@ -491,19 +507,21 @@ private struct PackageCard: View {
         Button(action: onTap) {
             VStack(alignment: .leading, spacing: 12) {
                 // Title row
-                HStack {
+                HStack(alignment: .center, spacing: 8) {
                     Text(package.storeProduct.localizedTitle)
-                        .font(.title3.weight(.semibold))
+                        .font(.headline.weight(.semibold))
                         .foregroundColor(.black)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                     
                     if isAnnual {
                         Text("SAVE 33%")
-                            .font(.caption.weight(.semibold))
+                            .font(.caption2.weight(.semibold))
                             .foregroundStyle(.white)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
                             .background(Color.green)
-                            .cornerRadius(6)
+                            .cornerRadius(5)
                     }
                     
                     Spacer()
@@ -535,17 +553,18 @@ private struct PackageCard: View {
                     
                     // When payment starts - clearly shown
                     if hasFreeTrial, let days = trialPeriodDays {
-                        HStack(spacing: 4) {
+                        HStack(spacing: 3) {
                             Text("\(days)-day free trial, then")
-                                .font(.subheadline.weight(.medium))
-                                .foregroundColor(.primary)
+                                .font(.caption.weight(.medium))
+                                .foregroundColor(.gray)
                             Text(finalBilledAmount)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundColor(.primary)
+                                .font(.caption.weight(.semibold))
+                                .foregroundColor(.gray)
                             Text(isAnnual ? "per year" : "per month")
-                                .font(.subheadline.weight(.medium))
-                                .foregroundColor(.primary)
+                                .font(.caption.weight(.medium))
+                                .foregroundColor(.gray)
                         }
+                        .lineLimit(1)
                     } else {
                         Text(isAnnual ? "per year" : "per month")
                             .font(.subheadline)
