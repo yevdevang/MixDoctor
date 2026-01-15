@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import FirebaseAnalytics
 
 @MainActor
 struct ResultsView: View {
@@ -56,7 +57,7 @@ struct ResultsView: View {
                 .padding(32)
                 .background(
                     RoundedRectangle(cornerRadius: 16)
-                        .fill(Color(red: 0.435, green: 0.173, blue: 0.871))
+                        .fill(Color.primaryAccent)
                 )
             }
         }
@@ -128,6 +129,7 @@ struct ResultsView: View {
                 }
             }
             .buttonStyle(.borderedProminent)
+            .disabled(!subscriptionService.canPerformAnalysis() || isAnalyzing)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -1550,12 +1552,23 @@ struct ResultsView: View {
             // Increment usage count for free users (back on main thread)
             subscriptionService.incrementAnalysisCount()
             
+            // Log free analysis count event
+            let remainingFree = subscriptionService.remainingFreeAnalyses
+            Analytics.logEvent("free_analysis_count", parameters: [
+                "remaining": String(remainingFree)
+            ])
+            
             // Update the local state
             analysisResult = result
             
             // Save to the persistent AudioFile model
             audioFile.analysisResult = result
             audioFile.dateAnalyzed = Date()
+            
+            // Log analysis completed event
+            Analytics.logEvent("analysis_completed", parameters: [
+                "overall_score": String(format: "%.1f", result.overallScore)
+            ])
             
             // Save to SwiftData and iCloud Drive on background thread to avoid freezing
             let fileName = audioFile.fileName
@@ -1634,7 +1647,7 @@ struct SimpleAnalysisLoader: View {
     var body: some View {
         ZStack {
             // Solid background - no animations
-            Color(red: 0.435, green: 0.173, blue: 0.871)
+            Color.primaryAccent
                 .ignoresSafeArea()
             
             VStack(spacing: 30) {
@@ -1680,10 +1693,10 @@ struct AnimatedGradientLoader: View {
             // Animated gradient background
             LinearGradient(
                 gradient: Gradient(colors: [
-                    Color(red: 0.435, green: 0.173, blue: 0.871), // Purple
+                    Color.primaryAccent, // Purple
                     Color(red: 0.6, green: 0.3, blue: 0.95),      // Light purple
                     Color(red: 0.2, green: 0.8, blue: 0.6),       // Green/Teal
-                    Color(red: 0.435, green: 0.173, blue: 0.871)  // Purple again
+                    Color.primaryAccent  // Purple again
                 ]),
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing

@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import FirebaseAnalytics
 
 struct SettingsView: View {
     @State private var viewModel = SettingsViewModel()
@@ -31,7 +32,7 @@ struct SettingsView: View {
                         
                         if subscriptionService.isProUser {
                             Image(systemName: "checkmark.seal.fill")
-                                .foregroundStyle(Color(red: 0.435, green: 0.173, blue: 0.871))
+                                .foregroundStyle(Color.primaryAccent)
                                 .font(.title2)
                         }
                     }
@@ -62,6 +63,9 @@ struct SettingsView: View {
                     
                     if !subscriptionService.isProUser {
                         Button {
+                            Analytics.logEvent("upgrade_button_tapped", parameters: [
+                                "source": "settings"
+                            ])
                             showPaywall = true
                         } label: {
                             HStack {

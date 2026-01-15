@@ -8,9 +8,21 @@
 import SwiftUI
 import SwiftData
 import StoreKit
+import FirebaseCore
+
+class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
+        FirebaseApp.configure()
+        return true
+    }
+}
 
 @main
 struct MixDoctorApp: App {
+    // Register app delegate for Firebase setup
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
+    
     @State private var modelContainer: ModelContainer
     @State private var subscriptionService = SubscriptionService.shared
     @State private var iCloudMonitor = iCloudSyncMonitor.shared
@@ -20,7 +32,7 @@ struct MixDoctorApp: App {
     @Environment(\.requestReview) private var requestReview
     
     init() {
-        // Configure Mac Catalyst fonts FIRST, before anything else
+        // Configure Mac Catalyst fonts
         #if targetEnvironment(macCatalyst)
         Self.configureMacCatalystFonts()
         #endif

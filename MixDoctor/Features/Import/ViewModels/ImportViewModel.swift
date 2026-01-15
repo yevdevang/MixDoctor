@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import SwiftData
+import FirebaseAnalytics
 
 @MainActor
 @Observable
@@ -81,6 +82,13 @@ final class ImportViewModel {
             }
             
             importProgress = 1.0
+            
+            // Log file imported event for each successfully imported file
+            if insertedCount > 0 {
+                Analytics.logEvent("file_imported", parameters: [
+                    "file_count": String(insertedCount)
+                ])
+            }
             
             // Show appropriate message based on results
             if duplicateCount > 0 && insertedCount > 0 {

@@ -173,7 +173,7 @@ struct PlayerView: View {
                 .font(.title2.weight(.semibold))
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
-                .foregroundColor(Color(red: 0.435, green: 0.173, blue: 0.871))
+                .foregroundColor(.primaryAccent)
             
             HStack(spacing: 4) {
                 Text("\(viewModel.audioFile.sampleRate / 1000, specifier: "%.1f") kHz")
@@ -198,7 +198,7 @@ struct PlayerView: View {
                         let isPlayed = Double(index) / Double(viewModel.waveformSamples.count) <= viewModel.progress
                         
                         RoundedRectangle(cornerRadius: 1)
-                            .fill(isPlayed ? Color(red: 0.435, green: 0.173, blue: 0.871) : Color.gray.opacity(0.4))
+                            .fill(isPlayed ? Color.primaryAccent : Color.gray.opacity(0.4))
                             .frame(height: max(normalizedHeight * geometry.size.height, 2))
                     }
                 }
@@ -224,7 +224,7 @@ struct PlayerView: View {
                 Image(systemName: "backward.fill")
                     .font(.title2)
             }
-            .foregroundStyle(hasPrevious ? Color(red: 0.435, green: 0.173, blue: 0.871) : Color.gray.opacity(0.3))
+            .foregroundStyle(hasPrevious ? Color.primaryAccent : Color.gray.opacity(0.3))
             .disabled(!hasPrevious)
             
             // Skip back 10 seconds
@@ -234,7 +234,7 @@ struct PlayerView: View {
                 Image(systemName: "gobackward.10")
                     .font(.title2)
             }
-            .foregroundStyle(Color(red: 0.435, green: 0.173, blue: 0.871))
+            .foregroundStyle(Color.primaryAccent)
             
             // Play/Pause
             Button {
@@ -243,7 +243,7 @@ struct PlayerView: View {
                 Image(systemName: viewModel.isPlaying ? "pause.circle.fill" : "play.circle.fill")
                     .font(.system(size: 72))
             }
-            .foregroundStyle(Color(red: 0.435, green: 0.173, blue: 0.871))
+            .foregroundStyle(Color.primaryAccent)
             
             // Skip forward 10 seconds
             Button {
@@ -252,7 +252,7 @@ struct PlayerView: View {
                 Image(systemName: "goforward.10")
                     .font(.title2)
             }
-            .foregroundStyle(Color(red: 0.435, green: 0.173, blue: 0.871))
+            .foregroundStyle(Color.primaryAccent)
             
             // Next track
             Button {
@@ -261,7 +261,7 @@ struct PlayerView: View {
                 Image(systemName: "forward.fill")
                     .font(.title2)
             }
-            .foregroundStyle(hasNext ? Color(red: 0.435, green: 0.173, blue: 0.871) : Color.gray.opacity(0.3))
+            .foregroundStyle(hasNext ? Color.primaryAccent : Color.gray.opacity(0.3))
             .disabled(!hasNext)
         }
     }
@@ -389,7 +389,7 @@ private struct PlaybackProgressSlider: View {
                     viewModel.isUserSeeking = false
                 }
             }
-            .tint(Color(red: 0.435, green: 0.173, blue: 0.871))
+            .tint(.primaryAccent)
             .disabled(true)  // Disabled until seek functionality is fixed
           
             
@@ -423,7 +423,7 @@ private struct AlbumArtworkView: View {
             .overlay {
                 Image(systemName: "music.quarternote.3")
                     .font(.system(size: 60))
-                    .foregroundStyle(Color(red: 0.435, green: 0.173, blue: 0.871))
+                    .foregroundStyle(Color.primaryAccent)
             }
     }
 }
