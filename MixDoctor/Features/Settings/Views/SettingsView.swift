@@ -223,6 +223,15 @@ struct SettingsView: View {
                 } header: {
                     Text("App Information")
                 }
+                
+                // MARK: - Developer Section (Debug Only)
+                #if DEBUG
+                Section("Developer") {
+                    Button("Reset Onboarding") {
+                        UserDefaults.standard.set(false, forKey: "hasCompletedOnboarding")
+                    }
+                }
+                #endif
             }
             #if targetEnvironment(macCatalyst)
             .scrollContentBackground(.hidden)
