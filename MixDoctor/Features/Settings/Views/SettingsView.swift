@@ -224,12 +224,15 @@ struct SettingsView: View {
                     Text("App Information")
                 }
                 
-                // MARK: - Developer Section (Debug Only)
+                // MARK: - Debug Section (for testing onboarding)
                 #if DEBUG
-                Section("Developer") {
+                Section("Debug") {
                     Button("Reset Onboarding") {
                         UserDefaults.standard.set(false, forKey: "hasCompletedOnboarding")
+                        // Force app restart to show onboarding
+                        exit(0)
                     }
+                    .foregroundStyle(.red)
                 }
                 #endif
             }

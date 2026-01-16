@@ -14,6 +14,7 @@ struct ContentView: View {
     @State private var isPlaying = false
     @State private var shouldAutoPlay = false
     @State private var theme: String = NSUbiquitousKeyValueStore.default.string(forKey: "theme") ?? "system"
+    @State private var hasCheckedEmptyFiles = false
     @Query(sort: \AudioFile.dateImported, order: .reverse) private var allAudioFiles: [AudioFile]
     
     var colorScheme: ColorScheme? {
@@ -96,6 +97,9 @@ struct ContentView: View {
         .tint(.primaryAccent)
         .preferredColorScheme(colorScheme)
         .onAppear(perform: setupThemeObservers)
+        .task {
+            checkAndNavigateToImportIfEmpty()
+        }
     }
     
     private var navigationTitle: String {
@@ -181,9 +185,24 @@ struct ContentView: View {
         .tint(.primaryAccent)
         .preferredColorScheme(colorScheme)
         .onAppear(perform: setupThemeObservers)
+        .task {
+            checkAndNavigateToImportIfEmpty()
+        }
     }
     
     // MARK: - Helper Methods
+    
+    /// Checks if there are no audio files and navigates to Import tab if empty
+    /// This only happens once after onboarding completes
+    private func checkAndNavigateToImportIfEmpty() {
+        guard !hasCheckedEmptyFiles else { return }
+        hasCheckedEmptyFiles = true
+        
+        // If no files exist, navigate to Import tab
+        if allAudioFiles.isEmpty {
+            selectedTab = 1 // Import tab
+        }
+    }
     
     private func setupThemeObservers() {
         // Load theme from iCloud

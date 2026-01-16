@@ -32,12 +32,6 @@ struct MixDoctorApp: App {
     @Environment(\.requestReview) private var requestReview
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     
-    // TEMPORARY: Force show onboarding for testing (set to false when done testing)
-    private let forceShowOnboarding = true
-    
-    // Track if onboarding has been dismissed in this session (for force mode)
-    @State private var onboardingDismissed = false
-    
     init() {
         // Configure Mac Catalyst fonts
         #if targetEnvironment(macCatalyst)
@@ -190,28 +184,14 @@ struct MixDoctorApp: App {
                         .transition(.opacity)
                         .zIndex(2)
                 } else {
-                    // After launch screen, decide what to show
-                    let shouldShowOnboarding = forceShowOnboarding ? !onboardingDismissed : !hasCompletedOnboarding
-                    
-                    if shouldShowOnboarding {
-                        // Show onboarding if forced (for testing) or not completed
+                    // After launch screen, show onboarding only if not completed
+                    if !hasCompletedOnboarding {
                         OnboardingView(isPresented: Binding(
-                            get: { 
-                                if forceShowOnboarding {
-                                    return !onboardingDismissed  // Show if not dismissed in this session
-                                }
-                                return !hasCompletedOnboarding
-                            },
+                            get: { !hasCompletedOnboarding },
                             set: { newValue in
                                 if !newValue {
-                                    // User dismissed onboarding
-                                    if forceShowOnboarding {
-                                        // In force mode, just mark as dismissed for this session
-                                        onboardingDismissed = true
-                                    } else {
-                                        // Normal mode: save completion
-                                        hasCompletedOnboarding = true
-                                    }
+                                    // User completed or skipped onboarding - save completion
+                                    hasCompletedOnboarding = true
                                 }
                             }
                         ))

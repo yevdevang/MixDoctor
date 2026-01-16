@@ -34,7 +34,7 @@ struct OnboardingFreeTrialScreen: View {
                 .padding(.horizontal, 40)
             
             // Body text
-            Text("No credit card required. Upgrade anytime for unlimited analyses and premium features.")
+            Text("No credit card required. Upgrade for 50 analysis per month and premium features.")
                 .font(.body)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)

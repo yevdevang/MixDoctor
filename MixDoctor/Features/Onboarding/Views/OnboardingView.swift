@@ -7,6 +7,9 @@
 
 import SwiftUI
 import FirebaseAnalytics
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct OnboardingView: View {
     @Binding var isPresented: Bool
@@ -14,6 +17,10 @@ struct OnboardingView: View {
     
     var body: some View {
         ZStack {
+            // Background color to ensure full coverage
+            Color(UIColor.systemBackground)
+                .ignoresSafeArea()
+            
             // Main content with TabView for pagination
             TabView(selection: $currentPage) {
                 OnboardingWelcomeScreen(currentPage: $currentPage)
@@ -30,6 +37,22 @@ struct OnboardingView: View {
             }
             .tabViewStyle(.page)
             .indexViewStyle(.page(backgroundDisplayMode: .always))
+            .onAppear {
+                #if canImport(UIKit)
+                // Set page indicator color to purple (primaryAccent)
+                // Adapts to light/dark mode like primaryAccent
+                UIPageControl.appearance().currentPageIndicatorTintColor = UIColor { traitCollection in
+                    if traitCollection.userInterfaceStyle == .dark {
+                        // Dark mode: Brighter purple - RGB(140, 80, 240) or #8c50f0
+                        return UIColor(red: 0.55, green: 0.31, blue: 0.94, alpha: 1.0)
+                    } else {
+                        // Light mode: Original purple - RGB(111, 44, 222) or #6f2cde
+                        return UIColor(red: 0.435, green: 0.173, blue: 0.871, alpha: 1.0)
+                    }
+                }
+                UIPageControl.appearance().pageIndicatorTintColor = UIColor.secondaryLabel
+                #endif
+            }
             
             // Skip button overlay (top-right)
             VStack {
@@ -45,12 +68,16 @@ struct OnboardingView: View {
                             isPresented = false
                         }
                     }
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(Color.primaryAccent)
                     .padding()
+                    #if canImport(UIKit)
+                    .padding(.top, UIDevice.current.userInterfaceIdiom == .pad ? 20 : 0)
+                    #endif
                 }
                 Spacer()
             }
         }
+        .ignoresSafeArea()
         .onAppear {
             // Log onboarding started event
             Analytics.logEvent("onboarding_started", parameters: nil)

@@ -5,9 +5,40 @@
 //
 
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct OnboardingResultsScreen: View {
     @Binding var currentPage: Int
+    
+    private var imageName: String {
+        #if targetEnvironment(macCatalyst)
+        return "GuideResultViewMac"
+        #elseif canImport(UIKit)
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            return "GuideResultViewiPad"
+        } else {
+            return "GuideResultViewPhone"
+        }
+        #else
+        return "GuideResultViewPhone"
+        #endif
+    }
+    
+    private var imageMaxWidth: CGFloat {
+        #if targetEnvironment(macCatalyst)
+        return 700
+        #elseif canImport(UIKit)
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            return 500
+        } else {
+            return 300
+        }
+        #else
+        return 300
+        #endif
+    }
     
     var body: some View {
         VStack(spacing: 24) {
@@ -24,10 +55,10 @@ struct OnboardingResultsScreen: View {
             // Image above text (vertical layout)
             VStack(spacing: 24) {
                 // Image on top
-                Image("GuideResultViewPhone")
+                Image(imageName)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .frame(maxWidth: 300)
+                    .frame(maxWidth: imageMaxWidth)
                     .cornerRadius(12)
                     .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
                 
