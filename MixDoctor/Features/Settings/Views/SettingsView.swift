@@ -223,6 +223,18 @@ struct SettingsView: View {
                 } header: {
                     Text("App Information")
                 }
+                
+                // MARK: - Debug Section (for testing onboarding)
+                #if DEBUG
+                Section("Debug") {
+                    Button("Reset Onboarding") {
+                        UserDefaults.standard.set(false, forKey: "hasCompletedOnboarding")
+                        // Force app restart to show onboarding
+                        exit(0)
+                    }
+                    .foregroundStyle(.red)
+                }
+                #endif
             }
             #if targetEnvironment(macCatalyst)
             .scrollContentBackground(.hidden)

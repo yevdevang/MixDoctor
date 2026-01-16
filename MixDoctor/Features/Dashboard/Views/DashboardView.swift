@@ -1227,11 +1227,19 @@ struct DashboardView: View {
 #endif
                     
                     // Try to load analysis result from iCloud Drive
+                    // IMPORTANT: Verify the analysis result matches this file to prevent loading stale results
                     if let analysisResult = AnalysisResultPersistence.shared.loadAnalysisResult(forAudioFile: fileName) {
-                        analysisResult.audioFile = audioFile
-                        audioFile.analysisResult = analysisResult
-                        audioFile.dateAnalyzed = analysisResult.dateAnalyzed
-                        try? modelContext.save()
+                        // Verify the analysis result matches the current file by checking file size and duration
+                        // This prevents loading analysis from a previously deleted file with the same name
+                        if verifyAnalysisResultMatchesFile(analysisResult: analysisResult, audioFile: audioFile) {
+                            analysisResult.audioFile = audioFile
+                            audioFile.analysisResult = analysisResult
+                            audioFile.dateAnalyzed = analysisResult.dateAnalyzed
+                            try? modelContext.save()
+                        } else {
+                            // Analysis result doesn't match - delete the stale JSON file
+                            AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: fileName)
+                        }
                     }
                     
                     imported += 1
@@ -1240,6 +1248,12 @@ struct DashboardView: View {
             }
             
             if imported > 0 {
+                // Clear cached filtered files to force refresh with new imports
+                await MainActor.run {
+                    cachedFilteredFiles = []
+                    lastFilterHash = 0
+                }
+                
 #if !targetEnvironment(macCatalyst)
                 // Update statistics after importing new files
                 await MainActor.run {
@@ -1263,10 +1277,17 @@ struct DashboardView: View {
             if let analysisResult = AnalysisResultPersistence.shared.loadAnalysisResult(forAudioFile: audioFile.fileName) {
                 // Check version compatibility
                 if analysisResult.analysisVersion == currentVersion {
-                    analysisResult.audioFile = audioFile
-                    audioFile.analysisResult = analysisResult
-                    audioFile.dateAnalyzed = analysisResult.dateAnalyzed
-                    loadedCount += 1
+                    // IMPORTANT: Verify the analysis result matches this file to prevent loading stale results
+                    if verifyAnalysisResultMatchesFile(analysisResult: analysisResult, audioFile: audioFile) {
+                        analysisResult.audioFile = audioFile
+                        audioFile.analysisResult = analysisResult
+                        audioFile.dateAnalyzed = analysisResult.dateAnalyzed
+                        loadedCount += 1
+                    } else {
+                        // Analysis result doesn't match - delete the stale JSON file
+                        AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: audioFile.fileName)
+                        clearedCount += 1
+                    }
                 } else {
                     AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: audioFile.fileName)
                     clearedCount += 1
@@ -1329,6 +1350,10 @@ struct DashboardView: View {
         } catch {
         }
         
+        // Clear cached filtered files to force refresh
+        cachedFilteredFiles = []
+        lastFilterHash = 0
+        
         // Update statistics after deletion
 #if targetEnvironment(macCatalyst)
         Task(priority: .utility) {
@@ -1340,6 +1365,54 @@ struct DashboardView: View {
         
         // Notify other views that files were deleted
         NotificationCenter.default.post(name: .audioFileDeleted, object: nil)
+    }
+    
+    /// Verifies that an analysis result matches the audio file it claims to analyze
+    /// This prevents loading stale analysis results from previously deleted files
+    /// - Parameters:
+    ///   - analysisResult: The analysis result to verify
+    ///   - audioFile: The audio file to check against
+    /// - Returns: true if the analysis result matches the file, false otherwise
+    private func verifyAnalysisResultMatchesFile(analysisResult: AnalysisResult, audioFile: AudioFile) -> Bool {
+        // Verify the audio file actually exists
+        let fileURL = audioFile.fileURL
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            // File doesn't exist - this is definitely a stale result
+            return false
+        }
+        
+        // Check if analysis date is after file import date (sanity check)
+        // dateAnalyzed is non-optional Date, so we can compare directly
+        if analysisResult.dateAnalyzed < audioFile.dateImported {
+            // Analysis was done before file was imported - this is a stale result
+            return false
+        }
+        
+        // Verify the analysis JSON file's modification date is after the audio file was imported
+        // This ensures the analysis was created for this specific file instance
+        let service = iCloudStorageService.shared
+        let audioDir = service.getAudioFilesDirectory()
+        let jsonFileName = "\(audioFile.fileName).analysis.json"
+        let jsonURL = audioDir.appendingPathComponent(jsonFileName)
+        
+        if FileManager.default.fileExists(atPath: jsonURL.path) {
+            do {
+                let jsonAttributes = try FileManager.default.attributesOfItem(atPath: jsonURL.path)
+                if let jsonModificationDate = jsonAttributes[.modificationDate] as? Date {
+                    // Analysis JSON should be modified after the file was imported
+                    // Allow 1 second tolerance for timing issues
+                    if jsonModificationDate < audioFile.dateImported.addingTimeInterval(-1.0) {
+                        // Analysis JSON is older than file import - this is a stale result
+                        return false
+                    }
+                }
+            } catch {
+                // If we can't check modification date, fail safe and reject the analysis
+                return false
+            }
+        }
+        
+        return true
     }
 
     

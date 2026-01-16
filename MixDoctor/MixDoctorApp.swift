@@ -30,6 +30,7 @@ struct MixDoctorApp: App {
     @State private var showLaunchScreen = true
     @StateObject private var ratingService: RatingService
     @Environment(\.requestReview) private var requestReview
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     
     init() {
         // Configure Mac Catalyst fonts
@@ -150,53 +151,54 @@ struct MixDoctorApp: App {
     }
     #endif
     
+    // Main content view (extracted for reuse)
+    private var mainContentView: some View {
+        ContentView()
+            .modelContainer(modelContainer)
+            .environmentObject(ratingService)
+            .macCatalystFontScaling(1.5) // Scale entire UI by 50% on Mac
+            .onChange(of: ratingService.shouldTriggerRating) { _, shouldTrigger in
+                if shouldTrigger {
+                    requestReview()
+                }
+            }
+            .task {
+                // Check subscription status on launch
+                await subscriptionService.updateCustomerInfo()
+                
+                // Start iCloud file monitoring
+                iCloudMonitor.startMonitoring()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .iCloudSyncToggled)) { _ in
+                // User needs to restart app for iCloud sync changes to take effect
+            }
+    }
+    
     var body: some Scene {
         WindowGroup {
             ZStack {
-                ContentView()
-                    .modelContainer(modelContainer)
-                    .environmentObject(ratingService)
-                    .macCatalystFontScaling(1.5) // Scale entire UI by 50% on Mac
-                    .onChange(of: ratingService.shouldTriggerRating) { _, shouldTrigger in
-                        if shouldTrigger {
-                            requestReview()
-                        }
-                    }
-                    .alert("Welcome to Mix Doctor! 🎵", isPresented: $showWelcomeMessage) {
-                        Button("Got It!") {
-                            showWelcomeMessage = false
-                        }
-                    } message: {
-                        Text("You have 3 free analyses to get started. Upgrade to Pro for unlimited analyses and advanced features!")
-                    }
-                    .task {
-                        // Check subscription status on launch
-                        await subscriptionService.updateCustomerInfo()
-                        
-                        // Start iCloud file monitoring
-                        iCloudMonitor.startMonitoring()
-                        
-                        // Show welcome message only for first-time free users
-                        if !subscriptionService.isProUser {
-                            let hasSeenWelcome = UserDefaults.standard.bool(forKey: "hasSeenWelcomeMessage")
-                            if !hasSeenWelcome {
-                                // Small delay to ensure UI is ready
-                                try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
-                                showWelcomeMessage = true
-                                UserDefaults.standard.set(true, forKey: "hasSeenWelcomeMessage")
-                            }
-                        }
-                    }
-                    .onReceive(NotificationCenter.default.publisher(for: .iCloudSyncToggled)) { _ in
-                        // User needs to restart app for iCloud sync changes to take effect
-                    }
-                    .opacity(showLaunchScreen ? 0 : 1)
-                
-                // Launch Screen
+                // Main app content or onboarding
                 if showLaunchScreen {
+                    // Launch screen shows first
                     LaunchScreenView()
                         .transition(.opacity)
+                        .zIndex(2)
+                } else {
+                    // After launch screen, show onboarding only if not completed
+                    if !hasCompletedOnboarding {
+                        OnboardingView(isPresented: Binding(
+                            get: { !hasCompletedOnboarding },
+                            set: { newValue in
+                                if !newValue {
+                                    // User completed or skipped onboarding - save completion
+                                    hasCompletedOnboarding = true
+                                }
+                            }
+                        ))
                         .zIndex(1)
+                    } else {
+                        mainContentView
+                    }
                 }
             }
             .onAppear {
