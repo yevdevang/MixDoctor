@@ -17,11 +17,13 @@ The Tonn API, powered by RoEx Audio, provides professional audio analysis capabi
 
 ### 1. API Key Configuration
 
-Your API key is already configured in `Info.plist`:
+Your API key should be configured in `Info.plist`:
 ```xml
 <key>TONN_API_KEY</key>
-<string>AIzaSyBCLq6x3oQdm8a6nAy7G_zGJlpLhsdNE6o</string>
+<string>YOUR_TONN_API_KEY_HERE</string>
 ```
+
+**Note:** Replace `YOUR_TONN_API_KEY_HERE` with your actual API key. Never commit API keys to version control.
 
 ### 2. Service Files
 

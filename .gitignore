@@ -1,6 +1,7 @@
 # API Keys and Secrets
 Config.xcconfig
 Secrets.plist
+GoogleService-Info.plist
 
 # Xcode
 *.xcodeproj/*
