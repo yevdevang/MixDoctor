@@ -96,8 +96,6 @@ struct SettingsView: View {
                         }
                     }
                     
-                    Toggle("Auto-Analyze New Files", isOn: $viewModel.autoAnalyze)
-                    
                     Toggle("Mute Launch Sound", isOn: $muteLaunchSound)
                 } header: {
                     Text("Preferences")

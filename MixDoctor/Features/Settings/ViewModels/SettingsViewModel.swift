@@ -22,14 +22,6 @@ final class SettingsViewModel {
         }
     }
     
-    var autoAnalyze: Bool {
-        get { UserDefaults.standard.bool(forKey: "autoAnalyze") }
-        set {
-            UserDefaults.standard.set(newValue, forKey: "autoAnalyze")
-            updatePreferences()
-        }
-    }
-    
     var iCloudSyncEnabled: Bool {
         get {
             // Default to true if not set (for better UX - CloudKit enabled by default)
@@ -48,11 +40,6 @@ final class SettingsViewModel {
     init() {
         // Load theme from iCloud
         selectedTheme = cloudStore.string(forKey: "theme") ?? "system"
-        
-        // Set default values if not set
-        if UserDefaults.standard.object(forKey: "autoAnalyze") == nil {
-            UserDefaults.standard.set(true, forKey: "autoAnalyze")
-        }
         
         // Migrate theme from UserDefaults to iCloud if needed
         if cloudStore.string(forKey: "theme") == nil {
@@ -113,7 +100,6 @@ final class SettingsViewModel {
             do {
                 let preferences = try await DataPersistenceService.shared.fetchUserPreferences()
                 preferences.theme = selectedTheme
-                preferences.autoAnalyze = autoAnalyze
                 try await DataPersistenceService.shared.updateUserPreferences(preferences)
             } catch {
             }

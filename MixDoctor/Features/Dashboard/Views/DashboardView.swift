@@ -502,12 +502,25 @@ struct DashboardView: View {
         result.hasClipping || result.hasInstrumentBalanceIssues
     }
     
+    // MARK: - Filter Counts
+    
+    private var pendingCount: Int {
+        audioFiles.filter { $0.analysisResult == nil }.count
+    }
+    
+//    private var issuesCount: Int {
+//        audioFiles.filter {
+//            guard let result = $0.analysisResult else { return false }
+//            return hasActualIssues(result: result)
+//        }.count
+//    }
+    
     // MARK: - Filter Picker
     
     private var filterPicker: some View {
         Picker("Filter", selection: $filterOption) {
             ForEach(FilterOption.allCases, id: \.self) { option in
-                Text(option.rawValue).tag(option)
+                Text(filterOptionTitle(for: option)).tag(option)
             }
         }
         .pickerStyle(.segmented)
@@ -533,6 +546,21 @@ struct DashboardView: View {
                 }
             ], for: .normal)
 #endif
+        }
+    }
+    
+    private func filterOptionTitle(for option: FilterOption) -> String {
+        switch option {
+        case .all:
+            return option.rawValue
+        case .analyzed:
+            return option.rawValue
+        case .pending:
+            let count = pendingCount
+            return count > 0 ? "\(option.rawValue) (\(count))" : option.rawValue
+        case .issues:
+            let count = issuesCount
+            return count > 0 ? "\(option.rawValue) (\(count))" : option.rawValue
         }
     }
     
