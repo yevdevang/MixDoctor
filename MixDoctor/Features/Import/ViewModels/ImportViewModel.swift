@@ -200,8 +200,8 @@ final class ImportViewModel {
     // MARK: - Orphaned File Recovery
     
     /// Scan iCloud folder for files that exist physically but aren't in the database
+    /// This runs silently in the background and doesn't show error dialogs
     func scanForOrphanedFiles() async {
-        
         let iCloudService = iCloudStorageService.shared
         let audioDirectory = iCloudService.getAudioFilesDirectory()
         
@@ -212,7 +212,12 @@ final class ImportViewModel {
         do {
             let fileURLs = try FileManager.default.contentsOfDirectory(
                 at: audioDirectory,
-                includingPropertiesForKeys: [.fileSizeKey, .nameKey],
+                includingPropertiesForKeys: [
+                    .fileSizeKey,
+                    .nameKey,
+                    .isUbiquitousItemKey,
+                    .ubiquitousItemDownloadingStatusKey
+                ],
                 options: [.skipsHiddenFiles]
             )
             
@@ -222,22 +227,77 @@ final class ImportViewModel {
             let databaseFileNames = Set(databaseFiles.map { $0.fileName })
             
             // Find files that exist physically but not in database
+            // Filter out files that aren't downloaded from iCloud
             let orphanedURLs = fileURLs.filter { url in
                 let fileName = url.lastPathComponent
                 let isAudioFile = AppConstants.supportedAudioFormats.contains(url.pathExtension.lowercased())
-                return isAudioFile && !databaseFileNames.contains(fileName)
+                
+                // Skip if not an audio file or already in database
+                guard isAudioFile && !databaseFileNames.contains(fileName) else {
+                    return false
+                }
+                
+                // Check if file is downloaded from iCloud (if it's an iCloud file)
+                do {
+                    let resourceValues = try url.resourceValues(forKeys: [
+                        .isUbiquitousItemKey,
+                        .ubiquitousItemDownloadingStatusKey
+                    ])
+                    
+                    let isUbiquitousItem = resourceValues.isUbiquitousItem ?? false
+                    
+                    // If it's an iCloud file, check if it's downloaded
+                    if isUbiquitousItem {
+                        if let status = resourceValues.ubiquitousItemDownloadingStatus {
+                            // Only include files that are fully downloaded
+                            return status == .current
+                        }
+                        // Can't determine status - skip to avoid errors
+                        return false
+                    }
+                    
+                    // Not an iCloud file - check if it exists locally
+                    return FileManager.default.fileExists(atPath: url.path)
+                } catch {
+                    // Error checking - skip this file to avoid import errors
+                    return false
+                }
             }
             
             if !orphanedURLs.isEmpty {
-                for url in orphanedURLs {
+                // Re-import orphaned files (silently - don't show errors for background scanning)
+                // Use a separate method that doesn't trigger error dialogs
+                do {
+                    let importedFiles = try await importService.importMultipleFiles(orphanedURLs, modelContext: modelContext)
+                    
+                    // Insert imported files into database
+                    for file in importedFiles {
+                        // Check for duplicates before inserting
+                        if !isDuplicate(file) {
+                            modelContext.insert(file)
+                        } else {
+                            // Remove duplicate file
+                            try? iCloudStorageService.shared.deleteAudioFile(at: file.fileURL)
+                        }
+                    }
+                    
+                    try? modelContext.save()
+                    
+                    // Refresh the list after importing
+                    await MainActor.run {
+                        loadImports()
+                    }
+                } catch let error as AudioImportError where error == .iCloudDownloadFailed {
+                    // Silently ignore iCloud download errors during background scanning
+                    // These files will be imported when user manually downloads them
+                } catch {
+                    // Silently ignore other errors during background scanning
+                    // Errors will be shown when user manually imports files
                 }
-                
-                // Re-import orphaned files
-                await importFiles(orphanedURLs)
-            } else {
             }
             
         } catch {
+            // Silently ignore errors during background scanning
         }
     }
     
