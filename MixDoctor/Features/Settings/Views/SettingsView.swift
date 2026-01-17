@@ -63,9 +63,7 @@ struct SettingsView: View {
                     
                     if !subscriptionService.isProUser {
                         Button {
-                            Analytics.logEvent("upgrade_button_tapped", parameters: [
-                                "source": "settings"
-                            ])
+                            Analytics.logEvent("upgrade_button_tapped", parameters: nil)
                             showPaywall = true
                         } label: {
                             HStack {

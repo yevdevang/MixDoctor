@@ -1534,6 +1534,9 @@ struct ResultsView: View {
 
         isAnalyzing = true
         defer { isAnalyzing = false }
+        
+        // Log analysis started event
+        Analytics.logEvent("analysis_started", parameters: nil)
 
         do {
             
@@ -1566,8 +1569,12 @@ struct ResultsView: View {
             audioFile.dateAnalyzed = Date()
             
             // Log analysis completed event
+            let usedCount = subscriptionService.isProUser ? 
+                (50 - subscriptionService.remainingProAnalyses) : 
+                (3 - subscriptionService.remainingFreeAnalyses)
             Analytics.logEvent("analysis_completed", parameters: [
-                "overall_score": String(format: "%.1f", result.overallScore)
+                "score": String(format: "%.1f", result.overallScore),
+                "analysis_count": String(usedCount)
             ])
             
             // Save to SwiftData and iCloud Drive on background thread to avoid freezing

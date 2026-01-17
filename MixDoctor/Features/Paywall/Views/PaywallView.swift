@@ -186,9 +186,7 @@ struct PaywallView: View {
         VStack(spacing: 8) {
             Button {
                 // Log upgrade button tapped event
-                Analytics.logEvent("upgrade_button_tapped", parameters: [
-                    "package_type": selectedPackage?.packageType == .annual ? "annual" : "monthly"
-                ])
+                Analytics.logEvent("upgrade_button_tapped", parameters: nil)
                 
                 Task {
                     await purchase()
@@ -342,9 +340,7 @@ struct PaywallView: View {
             
             // Log trial started event if user is in trial period
             if subscriptionService.isInTrialPeriod {
-                Analytics.logEvent("trial_started", parameters: [
-                    "package_type": package.packageType == .annual ? "annual" : "monthly"
-                ])
+                Analytics.logEvent("trial_started", parameters: nil)
             }
             
             print("   - Will dismiss: \(hasActiveEntitlement || isProOrTrial)")

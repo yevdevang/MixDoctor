@@ -698,6 +698,9 @@ struct DashboardView: View {
             await MainActor.run {
                 self.isAnalyzing = true
                 self.analyzingFile = file
+                
+                // Log analysis started event
+                Analytics.logEvent("analysis_started", parameters: nil)
             }
             
             // Check subscription (now safe off main thread)
@@ -806,6 +809,9 @@ struct DashboardView: View {
             await MainActor.run {
                 self.isAnalyzing = true
                 self.analyzingFile = file
+                
+                // Log analysis started event
+                Analytics.logEvent("analysis_started", parameters: nil)
             }
             
             // Check subscription (now safe off main thread)
@@ -853,8 +859,12 @@ struct DashboardView: View {
                     try? context.save()
                     
                     // Log analysis completed event
+                    let usedCount = subscriptionSvc.isProUser ? 
+                        (50 - subscriptionSvc.remainingProAnalyses) : 
+                        (3 - subscriptionSvc.remainingFreeAnalyses)
                     Analytics.logEvent("analysis_completed", parameters: [
-                        "overall_score": String(format: "%.1f", result.overallScore)
+                        "score": String(format: "%.1f", result.overallScore),
+                        "analysis_count": String(usedCount)
                     ])
 
                     // Update statistics after analysis
@@ -1214,9 +1224,7 @@ struct DashboardView: View {
                     try modelContext.save()
                     
                     // Log file imported event
-                    Analytics.logEvent("file_imported", parameters: [
-                        "file_name": fileName
-                    ])
+                    Analytics.logEvent("file_imported", parameters: nil)
                     
                     // Yield to prevent blocking UI during bulk imports
                     await Task.yield()

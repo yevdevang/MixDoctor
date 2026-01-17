@@ -85,9 +85,7 @@ final class ImportViewModel {
             
             // Log file imported event for each successfully imported file
             if insertedCount > 0 {
-                Analytics.logEvent("file_imported", parameters: [
-                    "file_count": String(insertedCount)
-                ])
+                Analytics.logEvent("file_imported", parameters: nil)
             }
             
             // Show appropriate message based on results

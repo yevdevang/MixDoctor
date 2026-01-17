@@ -61,7 +61,7 @@ struct OnboardingView: View {
                     Button("Skip") {
                         // Log skip event
                         Analytics.logEvent("onboarding_skipped", parameters: [
-                            "screen": currentPage
+                            "screen": String(currentPage)
                         ])
                         
                         withAnimation {
@@ -82,14 +82,18 @@ struct OnboardingView: View {
             // Log onboarding started event
             Analytics.logEvent("onboarding_started", parameters: nil)
         }
+        .onChange(of: currentPage) { _, newPage in
+            // Log screen view event when user navigates to a new onboarding screen
+            Analytics.logEvent("onboarding_screen_viewed", parameters: [
+                "screen": String(newPage + 1)  // Screen numbers are 1-indexed for analytics
+            ])
+        }
         .onChange(of: isPresented) { _, newValue in
             // When onboarding is dismissed, mark as completed
             if !newValue {
                 // Log completion event when onboarding is dismissed via "Get Started"
                 if currentPage == 3 {
-                    Analytics.logEvent("onboarding_completed", parameters: [
-                        "method": "finished"
-                    ])
+                    Analytics.logEvent("onboarding_completed", parameters: nil)
                 }
             }
         }

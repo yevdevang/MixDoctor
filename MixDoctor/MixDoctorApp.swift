@@ -9,11 +9,16 @@ import SwiftUI
 import SwiftData
 import StoreKit
 import FirebaseCore
+import FirebaseAnalytics
 
 class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
         FirebaseApp.configure()
+        
+        // Log app launch event
+        Analytics.logEvent("app_launched", parameters: nil)
+        
         return true
     }
 }
