@@ -136,7 +136,18 @@ struct StatCard: View {
         }
         .padding()
         .frame(maxWidth: .infinity, minHeight: 100)
-        .background(Color.backgroundPrimary)
+        #if canImport(UIKit)
+        .background(Color(UIColor.secondarySystemBackground))
+        #else
+        .background(Color.gray.opacity(0.15))
+        #endif
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(
+                    Color.secondary.opacity(0.2),
+                    lineWidth: 1
+                )
+        )
         .cornerRadius(12)
     }
 }

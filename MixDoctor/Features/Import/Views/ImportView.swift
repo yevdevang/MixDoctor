@@ -493,6 +493,9 @@ private struct ImportedFileRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
+            // Status icon
+            statusIcon
+            
             VStack(alignment: .leading, spacing: 4) {
                 Text(audioFile.fileName)
                     .font(.headline)
@@ -535,6 +538,81 @@ private struct ImportedFileRow: View {
             .buttonStyle(.plain)
         }
         .padding(.vertical, 8)
+    }
+    
+    // MARK: - Status Icon
+    
+    private var statusIcon: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(statusColor.opacity(0.15))
+                .frame(width: 40, height: 40)
+
+            // Mini waveform visualization
+            HStack(spacing: 2) {
+                ForEach(0..<5) { index in
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(statusColor)
+                        .frame(width: 2.5, height: waveformHeight(for: index))
+                }
+            }
+            
+            // Checkmark overlay for analyzed files (matches AudioFileRow exactly)
+            if audioFile.analysisResult != nil {
+                VStack {
+                    HStack {
+                        Spacer()
+                        // Always show checkmark for analyzed files (matches DashboardView)
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.white)
+                            .background(
+                                Circle()
+                                    .fill(statusColor)
+                                    .frame(width: 14, height: 14)
+                            )
+                    }
+                    Spacer()
+                }
+                .frame(width: 40, height: 40)
+                .padding(3)
+            }
+        }
+    }
+    
+    private var statusColor: Color {
+        if let result = audioFile.analysisResult {
+            // Use scoreColor directly (matches AudioFileRow)
+            // This will show red for scores < 60, orange-red for 60-74, orange for 75-84, etc.
+            return Color.scoreColor(for: result.overallScore)
+        }
+        return .gray
+    }
+    
+    private func waveformHeight(for index: Int) -> CGFloat {
+        // Generate waveform heights - same pattern as DashboardView
+        let heights: [CGFloat] = [12, 20, 16, 24, 14]
+        return heights[index % heights.count]
+    }
+    
+    // Helper function to detect actual issues (same logic as DashboardView)
+    private func hasActualIssues(result: AnalysisResult) -> Bool {
+        // If score is high (85+), likely no significant issues
+        if result.overallScore >= 85 {
+            return false
+        }
+        
+        // Check for actual metric-based issues
+        let hasPhaseIssues = result.phaseCoherence < 0.7
+        let hasStereoIssues = result.stereoWidthScore < 30 || result.stereoWidthScore > 90
+        let hasFreqIssues = (result.lowEndBalance > 60 || result.lowEndBalance < 15) ||
+        (result.midBalance < 25 || result.midBalance > 55) ||
+        (result.highBalance < 10 || result.highBalance > 45)
+        let hasDynamicIssues = result.dynamicRange < 8
+        let hasLevelIssues = result.peakLevel > -1 || result.loudnessLUFS > -10 || result.loudnessLUFS < -30
+        
+        return hasPhaseIssues || hasStereoIssues || hasFreqIssues || hasDynamicIssues || hasLevelIssues ||
+        result.hasClipping || result.hasInstrumentBalanceIssues
     }
 
     private func secondsText(duration: TimeInterval) -> String {
