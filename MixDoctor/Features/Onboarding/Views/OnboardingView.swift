@@ -67,6 +67,9 @@ struct OnboardingView: View {
                         withAnimation {
                             isPresented = false
                         }
+                        
+                        // Post notification when onboarding is skipped
+                        NotificationCenter.default.post(name: NSNotification.Name("OnboardingCompleted"), object: nil)
                     }
                     .foregroundStyle(Color.primaryAccent)
                     .padding()

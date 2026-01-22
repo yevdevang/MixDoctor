@@ -42,6 +42,7 @@ struct DashboardView: View {
     @State private var lastFilterHash = 0 // Track filter state changes
     @State private var syncDebounceTask: Task<Void, Never>? // Debounce sync operations
     @State private var hasLoggedDashboardView = false // Track if dashboard view event has been logged
+    @State private var showDeleteAllConfirmation = false // Confirmation for delete all
     
     // Cached statistics to prevent blocking SwiftData access during rendering
     @State private var cachedAnalyzedCount: Int = 0
@@ -136,6 +137,13 @@ struct DashboardView: View {
                 setupAppearance()
                 performInitialSync()
                 updateStatistics()
+                
+                // Load missing analysis results from JSON files on app startup
+                Task(priority: .userInitiated) {
+                    // Wait for SwiftData to finish loading files
+                    try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+                    await loadMissingAnalysisResults()
+                }
                 
                 // Log Firebase Analytics event
                 if !hasLoggedDashboardView {
@@ -282,6 +290,11 @@ struct DashboardView: View {
             }
             
             await scanAndImportFromiCloud()
+            
+            // Wait a moment for SwiftData to finish loading files
+            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+            
+            // Load missing analysis results from JSON files
             await loadMissingAnalysisResults()
         }
     }
@@ -352,8 +365,12 @@ struct DashboardView: View {
                 // Filter picker
                 filterPicker
                 
-                // Files list
-                filesList
+                // Files list or filtered empty state
+                if filteredFiles.isEmpty {
+                    filteredEmptyStateView
+                } else {
+                    filesList
+                }
             }
         }
 #if targetEnvironment(macCatalyst)
@@ -363,6 +380,14 @@ struct DashboardView: View {
 #endif
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $searchText, prompt: "Search audio files")
+        .alert("Delete All Files", isPresented: $showDeleteAllConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete All", role: .destructive) {
+                deleteAllFiles()
+            }
+        } message: {
+            Text("Are you sure you want to delete all \(audioFiles.count) file\(audioFiles.count == 1 ? "" : "s")? This action cannot be undone and will remove files from all your devices.")
+        }
         .toolbar {
             // iCloud sync button
             ToolbarItem(placement: .navigationBarLeading) {
@@ -405,6 +430,16 @@ struct DashboardView: View {
                         Label("Sort by Score", systemImage: "star")
                         if sortOption == .score {
                             Image(systemName: "checkmark")
+                        }
+                    }
+                    
+                    if !audioFiles.isEmpty {
+                        Divider()
+                        
+                        Button(role: .destructive, action: {
+                            showDeleteAllConfirmation = true
+                        }) {
+                            Label("Delete All Files", systemImage: "trash")
                         }
                     }
                 } label: {
@@ -508,12 +543,12 @@ struct DashboardView: View {
         audioFiles.filter { $0.analysisResult == nil }.count
     }
     
-//    private var issuesCount: Int {
-//        audioFiles.filter {
-//            guard let result = $0.analysisResult else { return false }
-//            return hasActualIssues(result: result)
-//        }.count
-//    }
+    private var filterIssuesCount: Int {
+        audioFiles.filter {
+            guard let result = $0.analysisResult else { return false }
+            return hasActualIssues(result: result)
+        }.count
+    }
     
     // MARK: - Filter Picker
     
@@ -559,7 +594,7 @@ struct DashboardView: View {
             let count = pendingCount
             return count > 0 ? "\(option.rawValue) (\(count))" : option.rawValue
         case .issues:
-            let count = issuesCount
+            let count = filterIssuesCount
             return count > 0 ? "\(option.rawValue) (\(count))" : option.rawValue
         }
     }
@@ -648,6 +683,53 @@ struct DashboardView: View {
                 await iCloudMonitor.syncNow()
                 await scanAndImportFromiCloud()
                 await loadMissingAnalysisResults()
+            }
+        }
+    }
+    
+    // MARK: - Filtered Empty State
+    
+    private var filteredEmptyStateView: some View {
+        GeometryReader { geometry in
+            ScrollView {
+                HStack {
+                    Spacer()
+                    
+                    VStack {
+                        Spacer()
+                        switch filterOption {
+                        case .all:
+                            ContentUnavailableView(
+                                "No Audio Files",
+                                systemImage: "music.note",
+                                description: Text("Import audio files to get started.")
+                            )
+                        case .analyzed:
+                            ContentUnavailableView(
+                                "No Analyzed Files",
+                                systemImage: "checkmark.circle",
+                                description: Text("No files have been analyzed yet.\n\nSelect a file to start analysis.")
+                            )
+                        case .pending:
+                            ContentUnavailableView(
+                                "No Pending Analysis",
+                                systemImage: "clock",
+                                description: Text("All files have been analyzed!\n\nGreat job keeping up with your mixes.")
+                            )
+                        case .issues:
+                            ContentUnavailableView(
+                                "No Issues Found",
+                                systemImage: "checkmark.seal.fill",
+                                description: Text("Excellent! All your analyzed files are in good shape.\n\nNo issues detected.")
+                            )
+                        }
+                        Spacer()
+                    }
+                    .frame(maxWidth: 500, minHeight: geometry.size.height)
+                    
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, minHeight: geometry.size.height)
             }
         }
     }
@@ -753,11 +835,6 @@ struct DashboardView: View {
                     return try await AudioKitService.analyzeAudioFileIsolated(url: fileURL)
                 }.value
 
-                // Save to iCloud Drive (background)
-                Task.detached(priority: .background) {
-                    try? AnalysisResultPersistence.shared.saveAnalysisResult(result, forAudioFile: fileName)
-                }
-
                 // Now update UI and SwiftData on main actor
                 await MainActor.run {
                     // Increment usage count
@@ -773,8 +850,22 @@ struct DashboardView: View {
                     audioFile.analysisResult = result
                     audioFile.dateAnalyzed = Date()
 
-                    // Save to SwiftData
-                    try? context.save()
+                    // Save to SwiftData first (synchronously)
+                    do {
+                        try context.save()
+                    } catch {
+                        print("❌ Failed to save analysis result to SwiftData: \(error.localizedDescription)")
+                    }
+                    
+                    // Save to iCloud Drive as JSON (background, but ensure it happens)
+                    Task.detached(priority: .background) {
+                        do {
+                            try AnalysisResultPersistence.shared.saveAnalysisResult(result, forAudioFile: fileName)
+                            print("✅ Successfully saved analysis result to JSON for \(fileName)")
+                        } catch {
+                            print("❌ Failed to save analysis result to JSON for \(fileName): \(error.localizedDescription)")
+                        }
+                    }
                     
                     // Log analysis completed event
                     Analytics.logEvent("analysis_completed", parameters: [
@@ -863,11 +954,6 @@ struct DashboardView: View {
                 // This runs completely off main thread
                 let result = try await AudioKitService.analyzeAudioFileIsolated(url: fileURL)
 
-                // Save to iCloud Drive (background)
-                Task.detached(priority: .background) {
-                    try? AnalysisResultPersistence.shared.saveAnalysisResult(result, forAudioFile: fileName)
-                }
-
                 // Now update UI and SwiftData on main actor
                 await MainActor.run {
                     // Increment usage count
@@ -883,8 +969,22 @@ struct DashboardView: View {
                     audioFile.analysisResult = result
                     audioFile.dateAnalyzed = Date()
 
-                    // Save to SwiftData
-                    try? context.save()
+                    // Save to SwiftData first (synchronously)
+                    do {
+                        try context.save()
+                    } catch {
+                        print("❌ Failed to save analysis result to SwiftData: \(error.localizedDescription)")
+                    }
+                    
+                    // Save to iCloud Drive as JSON (background, but ensure it happens)
+                    Task.detached(priority: .background) {
+                        do {
+                            try AnalysisResultPersistence.shared.saveAnalysisResult(result, forAudioFile: fileName)
+                            print("✅ Successfully saved analysis result to JSON for \(fileName)")
+                        } catch {
+                            print("❌ Failed to save analysis result to JSON for \(fileName): \(error.localizedDescription)")
+                        }
+                    }
                     
                     // Log analysis completed event
                     let usedCount = subscriptionSvc.isProUser ? 
@@ -1302,44 +1402,69 @@ struct DashboardView: View {
     }
     
     private func loadMissingAnalysisResults() async {
+        print("🔄 Starting loadMissingAnalysisResults() - checking for JSON files to load")
         
         let currentVersion = "AudioKit-\(AppConstants.analysisVersion)"
         var loadedCount = 0
         var clearedCount = 0
         
+        // Get all audio files (ensure we have the latest data)
+        let allFiles = audioFiles
+        print("   📊 Found \(allFiles.count) audio files to check")
+        
         // Check all files that don't have analysis results in SwiftData
-        for audioFile in audioFiles where audioFile.analysisResult == nil {
+        for audioFile in allFiles where audioFile.analysisResult == nil {
+            print("   🔍 Checking file without analysis: \(audioFile.fileName)")
+            
             // Try to load from iCloud Drive JSON
             if let analysisResult = AnalysisResultPersistence.shared.loadAnalysisResult(forAudioFile: audioFile.fileName) {
+                print("   ✅ Found JSON file for: \(audioFile.fileName)")
+                
                 // Check version compatibility
                 if analysisResult.analysisVersion == currentVersion {
+                    print("   ✅ Version matches: \(analysisResult.analysisVersion)")
+                    
                     // IMPORTANT: Verify the analysis result matches this file to prevent loading stale results
-                    if verifyAnalysisResultMatchesFile(analysisResult: analysisResult, audioFile: audioFile) {
+                    let matches = verifyAnalysisResultMatchesFile(analysisResult: analysisResult, audioFile: audioFile)
+                    if matches {
+                        print("   ✅ Analysis result matches file - loading into SwiftData")
                         analysisResult.audioFile = audioFile
                         audioFile.analysisResult = analysisResult
                         audioFile.dateAnalyzed = analysisResult.dateAnalyzed
                         loadedCount += 1
                     } else {
-                        // Analysis result doesn't match - delete the stale JSON file
-                        AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: audioFile.fileName)
-                        clearedCount += 1
+                        print("   ⚠️ Analysis result doesn't match file verification")
+                        print("      File: \(audioFile.fileName)")
+                        print("      File size: \(audioFile.fileSize), Duration: \(audioFile.duration)")
+                        print("      Analysis date: \(analysisResult.dateAnalyzed)")
+                        print("      File import date: \(audioFile.dateImported)")
+                        print("      ⚠️ Skipping load (keeping JSON file for now)")
+                        // Don't delete - might be valid but verification is too strict
+                        // AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: audioFile.fileName)
+                        // clearedCount += 1
                     }
                 } else {
+                    print("   ⚠️ Version mismatch: \(analysisResult.analysisVersion) != \(currentVersion) - deleting old JSON")
                     AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: audioFile.fileName)
                     clearedCount += 1
                 }
+            } else {
+                print("   ❌ No JSON file found for: \(audioFile.fileName)")
             }
         }
         
         // Also check files that HAVE analysis results but with wrong version
-        for audioFile in audioFiles {
+        for audioFile in allFiles {
             if let analysisResult = audioFile.analysisResult, analysisResult.analysisVersion != currentVersion {
+                print("   ⚠️ File has outdated analysis version - clearing: \(audioFile.fileName)")
                 audioFile.analysisResult = nil
                 audioFile.dateAnalyzed = nil
                 AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: audioFile.fileName)
                 clearedCount += 1
             }
         }
+        
+        print("   📊 Summary: Loaded \(loadedCount), Cleared \(clearedCount)")
         
         if loadedCount > 0 || clearedCount > 0 {
             do {
@@ -1403,6 +1528,51 @@ struct DashboardView: View {
         NotificationCenter.default.post(name: .audioFileDeleted, object: nil)
     }
     
+    /// Delete all audio files from the app
+    private func deleteAllFiles() {
+        let allFiles = audioFiles
+        
+        // Delete all files
+        for file in allFiles {
+            // Delete the actual audio file from storage
+            let fileURL = file.fileURL
+            do {
+                try iCloudStorageService.shared.deleteAudioFile(at: fileURL)
+            } catch {
+                // Continue even if individual file deletion fails
+            }
+            
+            // Delete the analysis result JSON from iCloud Drive
+            AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: file.fileName)
+            
+            // Delete the SwiftData record
+            modelContext.delete(file)
+        }
+        
+        // Save all deletions
+        do {
+            try modelContext.save()
+        } catch {
+            // Handle save error if needed
+        }
+        
+        // Clear cached filtered files
+        cachedFilteredFiles = []
+        lastFilterHash = 0
+        
+        // Update statistics after deletion
+#if targetEnvironment(macCatalyst)
+        Task(priority: .utility) {
+            await loadAudioFiles()
+        }
+#else
+        updateStatistics()
+#endif
+        
+        // Notify other views that files were deleted
+        NotificationCenter.default.post(name: .audioFileDeleted, object: nil)
+    }
+    
     /// Verifies that an analysis result matches the audio file it claims to analyze
     /// This prevents loading stale analysis results from previously deleted files
     /// - Parameters:
@@ -1413,41 +1583,47 @@ struct DashboardView: View {
         // Verify the audio file actually exists
         let fileURL = audioFile.fileURL
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
-            // File doesn't exist - this is definitely a stale result
+            print("   ⚠️ Verification failed: Audio file doesn't exist at \(fileURL.path)")
             return false
         }
         
-        // Check if analysis date is after file import date (sanity check)
-        // dateAnalyzed is non-optional Date, so we can compare directly
-        if analysisResult.dateAnalyzed < audioFile.dateImported {
-            // Analysis was done before file was imported - this is a stale result
-            return false
-        }
-        
-        // Verify the analysis JSON file's modification date is after the audio file was imported
-        // This ensures the analysis was created for this specific file instance
-        let service = iCloudStorageService.shared
-        let audioDir = service.getAudioFilesDirectory()
-        let jsonFileName = "\(audioFile.fileName).analysis.json"
-        let jsonURL = audioDir.appendingPathComponent(jsonFileName)
-        
-        if FileManager.default.fileExists(atPath: jsonURL.path) {
-            do {
-                let jsonAttributes = try FileManager.default.attributesOfItem(atPath: jsonURL.path)
-                if let jsonModificationDate = jsonAttributes[.modificationDate] as? Date {
-                    // Analysis JSON should be modified after the file was imported
-                    // Allow 1 second tolerance for timing issues
-                    if jsonModificationDate < audioFile.dateImported.addingTimeInterval(-1.0) {
-                        // Analysis JSON is older than file import - this is a stale result
-                        return false
-                    }
+        // More lenient verification: Check file size and duration match
+        // This is more reliable than dates, especially after app rebuilds
+        // Get actual file size from disk
+        do {
+            let fileAttributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
+            if let fileSizeOnDisk = fileAttributes[.size] as? Int64 {
+                // Allow 1KB tolerance for file size differences (metadata changes, etc.)
+                let sizeDifference = abs(fileSizeOnDisk - audioFile.fileSize)
+                if sizeDifference > 1024 {
+                    print("   ⚠️ Verification failed: File size mismatch")
+                    print("      Expected: \(audioFile.fileSize), Actual: \(fileSizeOnDisk), Diff: \(sizeDifference)")
+                    return false
                 }
-            } catch {
-                // If we can't check modification date, fail safe and reject the analysis
-                return false
             }
+        } catch {
+            print("   ⚠️ Verification warning: Could not check file size: \(error.localizedDescription)")
+            // Continue with other checks
         }
         
+        // Check if analysis date is reasonable (not more than 1 year in the future)
+        let oneYearFromNow = Date().addingTimeInterval(365 * 24 * 60 * 60)
+        if analysisResult.dateAnalyzed > oneYearFromNow {
+            print("   ⚠️ Verification failed: Analysis date is in the future")
+            return false
+        }
+        
+        // If analysis date is before import date, it might be from a previous import
+        // But allow it if the file name matches and file exists (more lenient)
+        // Only reject if analysis is WAY before import (more than 1 day)
+        let oneDayBeforeImport = audioFile.dateImported.addingTimeInterval(-24 * 60 * 60)
+        if analysisResult.dateAnalyzed < oneDayBeforeImport {
+            print("   ⚠️ Verification failed: Analysis is more than 1 day before import")
+            print("      Analysis: \(analysisResult.dateAnalyzed), Import: \(audioFile.dateImported)")
+            return false
+        }
+        
+        print("   ✅ Verification passed: File exists, size matches, dates are reasonable")
         return true
     }
 

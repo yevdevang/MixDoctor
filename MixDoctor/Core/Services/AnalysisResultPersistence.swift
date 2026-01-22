@@ -7,6 +7,7 @@
 
 import Foundation
 import SwiftData
+import UniformTypeIdentifiers
 
 /// Handles saving and loading analysis results as JSON files in iCloud Drive
 final class AnalysisResultPersistence {
@@ -65,9 +66,118 @@ final class AnalysisResultPersistence {
         // Convert to JSON
         let jsonData = try JSONSerialization.data(withJSONObject: data, options: .prettyPrinted)
         
-        // Write to file
-        try jsonData.write(to: jsonURL, options: .atomic)
+        // Check if we're saving to iCloud directory
+        let isICloudDirectory = jsonURL.path.contains("Mobile Documents") || jsonURL.path.contains("iCloud~")
         
+        print("💾 Saving analysis JSON for: \(audioFileName)")
+        print("   Destination: \(jsonURL.path)")
+        print("   Is iCloud directory: \(isICloudDirectory)")
+        
+        // Check if we're using iCloud
+        let iCloudEnabled = UserDefaults.standard.object(forKey: "iCloudSyncEnabled") as? Bool ?? true
+        let isActuallyICloud = isICloudDirectory && iCloudEnabled && service.iCloudContainerURL != nil
+        
+        if isActuallyICloud {
+            print("   ✅ Using iCloud - will mark file as ubiquitous")
+            let iCloudContainerURL = service.iCloudContainerURL!
+            print("   iCloud container URL: \(iCloudContainerURL.path)")
+            
+            // Ensure destination directory exists
+            let destinationDir = jsonURL.deletingLastPathComponent()
+            if !FileManager.default.fileExists(atPath: destinationDir.path) {
+                do {
+                    try FileManager.default.createDirectory(at: destinationDir, withIntermediateDirectories: true, attributes: nil)
+                    print("   ✅ Created directory: \(destinationDir.path)")
+                } catch {
+                    print("   ⚠️ Failed to create directory: \(error.localizedDescription)")
+                    throw error
+                }
+            }
+            
+            // For iCloud: Write to temp first, then use setUbiquitous
+            // This is REQUIRED for files to sync to iCloud Drive
+            let tempDir = FileManager.default.temporaryDirectory
+            let uniqueTempName = "\(UUID().uuidString)_\(jsonFileName)"
+            let tempURL = tempDir.appendingPathComponent(uniqueTempName)
+            
+            do {
+                // Step 1: Write to temporary location
+                try jsonData.write(to: tempURL, options: .atomic)
+                print("   ✅ Step 1: Wrote to temp: \(tempURL.path)")
+                
+                // Step 2: Remove existing file if it exists (setUbiquitous requires clean destination)
+                if FileManager.default.fileExists(atPath: jsonURL.path) {
+                    try FileManager.default.removeItem(at: jsonURL)
+                    print("   ✅ Step 2: Removed existing file")
+                }
+                
+                // Step 3: Use setUbiquitous to move to iCloud and mark as ubiquitous
+                // This is CRITICAL - without this, files won't sync
+                try FileManager.default.setUbiquitous(true, itemAt: tempURL, destinationURL: jsonURL)
+                print("   ✅ Step 3: Called setUbiquitous - file should now sync to iCloud")
+                
+                // Step 4: Wait for file system to process
+                Thread.sleep(forTimeInterval: 0.5)
+                
+                // Step 5: Verify file exists
+                if FileManager.default.fileExists(atPath: jsonURL.path) {
+                    print("   ✅ Step 4: File exists at destination: \(jsonURL.path)")
+                    
+                    // Step 6: Verify iCloud status
+                    do {
+                        let resourceValues = try jsonURL.resourceValues(forKeys: [
+                            .isUbiquitousItemKey,
+                            .ubiquitousItemIsUploadedKey
+                        ])
+                        
+                        let isUbiquitous = resourceValues.isUbiquitousItem ?? false
+                        let isUploaded = resourceValues.ubiquitousItemIsUploaded ?? false
+                        
+                        print("   📊 Final Status:")
+                        print("      - File Path: \(jsonURL.path)")
+                        print("      - Is Ubiquitous: \(isUbiquitous ? "✅ YES" : "❌ NO")")
+                        print("      - Is Uploaded: \(isUploaded ? "✅ YES" : "⏳ PENDING")")
+                        
+                        if !isUbiquitous {
+                            print("   ⚠️ CRITICAL: File is NOT marked as ubiquitous!")
+                            print("   ⚠️ This means it will NOT sync to iCloud Drive")
+                            print("   ⚠️ File exists locally but won't appear in iCloud")
+                        }
+                    } catch {
+                        print("   ⚠️ Could not verify iCloud status: \(error.localizedDescription)")
+                    }
+                } else {
+                    let errorMsg = "File does not exist after setUbiquitous at: \(jsonURL.path)"
+                    print("   ❌ \(errorMsg)")
+                    throw NSError(domain: "AnalysisResultPersistence", code: -1, userInfo: [NSLocalizedDescriptionKey: errorMsg])
+                }
+            } catch {
+                // setUbiquitous failed - log detailed error
+                print("   ❌ setUbiquitous FAILED: \(error.localizedDescription)")
+                print("   📝 Error details: \(error)")
+                
+                // Clean up temp file
+                try? FileManager.default.removeItem(at: tempURL)
+                
+                // Try direct write as fallback (won't sync but preserves data)
+                print("   📝 Attempting direct write fallback...")
+                try jsonData.write(to: jsonURL, options: .atomic)
+                print("   ⚠️ Saved directly (file exists but WON'T sync to iCloud): \(jsonFileName)")
+                print("   ⚠️ This is a fallback - file will not appear in iCloud Drive")
+            }
+        } else {
+            // Local storage only
+            print("   📁 Using local storage (iCloud not enabled or not available)")
+            try jsonData.write(to: jsonURL, options: .atomic)
+            print("   ✅ Saved to local directory: \(jsonURL.path)")
+        }
+        
+        // Verify file exists
+        guard FileManager.default.fileExists(atPath: jsonURL.path) else {
+            throw NSError(domain: "AnalysisResultPersistence", code: -1, userInfo: [NSLocalizedDescriptionKey: "File was not created successfully"])
+        }
+        
+        print("✅ Successfully saved analysis result: \(jsonFileName)")
     }
     
     // MARK: - Load Analysis Result

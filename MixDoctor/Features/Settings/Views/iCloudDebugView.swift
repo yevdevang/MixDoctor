@@ -82,13 +82,38 @@ struct iCloudDebugView: View {
             }
             
             Section("Files in iCloud") {
+                HStack {
+                    Text("\(filesInContainer.count) file(s)")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Button(action: {
+                        checkStatus()
+                    }) {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                            .font(.caption)
+                    }
+                    .disabled(isRefreshing)
+                }
+                
                 if filesInContainer.isEmpty {
                     Text("No files found")
                         .foregroundColor(.secondary)
                 } else {
-                    ForEach(filesInContainer, id: \.self) { file in
-                        Text(file)
-                            .font(.caption)
+                    ForEach(filesInContainer.sorted(), id: \.self) { file in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(file)
+                                .font(.caption)
+                            if file.hasSuffix(".analysis.json") {
+                                Text("Analysis JSON")
+                                    .font(.caption2)
+                                    .foregroundColor(.blue)
+                            } else if file.hasSuffix(".mp3") || file.hasSuffix(".wav") {
+                                Text("Audio File")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
                     }
                 }
             }

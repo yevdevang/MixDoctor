@@ -1579,16 +1579,21 @@ struct ResultsView: View {
             
             // Save to SwiftData and iCloud Drive on background thread to avoid freezing
             let fileName = audioFile.fileName
+            
+            // Save to SwiftData first (synchronously on main actor)
+            do {
+                try modelContext.save()
+            } catch {
+                print("❌ Failed to save analysis result to SwiftData: \(error.localizedDescription)")
+            }
+            
+            // Save to iCloud Drive as JSON for cross-device sync (background)
             Task.detached(priority: .utility) {
-                // Save to SwiftData
-                try? await MainActor.run {
-                    try self.modelContext.save()
-                }
-                
-                // Save to iCloud Drive as JSON for cross-device sync (disk I/O)
                 do {
                     try AnalysisResultPersistence.shared.saveAnalysisResult(result, forAudioFile: fileName)
+                    print("✅ Successfully saved analysis result to JSON for \(fileName)")
                 } catch {
+                    print("❌ Failed to save analysis result to JSON for \(fileName): \(error.localizedDescription)")
                 }
             }
             

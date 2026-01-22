@@ -48,6 +48,8 @@ struct OnboardingFreeTrialScreen: View {
                 withAnimation {
                     isPresented = false
                 }
+                // Post notification when onboarding is completed
+                NotificationCenter.default.post(name: NSNotification.Name("OnboardingCompleted"), object: nil)
             }
             .padding(.horizontal, 40)
             .padding(.bottom, 60)

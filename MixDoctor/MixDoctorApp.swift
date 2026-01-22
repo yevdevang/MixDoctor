@@ -54,13 +54,18 @@ struct MixDoctorApp: App {
             let storeURL = appSupportURL.appendingPathComponent("MixDoctor.store")
             
             // Schema version tracking for migration
-            let currentSchemaVersion = 4  // Incremented - ensure clean schema
+            // IMPORTANT: Only increment this when the schema actually changes
+            // Incrementing this will DELETE the entire database!
+            let currentSchemaVersion = 4
             let lastSchemaVersion = UserDefaults.standard.integer(forKey: "lastSchemaVersion")
             
             // If there's a corrupted store or schema changed, delete it
+            // WARNING: This deletes all data! Only do this if schema actually changed.
             if FileManager.default.fileExists(atPath: storeURL.path) {
                 // Check if we had a migration failure or schema version changed
-                if UserDefaults.standard.bool(forKey: "hadMigrationFailure") || lastSchemaVersion < currentSchemaVersion {
+                if UserDefaults.standard.bool(forKey: "hadMigrationFailure") || (lastSchemaVersion > 0 && lastSchemaVersion < currentSchemaVersion) {
+                    print("⚠️ Schema version changed from \(lastSchemaVersion) to \(currentSchemaVersion) - database will be reset")
+                    print("⚠️ Analysis results should be restored from JSON files via loadMissingAnalysisResults()")
                     try? FileManager.default.removeItem(at: storeURL)
                     // Also clean up any -wal or -shm files
                     try? FileManager.default.removeItem(at: storeURL.deletingLastPathComponent().appendingPathComponent("MixDoctor.store-wal"))
