@@ -8,6 +8,7 @@ struct ImportView: View {
     @State private var viewModel: ImportViewModel?
     @State private var isShowingDocumentPicker = false
     @State private var isDropTargeted = false
+    @State private var selectedGenre: String?
     @Binding var selectedAudioFile: AudioFile?
     @Binding var selectedTab: Int
     @Binding var shouldAutoPlay: Bool
@@ -107,35 +108,55 @@ struct ImportView: View {
         }
         .background(
             ZStack {
-                // Invisible full-coverage drop target - only active when dragging
+                // Invisible full-coverage drop target - only active when dragging and genre selected
                 Color.clear
                     .contentShape(Rectangle())
                     .onDrop(of: [.audio], isTargeted: $isDropTargeted) { providers in
+                        guard selectedGenre != nil else {
+                            return false
+                        }
                         handleDrop(providers: providers)
                         return true
                     }
                 
                 // Visual drop zone overlay when dragging
                 if isDropTargeted {
-                    RoundedRectangle(cornerRadius: 16)
-                        .strokeBorder(
-                            Color.primaryAccent,
-                            style: StrokeStyle(
-                                lineWidth: 3,
-                                dash: [10, 5]
+                    VStack {
+                        RoundedRectangle(cornerRadius: 16)
+                            .strokeBorder(
+                                Color.primaryAccent,
+                                style: StrokeStyle(
+                                    lineWidth: 3,
+                                    dash: [10, 5]
+                                )
                             )
-                        )
-                        .background(
-                            RoundedRectangle(cornerRadius: 16)
-                                .fill(Color.primaryAccent.opacity(0.1))
-                        )
-                        .padding(8)
-                        .allowsHitTesting(false)
-                        .transition(.opacity)
+                            .background(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(Color.primaryAccent.opacity(0.1))
+                            )
+                            .padding(8)
+                            .allowsHitTesting(false)
+                            .transition(.opacity)
+                        
+                        if selectedGenre == nil {
+                            Text("Please select a genre first")
+                                .font(.headline)
+                                .foregroundStyle(Color.primaryAccent)
+                                .padding()
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .fill(Color.backgroundSecondary)
+                                )
+                                .transition(.opacity)
+                        }
+                    }
                 }
             }
         )
         .animation(.easeInOut(duration: 0.2), value: isDropTargeted)
+        .onChange(of: selectedGenre) { oldValue, newValue in
+            viewModel.selectedGenre = newValue
+        }
         .task {
             // Run loading operations on background thread to avoid blocking UI during tab switch
             await Task.detached(priority: .userInitiated) {
@@ -187,31 +208,72 @@ struct ImportView: View {
                         .foregroundStyle(Color.secondaryText)
                 }
 
-                HStack(spacing: 16) {
+                VStack(spacing: 16) {
+                    // Genre selection dropdown - full width
+                    Menu {
+                        ForEach(AppConstants.availableGenres, id: \.self) { genre in
+                            Button {
+                                selectedGenre = genre
+                            } label: {
+                                HStack {
+                                    Text(genre)
+                                    if selectedGenre == genre {
+                                        Spacer()
+                                        Image(systemName: "checkmark")
+                                            .foregroundStyle(Color.primaryAccent)
+                                    }
+                                }
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Text("Genre:")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.primary)
+                            Text(selectedGenre ?? "Select a genre...")
+                                .font(.subheadline)
+                                .foregroundStyle(selectedGenre == nil ? Color.secondaryText : Color.primary)
+                            Spacer()
+                            Image(systemName: "chevron.down")
+                                .font(.caption)
+                                .foregroundStyle(Color.secondaryText)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(Color.backgroundSecondary)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .strokeBorder(
+                                            selectedGenre == nil ? Color.secondary.opacity(0.3) : Color.primaryAccent.opacity(0.5),
+                                            lineWidth: selectedGenre == nil ? 1 : 2
+                                        )
+                                )
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    
+                    // Browse Files button - full width
                     Button {
                         isShowingDocumentPicker = true
                     } label: {
                         Label("Browse Files", systemImage: "folder")
-                            .frame(maxWidth: 200)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .fill(Color.primaryAccent)
+                            )
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    
-                    // Sync button to recover orphaned files
-//                if let viewModel {
-//                    Button {
-//                        Task {
-//                            await viewModel.scanForOrphanedFiles()
-//                        }
-//                    } label: {
-//                        Image(systemName: "arrow.clockwise.icloud")
-//                            .font(.title3)
-//                    }
-//                    .buttonStyle(.bordered)
-//                    .controlSize(.large)
-//                    .disabled(viewModel.isImporting)
-//                }
+                    .buttonStyle(.plain)
+                    .disabled(selectedGenre == nil)
+                    .opacity(selectedGenre == nil ? 0.5 : 1.0)
                 }
+                .frame(maxWidth: 500)
 
                 supportedFormatsView
                 
@@ -248,17 +310,140 @@ struct ImportView: View {
                 .buttonStyle(.bordered)
                 .disabled(viewModel.isImporting)
                 
+                // Genre selection dropdown
+                Menu {
+                    ForEach(AppConstants.availableGenres, id: \.self) { genre in
+                        Button {
+                            selectedGenre = genre
+                        } label: {
+                            HStack {
+                                Text(genre)
+                                if selectedGenre == genre {
+                                    Spacer()
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(Color.primaryAccent)
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text("Genre:")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Text(selectedGenre ?? "Select...")
+                            .font(.subheadline)
+                            .foregroundStyle(selectedGenre == nil ? Color.secondaryText : Color.primary)
+                        Image(systemName: "chevron.down")
+                            .font(.caption2)
+                            .foregroundStyle(Color.secondaryText)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color.backgroundSecondary)
+                    )
+                }
+                .buttonStyle(.plain)
+                
                 Button {
                     isShowingDocumentPicker = true
                 } label: {
                     Label("Import More", systemImage: "plus.circle.fill")
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(viewModel.isImporting)
+                .disabled(viewModel.isImporting || selectedGenre == nil)
             }
             .padding()
+            #else
+            // Fixed header on iOS - not scrollable
+            VStack(spacing: 12) {
+                HStack(alignment: .center) {
+                    Text("\(viewModel.importedFiles.count) \(viewModel.importedFiles.count == 1 ? "Song" : "Songs")")
+                        .textCase(.none)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    
+                    // Scan for orphaned files button
+                    Button {
+                        Task {
+                            await viewModel.scanForOrphanedFiles()
+                        }
+                    } label: {
+                        Image(systemName: "arrow.clockwise.icloud")
+                    }
+                    .font(.subheadline)
+                    .disabled(viewModel.isImporting)
+                }
+                .padding(.vertical, 4)
+                
+                // Genre selection dropdown - full width on iOS
+                Menu {
+                    ForEach(AppConstants.availableGenres, id: \.self) { genre in
+                        Button {
+                            selectedGenre = genre
+                        } label: {
+                            HStack {
+                                Text(genre)
+                                if selectedGenre == genre {
+                                    Spacer()
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(Color.primaryAccent)
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Text("Genre:")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.primary)
+                        Text(selectedGenre ?? "Select a genre...")
+                            .font(.subheadline)
+                            .foregroundStyle(selectedGenre == nil ? Color.secondaryText : Color.primary)
+                        Spacer()
+                        Image(systemName: "chevron.down")
+                            .font(.caption)
+                            .foregroundStyle(Color.secondaryText)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color.backgroundSecondary)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .strokeBorder(
+                                        selectedGenre == nil ? Color.secondary.opacity(0.3) : Color.primaryAccent.opacity(0.5),
+                                        lineWidth: selectedGenre == nil ? 1 : 2
+                                    )
+                            )
+                    )
+                }
+                .buttonStyle(.plain)
+                
+                Button("Import More") {
+                    isShowingDocumentPicker = true
+                }
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.primaryAccent)
+                )
+                .disabled(viewModel.isImporting || selectedGenre == nil)
+                .opacity((viewModel.isImporting || selectedGenre == nil) ? 0.5 : 1.0)
+            }
+            .padding()
+            .background(Color.backgroundPrimary)
             #endif
             
+            // Scrollable list
             List {
                 Section {
                     ForEach(viewModel.importedFiles) { file in
@@ -293,34 +478,6 @@ struct ImportView: View {
                         .frame(maxWidth: .infinity, minHeight: 100)
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
-                } header: {
-                    #if !targetEnvironment(macCatalyst)
-                    HStack(alignment: .center) {
-                        Text("\(viewModel.importedFiles.count) \(viewModel.importedFiles.count == 1 ? "Song" : "Songs")")
-                            .textCase(.none)
-                            .font(.headline)
-                            .foregroundStyle(.primary)
-                        Spacer()
-                        
-                        // Scan for orphaned files button
-                        Button {
-                            Task {
-                                await viewModel.scanForOrphanedFiles()
-                            }
-                        } label: {
-                            Image(systemName: "arrow.clockwise.icloud")
-                        }
-                        .font(.subheadline)
-                        .disabled(viewModel.isImporting)
-                        
-                        Button("Import More") {
-                            isShowingDocumentPicker = true
-                        }
-                        .font(.subheadline)
-                        .disabled(viewModel.isImporting)
-                    }
-                    .padding(.vertical, 4)
-                    #endif
                 }
             }
             .listStyle(.insetGrouped)
@@ -424,7 +581,7 @@ struct ImportView: View {
             }
             
             if !urls.isEmpty {
-                await viewModel.importFiles(urls)
+                await viewModel.importFiles(urls, genre: selectedGenre)
                 
                 // Select the first file if nothing is selected
                 if !viewModel.importedFiles.isEmpty && selectedAudioFile == nil {
@@ -448,7 +605,7 @@ struct ImportView: View {
             }
             
             Task {
-                await viewModel.importFiles(urls)
+                await viewModel.importFiles(urls, genre: selectedGenre)
                 
                 // Just select the first file, don't auto-play or switch tabs
                 if !viewModel.importedFiles.isEmpty && selectedAudioFile == nil {

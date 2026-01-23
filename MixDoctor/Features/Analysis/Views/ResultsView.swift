@@ -1547,8 +1547,9 @@ struct ResultsView: View {
             
             // Perform the analysis completely off the main thread to prevent UI freezing
             let fileURL = audioFile.fileURL
+            let genre = audioFile.genre
             let result = try await Task.detached(priority: .userInitiated) {
-                try await AudioKitService.shared.getDetailedAnalysis(for: fileURL)
+                try await AudioKitService.shared.getDetailedAnalysis(for: fileURL, genre: genre)
             }.value
             
             

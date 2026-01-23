@@ -176,7 +176,9 @@ struct MixDoctorApp: App {
                 // Check subscription status on launch
                 await subscriptionService.updateCustomerInfo()
                 
-                // Start iCloud file monitoring
+                // Defer iCloud monitoring to avoid blocking launch
+                // Start monitoring after a short delay to let UI render first
+                try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second delay
                 iCloudMonitor.startMonitoring()
             }
             .onReceive(NotificationCenter.default.publisher(for: .iCloudSyncToggled)) { _ in

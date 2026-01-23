@@ -33,14 +33,14 @@ public class AudioKitService: ObservableObject {
     
     /// Static analysis function that runs completely isolated from main actor
     /// This is crucial for MacCatalyst to avoid UI blocking
-    public static func analyzeAudioFileIsolated(url: URL) async throws -> AnalysisResult {
+    public static func analyzeAudioFileIsolated(url: URL, genre: String? = nil) async throws -> AnalysisResult {
         // This runs completely isolated - no access to shared state
-        return try await AudioKitService.shared.performAudioKitAnalysis(url: url)
+        return try await AudioKitService.shared.performAudioKitAnalysis(url: url, genre: genre)
     }
     
     /// Analyze audio file and return comprehensive analysis for display
     /// Must be nonisolated to avoid blocking main thread on MacCatalyst
-    nonisolated public func getDetailedAnalysis(for url: URL) async throws -> AnalysisResult {
+    nonisolated public func getDetailedAnalysis(for url: URL, genre: String? = nil) async throws -> AnalysisResult {
         
         // Check if analysis already exists in iCloud Drive to avoid re-analyzing
         let fileName = url.lastPathComponent
@@ -61,7 +61,7 @@ public class AudioKitService: ObservableObject {
         // await MainActor.run { isAnalyzing = true }
         // defer { Task { @MainActor in isAnalyzing = false } }
         
-        let result = try await performAudioKitAnalysis(url: url)
+        let result = try await performAudioKitAnalysis(url: url, genre: genre)
         
         // Save to iCloud Drive for future use
         do {
@@ -73,7 +73,7 @@ public class AudioKitService: ObservableObject {
     }
     
     
-    nonisolated private func performAudioKitAnalysis(url: URL) async throws -> AnalysisResult {
+    nonisolated private func performAudioKitAnalysis(url: URL, genre: String? = nil) async throws -> AnalysisResult {
         // Perform all file I/O on a background thread to avoid blocking
         let (buffer, duration, actualSampleRate, fileName) = try await Task.detached(priority: .userInitiated) {
             // Load audio file for AudioKit analysis
@@ -100,7 +100,7 @@ public class AudioKitService: ObservableObject {
 
         // Perform AudioKit-based analysis on background thread (CPU-intensive DSP)
         let analysisResult = await Task.detached(priority: .userInitiated) {
-            await self.performAudioKitBufferAnalysis(buffer, duration: duration, sampleRate: actualSampleRate, fileName: fileName)
+            await self.performAudioKitBufferAnalysis(buffer, duration: duration, sampleRate: actualSampleRate, fileName: fileName, genre: genre)
         }.value
         
         // Create AnalysisResult with AudioKit data
@@ -177,6 +177,9 @@ public class AudioKitService: ObservableObject {
             
             // Prepare comprehensive professional metrics for Claude
             let metrics = AudioMetricsForClaude(
+                // User-selected genre for genre-specific analysis
+                genre: genre,
+                
                 // Basic Level Metrics
                 peakLevel: result.peakLevel,
                 rmsLevel: result.rmsLevel,
@@ -244,8 +247,9 @@ public class AudioKitService: ObservableObject {
             )
             
             // Claude API call - ensure it's off main thread
+            // Pass user-selected genre if available (passed through function chain)
             let claudeResponse = try await Task.detached(priority: .userInitiated) {
-                try await ClaudeAPIService.shared.analyzeAudioMetrics(metrics)
+                try await ClaudeAPIService.shared.analyzeAudioMetrics(metrics, userGenre: genre)
             }.value
             
             // UNMIXED DETECTION DISABLED - always show score
@@ -306,7 +310,7 @@ public class AudioKitService: ObservableObject {
     
     // MARK: - AudioKit Analysis Implementation
     
-    nonisolated private func performAudioKitBufferAnalysis(_ buffer: AVAudioPCMBuffer, duration: TimeInterval, sampleRate: Double, fileName: String) async -> AudioKitAnalysisResult {
+    nonisolated private func performAudioKitBufferAnalysis(_ buffer: AVAudioPCMBuffer, duration: TimeInterval, sampleRate: Double, fileName: String, genre: String? = nil) async -> AudioKitAnalysisResult {
         // AudioKit-based buffer analysis
         
         guard let leftData = buffer.floatChannelData?[0] else {

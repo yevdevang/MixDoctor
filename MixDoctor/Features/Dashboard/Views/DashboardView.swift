@@ -316,46 +316,6 @@ struct DashboardView: View {
     
     private var dashboardContent: some View {
         VStack(spacing: 0) {
-            // iCloud sync status banner
-            if iCloudMonitor.isSyncing {
-                HStack(spacing: 12) {
-                    // Animated sync icon
-                    ProgressView()
-                        .tint(.primaryAccent)
-                    
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Syncing with iCloud")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                            .foregroundStyle(.primary)
-                        
-                        Text("Checking for new files and updates...")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    
-                    Spacer()
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .background(
-                    LinearGradient(
-                        colors: [
-                            Color.primaryAccent.opacity(0.08),
-                            Color.primaryAccent.opacity(0.04)
-                        ],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
-                .overlay(
-                    Rectangle()
-                        .frame(height: 1)
-                        .foregroundStyle(Color.primaryAccent.opacity(0.2)),
-                    alignment: .bottom
-                )
-            }
-            
             if audioFiles.isEmpty {
                 emptyStateView
             } else {
@@ -402,8 +362,26 @@ struct DashboardView: View {
                     }
                 } label: {
                     if iCloudMonitor.isSyncing {
-                        ProgressView()
-                            .tint(.primaryAccent)
+                        ZStack {
+                            // Circular progress indicator (always show background circle when syncing)
+                            Circle()
+                                .stroke(Color.primaryAccent.opacity(0.2), lineWidth: 2)
+                            
+                            // Progress ring if progress is available
+                            if iCloudMonitor.syncProgress > 0 && iCloudMonitor.syncProgress < 1.0 {
+                                Circle()
+                                    .trim(from: 0, to: iCloudMonitor.syncProgress)
+                                    .stroke(Color.primaryAccent, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                                    .rotationEffect(.degrees(-90))
+                                    .animation(.linear, value: iCloudMonitor.syncProgress)
+                            }
+                            
+                            // Spinning indicator in center (always show when syncing)
+                            ProgressView()
+                                .tint(.primaryAccent)
+                                .scaleEffect(0.7)
+                        }
+                        .frame(width: 20, height: 20)
                     } else {
                         Label("Sync iCloud", systemImage: "icloud.and.arrow.down")
                     }
@@ -664,13 +642,56 @@ struct DashboardView: View {
                 HStack {
                     Spacer()
                     
-                    VStack {
+                    VStack(spacing: 20) {
                         Spacer()
-                        ContentUnavailableView(
-                            "No Audio Files",
-                            systemImage: "music.note",
-                            description: Text("Import audio files to get started.\n\nPull down to sync from iCloud.")
-                        )
+                        
+                        if iCloudMonitor.isSyncing {
+                            // Show loader when syncing/downloading files
+                            VStack(spacing: 16) {
+                                ZStack {
+                                    // Circular progress indicator
+                                    if iCloudMonitor.syncProgress > 0 && iCloudMonitor.syncProgress < 1.0 {
+                                        Circle()
+                                            .stroke(Color.primaryAccent.opacity(0.2), lineWidth: 4)
+                                            .frame(width: 60, height: 60)
+                                        Circle()
+                                            .trim(from: 0, to: iCloudMonitor.syncProgress)
+                                            .stroke(Color.primaryAccent, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                                            .rotationEffect(.degrees(-90))
+                                            .animation(.linear, value: iCloudMonitor.syncProgress)
+                                            .frame(width: 60, height: 60)
+                                    }
+                                    // Spinning indicator in center
+                                    ProgressView()
+                                        .tint(.primaryAccent)
+                                        .scaleEffect(1.2)
+                                }
+                                
+                                VStack(spacing: 8) {
+                                    Text("Downloading files...")
+                                        .font(.headline)
+                                        .foregroundStyle(.primary)
+                                    
+                                    if iCloudMonitor.syncProgress > 0 && iCloudMonitor.syncProgress < 1.0 {
+                                        Text("\(Int(iCloudMonitor.syncProgress * 100))% complete")
+                                            .font(.subheadline)
+                                            .foregroundStyle(.secondary)
+                                    } else {
+                                        Text("Syncing from iCloud")
+                                            .font(.subheadline)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                        } else {
+                            // Show normal empty state when not syncing
+                            ContentUnavailableView(
+                                "No Audio Files",
+                                systemImage: "music.note",
+                                description: Text("Import audio files to get started.\n\nPull down to sync from iCloud.")
+                            )
+                        }
+                        
                         Spacer()
                     }
                     .frame(maxWidth: 500, minHeight: geometry.size.height)
@@ -825,6 +846,7 @@ struct DashboardView: View {
             
             // Get filename for analysis
             let fileName = audioFile.fileName
+            let genre = audioFile.genre
 
             do {
                 // Run analysis on low-priority background thread to keep UI responsive
@@ -832,7 +854,7 @@ struct DashboardView: View {
                     // Construct fileURL inside background task to avoid blocking main thread
                     let audioDir = iCloudStorageService.shared.getAudioFilesDirectory()
                     let fileURL = audioDir.appendingPathComponent(fileName)
-                    return try await AudioKitService.analyzeAudioFileIsolated(url: fileURL)
+                    return try await AudioKitService.analyzeAudioFileIsolated(url: fileURL, genre: genre)
                 }.value
 
                 // Now update UI and SwiftData on main actor
@@ -945,6 +967,7 @@ struct DashboardView: View {
             
             // Get filename for analysis
             let fileName = audioFile.fileName
+            let genre = audioFile.genre
             
             do {
                 // Construct fileURL inside background task to avoid blocking main thread
@@ -952,7 +975,7 @@ struct DashboardView: View {
                 let fileURL = audioDir.appendingPathComponent(fileName)
                 
                 // This runs completely off main thread
-                let result = try await AudioKitService.analyzeAudioFileIsolated(url: fileURL)
+                let result = try await AudioKitService.analyzeAudioFileIsolated(url: fileURL, genre: genre)
 
                 // Now update UI and SwiftData on main actor
                 await MainActor.run {
@@ -1237,24 +1260,51 @@ struct DashboardView: View {
                 return
             }
             
+            // Check for files that need downloading
+            var filesToDownload: [URL] = []
+            for fileURL in audioFiles {
+                if let values = try? fileURL.resourceValues(forKeys: [URLResourceKey.ubiquitousItemDownloadingStatusKey]),
+                   values.ubiquitousItemDownloadingStatus == .notDownloaded {
+                    filesToDownload.append(fileURL)
+                }
+            }
+            
+            // Set syncing state if we have files to download
+            if !filesToDownload.isEmpty {
+                await MainActor.run {
+                    iCloudMonitor.isSyncing = true
+                    iCloudMonitor.syncProgress = 0.0
+                }
+            }
+            
             var imported = 0
             
-            for fileURL in audioFiles {
+            for (index, fileURL) in audioFiles.enumerated() {
                 // Check if already imported by comparing stored filename
                 let fileName = fileURL.lastPathComponent
                 
                 // Download if needed first (with shorter timeout on Mac Catalyst)
+                var needsDownload = false
                 do {
                     let values = try fileURL.resourceValues(forKeys: [URLResourceKey.ubiquitousItemDownloadingStatusKey])
                     if values.ubiquitousItemDownloadingStatus == .notDownloaded {
+                        needsDownload = true
                         try FileManager.default.startDownloadingUbiquitousItem(at: fileURL)
-#if targetEnvironment(macCatalyst)
-                        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s on Mac
-#else
-                        try? await Task.sleep(nanoseconds: 2_000_000_000) // 2s on iOS
-#endif
+                        
+                        // Wait for download with progress updates
+                        if let downloadIndex = filesToDownload.firstIndex(of: fileURL) {
+                            await waitForFileDownload(fileURL: fileURL, totalFiles: filesToDownload.count, currentIndex: downloadIndex)
+                        }
                     }
                 } catch {
+                }
+                
+                // Update progress
+                if !filesToDownload.isEmpty {
+                    let progress = Double(index + 1) / Double(audioFiles.count)
+                    await MainActor.run {
+                        iCloudMonitor.syncProgress = progress
+                    }
                 }
                 
                 // Get file metadata BEFORE checking duplicates (needed for better duplicate detection)
@@ -1383,6 +1433,12 @@ struct DashboardView: View {
                 }
             }
             
+            // Clear syncing state
+            await MainActor.run {
+                iCloudMonitor.isSyncing = false
+                iCloudMonitor.syncProgress = filesToDownload.isEmpty ? 0.0 : 1.0
+            }
+            
             if imported > 0 {
                 // Clear cached filtered files to force refresh with new imports
                 await MainActor.run {
@@ -1398,6 +1454,49 @@ struct DashboardView: View {
 #endif
             }
         } catch {
+            // Clear syncing state on error
+            await MainActor.run {
+                iCloudMonitor.isSyncing = false
+                iCloudMonitor.syncProgress = 0.0
+            }
+        }
+    }
+    
+    /// Wait for an iCloud file to finish downloading with progress updates
+    private func waitForFileDownload(fileURL: URL, totalFiles: Int, currentIndex: Int, maxAttempts: Int = 30) async {
+        #if targetEnvironment(macCatalyst)
+        let pollInterval: UInt64 = 200_000_000 // 0.2 seconds
+        let attempts = 15 // 3 seconds max
+        #else
+        let pollInterval: UInt64 = 1_000_000_000 // 1 second
+        let attempts = maxAttempts
+        #endif
+        
+        for attempt in 0..<attempts {
+            do {
+                let values = try fileURL.resourceValues(forKeys: [.ubiquitousItemDownloadingStatusKey])
+                let status = values.ubiquitousItemDownloadingStatus
+                
+                if status == .current {
+                    // File is downloaded, update progress
+                    let progress = Double(currentIndex + 1) / Double(totalFiles)
+                    await MainActor.run {
+                        iCloudMonitor.syncProgress = progress
+                    }
+                    return
+                }
+            } catch {
+            }
+            
+            // Update progress while waiting
+            let baseProgress = Double(currentIndex) / Double(totalFiles)
+            let attemptProgress = Double(attempt) / Double(attempts) / Double(totalFiles)
+            await MainActor.run {
+                iCloudMonitor.syncProgress = min(baseProgress + attemptProgress, 1.0)
+            }
+            
+            // Wait before checking again
+            try? await Task.sleep(nanoseconds: pollInterval)
         }
     }
     

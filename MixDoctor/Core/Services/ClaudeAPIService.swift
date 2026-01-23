@@ -29,7 +29,7 @@ class ClaudeAPIService {
     }
     
     /// Send audio analysis metrics to Claude and get AI insights
-    func analyzeAudioMetrics(_ metrics: AudioMetricsForClaude) async throws -> ClaudeAnalysisResponse {
+    func analyzeAudioMetrics(_ metrics: AudioMetricsForClaude, userGenre: String? = nil) async throws -> ClaudeAnalysisResponse {
         
         // DEBUG: Print actual values being sent to Claude
         print("🎵 FREQUENCY DATA SENT TO CLAUDE:")
@@ -41,10 +41,15 @@ class ClaudeAPIService {
         
         // Detect track type and genre
         let isMastered = detectMasteredTrack(metrics)
-        let genre = detectGenre(metrics)
+        // Prioritize genre from metrics (user-selected), then userGenre parameter, then auto-detect
+        let genre = metrics.genre ?? userGenre ?? detectGenre(metrics)
         let isUnmixed = metrics.isLikelyUnmixed
         
-        print("🏷️ DETECTED: isMastered=\(isMastered), genre=\(genre), isUnmixed=\(isUnmixed)")
+        if let selectedGenre = metrics.genre ?? userGenre {
+            print("🏷️ USER-SELECTED GENRE: \(selectedGenre)")
+        } else {
+            print("🏷️ AUTO-DETECTED: isMastered=\(isMastered), genre=\(genre), isUnmixed=\(isUnmixed)")
+        }
         
         // Check if track was flagged as unmixed by AudioKit detection
         if metrics.isLikelyUnmixed {
@@ -55,7 +60,7 @@ class ClaudeAPIService {
         // Get separated prompts for caching
         // CACHE VERSION: Update this number when scoring rules change to bust the cache
         let cacheVersion = "v8.0-STRICTER-PENALTIES-BONUSES"  // Stricter penalties + bonus points for exceptional masters
-        let systemPrompt = getSystemPrompt(isMastered: isMastered, isUnmixed: isUnmixed) + "\n\n[Scoring Rules Version: \(cacheVersion)]"
+        let systemPrompt = getSystemPrompt(isMastered: isMastered, isUnmixed: isUnmixed, genre: genre) + "\n\n[Scoring Rules Version: \(cacheVersion)]"
         let userMessage = getUserMessage(metrics: metrics, genre: genre, isMastered: isMastered)
         
         let requestBody: [String: Any] = [
@@ -258,6 +263,14 @@ class ClaudeAPIService {
         • High Mid (3-8kHz): \(highMid)% (ELECTRONIC GOOD: 10-20%, SYNTH CLARITY)
         • High (8-20kHz): \(high)% (ELECTRONIC GOOD: 8-18%, SPARKLE/FX)
         """
+        case "Hip-Hop/R&B":
+            return """
+        • Low End (20-200Hz): \(lowEnd)% (HIP-HOP/R&B GOOD: 30-50%, ACCEPTABLE: 25-55%, POOR: >60%)
+        • Low Mid (200-800Hz): \(lowMid)% (HIP-HOP/R&B GOOD: 20-35%, VOCALS/808s)
+        • Mid (800Hz-3kHz): \(mid)% (HIP-HOP/R&B GOOD: 20-35%, VOCAL CLARITY)
+        • High Mid (3-8kHz): \(highMid)% (HIP-HOP/R&B GOOD: 8-20%, VOCAL PRESENCE)
+        • High (8-20kHz): \(high)% (HIP-HOP/R&B ACCEPTABLE: 2-12%, MINIMAL BY DESIGN)
+        """
         case "Hip-Hop":
             return """
         • Low End (20-200Hz): \(lowEnd)% (HIP-HOP GOOD: 30-45%, ACCEPTABLE: 25-55%, POOR: >60%)
@@ -265,6 +278,14 @@ class ClaudeAPIService {
         • Mid (800Hz-3kHz): \(mid)% (HIP-HOP GOOD: 20-35%, VOCAL CLARITY)
         • High Mid (3-8kHz): \(highMid)% (HIP-HOP GOOD: 8-20%, VOCAL PRESENCE)
         • High (8-20kHz): \(high)% (HIP-HOP ACCEPTABLE: 2-12%, MINIMAL BY DESIGN)
+        """
+        case "Rock/Indie":
+            return """
+        • Low End (20-200Hz): \(lowEnd)% (ROCK/INDIE GOOD: 20-35%, ACCEPTABLE: 15-40%, POOR: >45%)
+        • Low Mid (200-800Hz): \(lowMid)% (ROCK/INDIE GOOD: 18-28%, GUITAR WARMTH)
+        • Mid (800Hz-3kHz): \(mid)% (ROCK/INDIE GOOD: 25-40%, VOCAL/GUITAR CLARITY)
+        • High Mid (3-8kHz): \(highMid)% (ROCK/INDIE GOOD: 15-25%, PRESENCE/ARTICULATION)
+        • High (8-20kHz): \(high)% (ROCK/INDIE GOOD: 8-18%, AIR/SPARKLE)
         """
         case "Alternative/Dark Pop":
             return """
@@ -276,11 +297,52 @@ class ClaudeAPIService {
         """
         case "Rock/Metal":
             return """
-        • Low End (20-200Hz): \(lowEnd)% (ROCK GOOD: 15-25%, ACCEPTABLE: 12-30%, POOR: >35%)
-        • Low Mid (200-800Hz): \(lowMid)% (ROCK GOOD: 20-30%, GUITAR BODY)
-        • Mid (800Hz-3kHz): \(mid)% (ROCK GOOD: 25-40%, VOCAL/GUITAR PRESENCE)
-        • High Mid (3-8kHz): \(highMid)% (ROCK GOOD: 15-28%, GUITAR BITE/CLARITY)
-        • High (8-20kHz): \(high)% (ROCK GOOD: 8-18%, CYMBALS/AIR)
+        • Low End (20-200Hz): \(lowEnd)% (ROCK/METAL GOOD: 15-25%, ACCEPTABLE: 12-30%, POOR: >35%)
+        • Low Mid (200-800Hz): \(lowMid)% (ROCK/METAL GOOD: 20-30%, GUITAR BODY)
+        • Mid (800Hz-3kHz): \(mid)% (ROCK/METAL GOOD: 25-40%, VOCAL/GUITAR PRESENCE)
+        • High Mid (3-8kHz): \(highMid)% (ROCK/METAL GOOD: 15-28%, GUITAR BITE/CLARITY)
+        • High (8-20kHz): \(high)% (ROCK/METAL GOOD: 8-18%, CYMBALS/AIR)
+        """
+        case "Metal":
+            return """
+        • Low End (20-200Hz): \(lowEnd)% (METAL GOOD: 40-60%, HEAVY FOUNDATION)
+        • Low Mid (200-800Hz): \(lowMid)% (METAL GOOD: 18-28%, GUITAR BODY)
+        • Mid (800Hz-3kHz): \(mid)% (METAL GOOD: 20-35%, VOCAL/GUITAR PRESENCE)
+        • High Mid (3-8kHz): \(highMid)% (METAL GOOD: 10-20%, GUITAR BITE)
+        • High (8-20kHz): \(high)% (METAL GOOD: 5-15%, CYMBAL PRESENCE)
+        """
+        case "Jazz":
+            return """
+        • Low End (20-200Hz): \(lowEnd)% (JAZZ GOOD: 15-30%, CONTROLLED FOUNDATION)
+        • Low Mid (200-800Hz): \(lowMid)% (JAZZ GOOD: 20-30%, INSTRUMENT WARMTH)
+        • Mid (800Hz-3kHz): \(mid)% (JAZZ GOOD: 25-40%, INSTRUMENT CLARITY)
+        • High Mid (3-8kHz): \(highMid)% (JAZZ GOOD: 12-22%, PRESENCE)
+        • High (8-20kHz): \(high)% (JAZZ GOOD: 8-18%, AIR/DETAIL)
+        """
+        case "Classical/Orchestral":
+            return """
+        • Low End (20-200Hz): \(lowEnd)% (CLASSICAL GOOD: 10-25%, NATURAL BALANCE)
+        • Low Mid (200-800Hz): \(lowMid)% (CLASSICAL GOOD: 20-30%, INSTRUMENT BODY)
+        • Mid (800Hz-3kHz): \(mid)% (CLASSICAL GOOD: 30-45%, INSTRUMENT CLARITY)
+        • High Mid (3-8kHz): \(highMid)% (CLASSICAL GOOD: 8-18%, NATURAL PRESENCE)
+        • High (8-20kHz): \(high)% (CLASSICAL GOOD: 5-15%, AIR/DETAIL)
+        """
+        case "Acoustic/Singer-Songwriter":
+            return """
+        • Low End (20-200Hz): \(lowEnd)% (ACOUSTIC GOOD: 12-25%, NATURAL FOUNDATION)
+        • Low Mid (200-800Hz): \(lowMid)% (ACOUSTIC GOOD: 22-32%, WARMTH/BODY)
+        • Mid (800Hz-3kHz): \(mid)% (ACOUSTIC GOOD: 25-40%, VOCAL CLARITY)
+        • High Mid (3-8kHz): \(highMid)% (ACOUSTIC GOOD: 10-20%, PRESENCE)
+        • High (8-20kHz): \(high)% (ACOUSTIC GOOD: 6-15%, NATURAL AIR)
+        """
+        case "Live":
+            return """
+        • Low End (20-200Hz): \(lowEnd)% (LIVE GOOD: 15-30%, NATURAL BALANCE, ROOM DEPENDENT)
+        • Low Mid (200-800Hz): \(lowMid)% (LIVE GOOD: 18-30%, ROOM ACOUSTICS)
+        • Mid (800Hz-3kHz): \(mid)% (LIVE GOOD: 25-40%, AUDIENCE/VOCAL PRESENCE)
+        • High Mid (3-8kHz): \(highMid)% (LIVE GOOD: 12-25%, CROWD ENERGY/PRESENCE)
+        • High (8-20kHz): \(high)% (LIVE GOOD: 5-15%, NATURAL AIR, ROOM DEPENDENT)
+        ⚠️ LIVE RECORDING: Expect more dynamic range, room acoustics, and natural frequency variations
         """
         case "Pop":
             return """
@@ -301,7 +363,10 @@ class ClaudeAPIService {
         }
     }
     
-    private func getSystemPrompt(isMastered: Bool, isUnmixed: Bool) -> String {
+    private func getSystemPrompt(isMastered: Bool, isUnmixed: Bool, genre: String) -> String {
+        // LIVE RECORDINGS - special handling
+        let isLiveRecording = genre.lowercased() == "live"
+        
         // UNMIXED TRACKS - completely different scoring approach
         if isUnmixed {
             return """
@@ -450,7 +515,27 @@ class ClaudeAPIService {
             
             🎯 SCORING RULES (0-100 scale) - GENRE-AWARE ANALYSIS:
             
-            ⚠️ SCORING PHILOSOPHY FOR MASTERED TRACKS:
+            ⚠️ CRITICAL: GENRE-SPECIFIC ANALYSIS REQUIRED
+            The user has selected the genre: **\(genre)**
+            You MUST analyze this track according to \(genre) genre standards and expectations.
+            Genre-specific frequency characteristics are INTENTIONAL and CORRECT - do NOT penalize for genre-appropriate frequency balance.
+            Only penalize for technical defects that would be problematic regardless of genre.
+            Use genre-specific frequency guidelines for \(genre) when evaluating frequency balance.
+            
+            \(isLiveRecording ? """
+            ⚠️ LIVE RECORDING SCORING PHILOSOPHY:
+            • Live recordings should be scored using LIVE MIXING standards, not studio mastering standards
+            • Higher dynamic range (10-18dB) is NORMAL and EXPECTED for live recordings
+            • Room acoustics, audience noise, and natural reverb are part of the live experience
+            • Frequency balance will vary based on venue acoustics - this is NORMAL
+            • Less compression is typical - live mixes preserve performance dynamics
+            • Scoring should reflect the quality of LIVE MIXING, not studio production polish
+            • Excellent live mixes score 80-90 points (preserving performance energy while maintaining clarity)
+            • Good live mixes score 70-79 points (decent balance, some room issues acceptable)
+            • Acceptable live mixes score 60-69 points (workable, but needs improvement)
+            
+            """ : "")
+            ⚠️ SCORING PHILOSOPHY FOR \(isLiveRecording ? "LIVE RECORDING MIXES" : "MASTERED TRACKS"):
             • Commercial mastered tracks (Korn, Green Day, etc.) should score 88-95 points
             • Start at 100 points and subtract ONLY for actual technical defects
             • Genre characteristics (bass-heavy Rock, compressed EDM) are CORRECT, not problems
@@ -477,6 +562,78 @@ class ClaudeAPIService {
             
             GENRE-SPECIFIC FREQUENCY EXPECTATIONS (DO NOT PENALIZE):
             
+            ⚠️ CURRENT TRACK GENRE: **\(genre)**
+            Apply the following genre-specific expectations for \(genre). These characteristics are INTENTIONAL and CORRECT for this genre:
+            
+            POP:
+            • Bass 20-35%: Balanced foundation (no penalty)
+            • Low-Mid 18-28%: Warmth and body (no penalty)
+            • Mid 28-45%: Vocal clarity CRITICAL (no penalty)
+            • High-Mid 15-25%: Vocal presence (no penalty)
+            • High 8-15%: Bright and airy (no penalty)
+            
+            ROCK/INDIE:
+            • Bass 20-35%: Balanced foundation (no penalty)
+            • Low-Mid 18-28%: Guitar warmth (no penalty)
+            • Mid 25-40%: Vocal and instrument clarity (no penalty)
+            • High-Mid 15-25%: Presence and articulation (no penalty)
+            • High 8-18%: Air and sparkle (no penalty)
+            
+            HIP-HOP/R&B:
+            • Bass 30-50%: NORMAL for 808s and sub-bass (no penalty)
+            • Low-Mid 20-35%: Vocal warmth and 808 body (no penalty)
+            • Mid 20-35%: Vocal clarity (no penalty)
+            • High-Mid 8-20%: Vocal presence (no penalty)
+            • High 2-12%: Intentionally warm/dark (no penalty)
+            
+            EDM/ELECTRONIC:
+            • Bass 35-60%: NORMAL for bass-heavy genres (no penalty)
+            • Low-Mid 15-25%: Synth body (no penalty)
+            • Mid 15-30%: Vocal presence (no penalty)
+            • High-Mid 10-20%: Synth clarity (no penalty)
+            • High 8-18%: Synthetic sparkle and FX (no penalty)
+            
+            JAZZ:
+            • Bass 15-30%: Controlled foundation (no penalty)
+            • Low-Mid 20-30%: Instrument warmth (no penalty)
+            • Mid 25-40%: Instrument clarity (no penalty)
+            • High-Mid 12-22%: Presence (no penalty)
+            • High 8-18%: Air and detail (no penalty)
+            
+            CLASSICAL/ORCHESTRAL:
+            • Bass 10-25%: Natural orchestral balance (no penalty)
+            • Low-Mid 20-30%: Instrument body (no penalty)
+            • Mid 30-45%: Instrument clarity (no penalty)
+            • High-Mid 8-18%: Natural presence (no penalty)
+            • High 5-15%: Air and detail (no penalty)
+            
+            METAL:
+            • Bass 40-60%: Heavy foundation (no penalty)
+            • Low-Mid 18-28%: Guitar body (no penalty)
+            • Mid 20-35%: Vocal/guitar presence (no penalty)
+            • High-Mid 10-20%: Guitar bite (no penalty)
+            • High 5-15%: Cymbal presence (no penalty)
+            
+            ACOUSTIC/SINGER-SONGWRITER:
+            • Bass 12-25%: Natural foundation (no penalty)
+            • Low-Mid 22-32%: Warmth and body (no penalty)
+            • Mid 25-40%: Vocal clarity (no penalty)
+            • High-Mid 10-20%: Presence (no penalty)
+            • High 6-15%: Natural air (no penalty)
+            
+            LIVE:
+            • Bass 15-30%: Natural balance, room dependent (no penalty)
+            • Low-Mid 18-30%: Room acoustics (no penalty)
+            • Mid 25-40%: Audience/vocal presence (no penalty)
+            • High-Mid 12-25%: Crowd energy/presence (no penalty)
+            • High 5-15%: Natural air, room dependent (no penalty)
+            ⚠️ LIVE RECORDING CHARACTERISTICS (ALL NORMAL):
+            • Higher dynamic range (10-18dB): EXPECTED and CORRECT (no penalty)
+            • Room reverb and ambience: INTENTIONAL part of live sound (no penalty)
+            • Audience noise and crowd energy: NATURAL part of live recording (no penalty)
+            • Frequency variations based on venue: NORMAL (no penalty)
+            • Less compression than studio: PRESERVES PERFORMANCE ENERGY (no penalty)
+            
             ROCK/METAL (Korn, Green Day, etc.):
             • Bass 45-65%: NORMAL for heavy guitars and bass (no penalty)
             • Low-Mid 15-25%: Guitar body (no penalty)
@@ -484,17 +641,11 @@ class ClaudeAPIService {
             • High-Mid 2-10%: Cymbal presence (no penalty)
             • High 0-5%: Intentionally dark/warm mastering (no penalty)
             
-            ELECTRONIC/EDM:
-            • Bass 50-70%: NORMAL for bass-heavy genres (no penalty)
-            • High 5-20%: Synthetic sparkle (no penalty)
-            
-            HIP-HOP:
-            • Bass 40-60%: NORMAL for 808s and sub-bass (no penalty)
-            • High 0-8%: Intentionally warm/dark (no penalty)
-            
-            POP:
-            • Bass 20-40%: Balanced (no penalty)
-            • High 5-15%: Bright and airy (no penalty)
+            OTHER:
+            • Use general professional standards
+            • Bass 15-30%: Balanced (no penalty)
+            • Mid 25-40%: Clarity (no penalty)
+            • High 8-18%: Air and sparkle (no penalty)
             
             TECHNICAL PENALTIES (Subtract from 100):
             
@@ -617,9 +768,28 @@ class ClaudeAPIService {
             - Keep recommendations actionable but simple without technical numbers
             - The scoring details below are for YOUR calculation only - do NOT expose them to the user
             
-            You are analyzing a PRE-MASTERED MIX using professional mixing standards. This is NOT a final master.
+            \(isLiveRecording ? """
+            ⚠️ LIVE RECORDING DETECTED:
+            This is a LIVE RECORDING MIX, not a studio production.
+            Live recordings have different characteristics and expectations:
+            • Higher dynamic range is NORMAL and EXPECTED (live performances are dynamic)
+            • Room acoustics and audience noise are part of the live experience
+            • Frequency balance varies based on venue acoustics and mic placement
+            • Less compression and processing compared to studio mixes
+            • Natural reverb and room ambience are INTENTIONAL
+            • Scoring should reflect LIVE MIXING standards, not studio mixing standards
             
-            🎯 PRE-MASTER MIX ANALYSIS - Use MIXING STANDARDS:
+            """ : "")
+            You are analyzing a \(isLiveRecording ? "LIVE RECORDING MIX" : "PRE-MASTERED MIX") using professional \(isLiveRecording ? "live mixing" : "mixing") standards. This is NOT a final master.
+            
+            ⚠️ CRITICAL: GENRE-SPECIFIC ANALYSIS REQUIRED
+            The user has selected the genre: **\(genre)**
+            You MUST analyze this mix according to \(genre) genre standards and expectations.
+            Genre-specific frequency characteristics are INTENTIONAL and CORRECT - do NOT penalize for genre-appropriate frequency balance.
+            Only penalize for technical defects that would be problematic regardless of genre.
+            Use genre-specific frequency guidelines for \(genre) when evaluating frequency balance.
+            
+            🎯 \(isLiveRecording ? "LIVE RECORDING" : "PRE-MASTER") MIX ANALYSIS - Use \(isLiveRecording ? "LIVE MIXING" : "MIXING") STANDARDS:
             
             🎚️ PRE-MASTER LEVELS & DYNAMICS:
             • Peak Level (MIX TARGET: -3 to -6dB, GOOD: -3 to -8dB)
@@ -690,10 +860,19 @@ class ClaudeAPIService {
               - Dynamic Range <6dB: -10 points
             • BONUSES for mix excellence:
               - Peak level -3 to -6dB: +5 points (perfect headroom)
+              \(isLiveRecording ? """
+              - Good dynamic range for live (10-18dB): +5 points (PRESERVES LIVE ENERGY)
+              - Excellent dynamic range for live (>15dB): +7 points (EXCEPTIONAL LIVE MIXING)
+              """ : """
               - Good dynamic range (>15dB): +5 points
+              """)
               - Balanced frequency spectrum: +5 points
               - Excellent phase coherence (>75%): +5 points
               - Excellent stereo width (25-45%): +5 points
+              \(isLiveRecording ? """
+              - Natural room ambience preserved: +3 points (GOOD LIVE MIXING)
+              - Clear audience presence without overwhelming mix: +2 points
+              """ : "")
             
             IMPORTANT SCORING GUIDANCE:
             • Minor issues (phase 40-60%, moderate bass, slight imbalances) should NOT heavily impact scores
@@ -715,10 +894,20 @@ class ClaudeAPIService {
     }
     
     private func getUserMessage(metrics: AudioMetricsForClaude, genre: String, isMastered: Bool) -> String {
+        // Use genre from metrics if available, otherwise use passed genre
+        let finalGenre = metrics.genre ?? genre
+        let genreContext = finalGenre.isEmpty ? "" : """
+            
+            🎵 GENRE-SPECIFIC ANALYSIS:
+            This track is classified as: **\(finalGenre)**
+            Please analyze this track according to \(finalGenre) genre standards and expectations.
+            Use genre-specific frequency balance guidelines and scoring criteria for \(finalGenre).
+            
+            """
+        
         if isMastered {
             return """
-            Analyze this MASTERED TRACK.
-            Genre: \(genre)
+            Analyze this MASTERED TRACK.\(genreContext)
             
             🎚️ STEREO WIDTH: \(String(format: "%.1f", metrics.stereoWidth))%
             🎭 PHASE CORRELATION: \(String(format: "%.1f", metrics.phaseCoherence * 100))%
@@ -729,11 +918,7 @@ class ClaudeAPIService {
             📉 CREST FACTOR: \(String(format: "%.1f", metrics.truePeakLevel - metrics.rmsLevel)) dB
             
             🎵 FREQUENCY BALANCE:
-            • Low End (20-200Hz): \(String(format: "%.1f", metrics.lowEnd))%
-            • Low Mid (200-800Hz): \(String(format: "%.1f", metrics.lowMid))%
-            • Mid (800Hz-3kHz): \(String(format: "%.1f", metrics.mid))%
-            • High Mid (3-8kHz): \(String(format: "%.1f", metrics.highMid))%
-            • High (8-20kHz): \(String(format: "%.1f", metrics.high))%
+            \(getGenreFrequencyGuidelines(genre: finalGenre, metrics: metrics))
             
             🚨 DETECTED ISSUES:
             • Clipping: \(metrics.hasClipping ? "❌ YES" : "✅ No")
@@ -744,8 +929,7 @@ class ClaudeAPIService {
             """
         } else {
             return """
-            Analyze this PRE-MASTERED MIX.
-            Genre: \(genre)
+            Analyze this PRE-MASTERED MIX.\(genreContext)
             
             🎚️ PRE-MASTER LEVELS & DYNAMICS:
             • Peak Level: \(String(format: "%.1f", metrics.peakLevel)) dB
@@ -760,11 +944,7 @@ class ClaudeAPIService {
             • Mono Compatibility: \(String(format: "%.1f", metrics.monoCompatibility * 100))%
             
             🎵 FREQUENCY BALANCE:
-            • Low End (20-200Hz): \(String(format: "%.1f", metrics.lowEnd))%
-            • Low Mid (200-800Hz): \(String(format: "%.1f", metrics.lowMid))%
-            • Mid (800Hz-3kHz): \(String(format: "%.1f", metrics.mid))%
-            • High Mid (3-8kHz): \(String(format: "%.1f", metrics.highMid))%
-            • High (8-20kHz): \(String(format: "%.1f", metrics.high))%
+            \(getGenreFrequencyGuidelines(genre: finalGenre, metrics: metrics))
             
             🚨 PRE-MASTER MIX ISSUES:
             • Clipping: \(metrics.hasClipping ? "❌ YES" : "✅ No")
@@ -1271,6 +1451,9 @@ class ClaudeAPIService {
 // MARK: - Data Models
 
 struct AudioMetricsForClaude {
+    // User-selected genre for genre-specific analysis
+    let genre: String?
+    
     // Basic Level Metrics
     let peakLevel: Double
     let rmsLevel: Double

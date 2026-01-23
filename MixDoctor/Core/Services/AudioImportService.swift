@@ -71,7 +71,7 @@ final class AudioImportService {
     
     // MARK: - Public API
     
-    func importAudioFile(from url: URL, modelContext: ModelContext? = nil) async throws -> AudioFile {
+    func importAudioFile(from url: URL, modelContext: ModelContext? = nil, genre: String? = nil) async throws -> AudioFile {
         
         // Try to start accessing security-scoped resource
         // Note: This may return false if already accessed by caller, which is OK
@@ -223,7 +223,8 @@ final class AudioImportService {
                 sampleRate: metadata.sampleRate,
                 bitDepth: metadata.bitDepth,
                 numberOfChannels: metadata.numberOfChannels,
-                fileSize: metadata.fileSize
+                fileSize: metadata.fileSize,
+                genre: genre
             )
             
             return audioFile
@@ -236,7 +237,7 @@ final class AudioImportService {
         }
     }
     
-    func importMultipleFiles(_ urls: [URL], modelContext: ModelContext? = nil) async throws -> [AudioFile] {
+    func importMultipleFiles(_ urls: [URL], modelContext: ModelContext? = nil, genre: String? = nil) async throws -> [AudioFile] {
         var importedFiles: [AudioFile] = []
         var duplicateErrors: [Error] = []
         var iCloudError: Error?
@@ -244,7 +245,7 @@ final class AudioImportService {
         
         for url in urls {
             do {
-                let audioFile = try await importAudioFile(from: url, modelContext: modelContext)
+                let audioFile = try await importAudioFile(from: url, modelContext: modelContext, genre: genre)
                 importedFiles.append(audioFile)
             } catch let error as AudioImportError where error == .duplicateFile {
                 // Track duplicates separately - don't fail the whole operation

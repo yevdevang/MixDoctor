@@ -16,6 +16,7 @@ final class ImportViewModel {
     var showError = false
     var infoMessage: String?
     var showInfo = false
+    var selectedGenre: String?
 
     init(modelContext: ModelContext, importService: AudioImportService = AudioImportService()) {
         self.modelContext = modelContext
@@ -33,7 +34,7 @@ final class ImportViewModel {
         }
     }
 
-    func importFiles(_ urls: [URL]) async {
+    func importFiles(_ urls: [URL], genre: String? = nil) async {
         guard !urls.isEmpty else { return }
 
         for (index, url) in urls.enumerated() {
@@ -48,8 +49,8 @@ final class ImportViewModel {
         defer { isImporting = false }
 
         do {
-            // Pass modelContext to importService so it can check for duplicates BEFORE copying to iCloud
-            let files = try await importService.importMultipleFiles(urls, modelContext: modelContext)
+            // Pass modelContext and genre to importService so it can check for duplicates BEFORE copying to iCloud
+            let files = try await importService.importMultipleFiles(urls, modelContext: modelContext, genre: genre ?? selectedGenre)
             
             
             // Check for duplicates before inserting
