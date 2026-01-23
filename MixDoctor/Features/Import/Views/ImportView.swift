@@ -73,6 +73,7 @@ struct ImportView: View {
                 if let viewModel = viewModel,
                    let file = fileToDelete,
                    let index = viewModel.importedFiles.firstIndex(where: { $0.id == file.id }) {
+                    // Delete the file (this handles cleanup and notification)
                     deleteFiles(at: IndexSet(integer: index), viewModel: viewModel)
                 }
                 fileToDelete = nil
@@ -169,14 +170,10 @@ struct ImportView: View {
             }.value
         }
         .onReceive(NotificationCenter.default.publisher(for: .audioFileDeleted)) { _ in
-            // Reload files when a file is deleted from Dashboard (non-blocking)
-            Task.detached(priority: .utility) {
-                await MainActor.run {
-                    viewModel.loadImports()
-                }
-            }
-            // Also check for orphans
-            Task {
+            // Don't reload here - removeImportedFile() already updates the array
+            // This notification is for OTHER views (ContentView, PlayerView)
+            // Only check for orphans if file was deleted from another view (Dashboard)
+            Task(priority: .utility) {
                 await viewModel.scanForOrphanedFiles()
             }
         }
@@ -620,9 +617,27 @@ struct ImportView: View {
     }
 
     private func deleteFiles(at offsets: IndexSet, viewModel: ImportViewModel) {
+        // Check if the currently selected file is being deleted BEFORE deletion
+        let filesToDelete = offsets.map { viewModel.importedFiles[$0] }
+        let isSelectedFileBeingDeleted = filesToDelete.contains { $0.id == selectedAudioFile?.id }
+        
+        // Delete files (removeImportedFile does everything in background with delay)
         for index in offsets {
             let file = viewModel.importedFiles[index]
             viewModel.removeImportedFile(file)
+        }
+        
+        // Clear selection immediately if needed (array will update shortly)
+        if isSelectedFileBeingDeleted {
+            selectedAudioFile = nil
+            
+            // After a short delay, select first available file
+            Task {
+                try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+                if !viewModel.importedFiles.isEmpty {
+                    selectedAudioFile = viewModel.importedFiles.first
+                }
+            }
         }
     }
 

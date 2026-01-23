@@ -171,31 +171,52 @@ final class ImportViewModel {
     }
 
     func removeImportedFile(_ file: AudioFile) {
-        
-        // Delete the actual audio file from storage (iCloud or local)
-        // Using iCloudStorageService ensures proper eviction and cross-device sync
+        // Capture needed values immediately to avoid accessing file on background thread
         let fileURL = file.fileURL
-        do {
-            try iCloudStorageService.shared.deleteAudioFile(at: fileURL)
-        } catch {
+        let fileName = file.fileName
+        let fileID = file.id
+        
+        // Do ALL operations in background to prevent any UI blocking
+        Task.detached(priority: .userInitiated) {
+            // Small delay to let current UI operation finish
+            try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
+            
+            // Update UI array on main thread
+            await MainActor.run {
+                if let index = self.importedFiles.firstIndex(where: { $0.id == fileID }) {
+                    self.importedFiles.remove(at: index)
+                }
+            }
+            
+            // Delete the actual audio file from storage (iCloud or local)
+            do {
+                try await iCloudStorageService.shared.deleteAudioFile(at: fileURL)
+            } catch {
+            }
+            
+            // Delete the analysis result JSON from iCloud Drive
+            await AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: fileName)
+            
+            // Delete from SwiftData on main thread
+            await MainActor.run {
+                // Re-fetch the file to ensure we have the right context
+                let descriptor = FetchDescriptor<AudioFile>(
+                    predicate: #Predicate<AudioFile> { $0.id == fileID }
+                )
+                
+                if let fileToDelete = try? self.modelContext.fetch(descriptor).first {
+                    self.modelContext.delete(fileToDelete)
+                    
+                    do {
+                        try self.modelContext.save()
+                    } catch {
+                    }
+                }
+                
+                // CRITICAL: Notify other views AFTER deletion is complete
+                NotificationCenter.default.post(name: .audioFileDeleted, object: nil)
+            }
         }
-        
-        // Delete the analysis result JSON from iCloud Drive
-        AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: file.fileName)
-        
-        // Delete the SwiftData record (CloudKit will sync this deletion)
-        modelContext.delete(file)
-        
-        do {
-            try modelContext.save()
-        } catch {
-        }
-        
-        // Reload imports to ensure UI is in sync with database
-        loadImports()
-        
-        // Notify other views that files were deleted
-        NotificationCenter.default.post(name: .audioFileDeleted, object: nil)
     }
     
     // MARK: - Orphaned File Recovery

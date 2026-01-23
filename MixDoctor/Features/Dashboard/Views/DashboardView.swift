@@ -1586,7 +1586,6 @@ struct DashboardView: View {
     }
     
     private func deleteFiles(at offsets: IndexSet) {
-        
         for index in offsets {
             let file = filteredFiles[index]
             
@@ -1623,7 +1622,7 @@ struct DashboardView: View {
         updateStatistics()
 #endif
         
-        // Notify other views that files were deleted
+        // CRITICAL: Notify other views AFTER deletion is complete
         NotificationCenter.default.post(name: .audioFileDeleted, object: nil)
     }
     
@@ -1668,7 +1667,7 @@ struct DashboardView: View {
         updateStatistics()
 #endif
         
-        // Notify other views that files were deleted
+        // CRITICAL: Notify other views AFTER deletion is complete
         NotificationCenter.default.post(name: .audioFileDeleted, object: nil)
     }
     

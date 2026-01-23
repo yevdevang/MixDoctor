@@ -96,6 +96,11 @@ struct ContentView: View {
         .tint(.primaryAccent)
         .preferredColorScheme(colorScheme)
         .onAppear(perform: setupThemeObservers)
+        .onReceive(NotificationCenter.default.publisher(for: .audioFileDeleted)) { _ in
+            // Just clear selection - @Query will auto-update when SwiftData changes
+            // Don't access allAudioFiles here - it triggers blocking SwiftData fetch!
+            selectedAudioFile = nil
+        }
     }
     
     private var navigationTitle: String {
@@ -193,6 +198,11 @@ struct ContentView: View {
                     }
                 }
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .audioFileDeleted)) { _ in
+            // Just clear selection - @Query will auto-update when SwiftData changes
+            // Don't access allAudioFiles here - it triggers blocking SwiftData fetch!
+            selectedAudioFile = nil
         }
     }
     
