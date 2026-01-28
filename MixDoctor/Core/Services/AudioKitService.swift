@@ -33,14 +33,14 @@ public class AudioKitService: ObservableObject {
     
     /// Static analysis function that runs completely isolated from main actor
     /// This is crucial for MacCatalyst to avoid UI blocking
-    public static func analyzeAudioFileIsolated(url: URL, genre: String? = nil) async throws -> AnalysisResult {
+    public static func analyzeAudioFileIsolated(url: URL, genre: String? = nil, mixStage: String? = nil) async throws -> AnalysisResult {
         // This runs completely isolated - no access to shared state
-        return try await AudioKitService.shared.performAudioKitAnalysis(url: url, genre: genre)
+        return try await AudioKitService.shared.performAudioKitAnalysis(url: url, genre: genre, mixStage: mixStage)
     }
     
     /// Analyze audio file and return comprehensive analysis for display
     /// Must be nonisolated to avoid blocking main thread on MacCatalyst
-    nonisolated public func getDetailedAnalysis(for url: URL, genre: String? = nil) async throws -> AnalysisResult {
+    nonisolated public func getDetailedAnalysis(for url: URL, genre: String? = nil, mixStage: String? = nil) async throws -> AnalysisResult {
         
         // Check if analysis already exists in iCloud Drive to avoid re-analyzing
         let fileName = url.lastPathComponent
@@ -61,7 +61,7 @@ public class AudioKitService: ObservableObject {
         // await MainActor.run { isAnalyzing = true }
         // defer { Task { @MainActor in isAnalyzing = false } }
         
-        let result = try await performAudioKitAnalysis(url: url, genre: genre)
+        let result = try await performAudioKitAnalysis(url: url, genre: genre, mixStage: mixStage)
         
         // Save to iCloud Drive for future use
         do {
@@ -73,7 +73,17 @@ public class AudioKitService: ObservableObject {
     }
     
     
-    nonisolated private func performAudioKitAnalysis(url: URL, genre: String? = nil) async throws -> AnalysisResult {
+    nonisolated private func performAudioKitAnalysis(url: URL, genre: String? = nil, mixStage: String? = nil) async throws -> AnalysisResult {
+        // Reset progress tracker at the start of each analysis
+        await MainActor.run {
+            AnalysisProgressTracker.shared.reset()
+        }
+        
+        // Update progress: Starting
+        await MainActor.run {
+            AnalysisProgressTracker.shared.updateProgress(step: "Loading audio file...", progress: 0.1)
+        }
+        
         // Perform all file I/O on a background thread to avoid blocking
         let (buffer, duration, actualSampleRate, fileName) = try await Task.detached(priority: .userInitiated) {
             // Load audio file for AudioKit analysis
@@ -98,9 +108,14 @@ public class AudioKitService: ObservableObject {
             return (buffer, duration, actualSampleRate, fileName)
         }.value
 
+        // Update progress: Analyzing
+        await MainActor.run {
+            AnalysisProgressTracker.shared.updateProgress(step: "Analyzing frequency spectrum...", progress: 0.3)
+        }
+        
         // Perform AudioKit-based analysis on background thread (CPU-intensive DSP)
         let analysisResult = await Task.detached(priority: .userInitiated) {
-            await self.performAudioKitBufferAnalysis(buffer, duration: duration, sampleRate: actualSampleRate, fileName: fileName, genre: genre)
+            await self.performAudioKitBufferAnalysis(buffer, duration: duration, sampleRate: actualSampleRate, fileName: fileName, genre: genre, mixStage: mixStage)
         }.value
         
         // Create AnalysisResult with AudioKit data
@@ -166,7 +181,12 @@ public class AudioKitService: ObservableObject {
 
 
 
-        
+
+
+        // Update progress: Preparing for AI
+        await MainActor.run {
+            AnalysisProgressTracker.shared.updateProgress(step: "Calculating professional metrics...", progress: 0.6)
+        }
 
         // Add Claude AI analysis
         do {
@@ -174,6 +194,11 @@ public class AudioKitService: ObservableObject {
             // Get subscription status
             let subscriptionService = await SubscriptionService.shared
             let isProUser = await subscriptionService.isProUser
+            
+            // Update progress: Sending to Claude
+            await MainActor.run {
+                AnalysisProgressTracker.shared.updateProgress(step: "Generating AI insights...", progress: 0.7)
+            }
             
             // Prepare comprehensive professional metrics for Claude
             let metrics = AudioMetricsForClaude(
@@ -247,15 +272,29 @@ public class AudioKitService: ObservableObject {
             )
             
             // Claude API call - ensure it's off main thread
-            // Pass user-selected genre if available (passed through function chain)
+            // Pass user-selected genre and mixStage if available (passed through function chain)
             let claudeResponse = try await Task.detached(priority: .userInitiated) {
-                try await ClaudeAPIService.shared.analyzeAudioMetrics(metrics, userGenre: genre)
+                try await ClaudeAPIService.shared.analyzeAudioMetrics(metrics, userGenre: genre, mixStage: mixStage)
             }.value
             
-            // UNMIXED DETECTION DISABLED - always show score
-            // Simple arrangements shouldn't be penalized
+            // Update progress: Complete
+            await MainActor.run {
+                AnalysisProgressTracker.shared.updateProgress(step: "Finalizing results...", progress: 0.95)
+            }
             
-            result.isProfessionallyMixed = true
+            // Use unmixed detection result OR low score to set mixing status
+            // If detected as unmixed OR score < 75 (amateur/unmixed quality), mark it as such for UI banner
+            let isUnmixedByDetection = result.unmixedDetection!.isLikelyUnmixed
+            let isUnmixedByScore = claudeResponse.score < 75  // Scores below 75 indicate amateur/unmixed quality
+            
+            // Additional check: Severe technical issues (even with ok score) = unmixed
+            let hasSevereTechnicalIssues = (
+                result.phaseCoherence < 0.45 ||  // Poor phase coherence
+                (result.stereoWidthScore > 95 && result.monoCompatibility < 0.75) ||  // Excessive width + poor mono
+                result.dynamicRange > 20.0  // Uncompressed
+            )
+            
+            result.isProfessionallyMixed = !(isUnmixedByDetection || isUnmixedByScore || hasSevereTechnicalIssues)
             result.aiSummary = claudeResponse.summary
             result.aiRecommendations = claudeResponse.recommendations
             result.isReadyForMastering = claudeResponse.isReadyForMastering
@@ -273,8 +312,13 @@ public class AudioKitService: ObservableObject {
                 print("❌ Analysis Error: \(error.localizedDescription)")
             }
             
-            // API failed - show error message, still mark as professional
-            result.isProfessionallyMixed = true
+            // API failed - use unmixed detection result OR check for severe technical issues
+            let hasSevereTechnicalIssues = (
+                result.phaseCoherence < 0.45 ||  // Poor phase coherence
+                (result.stereoWidthScore > 95 && result.monoCompatibility < 0.75) ||  // Excessive width + poor mono
+                result.dynamicRange > 20.0  // Uncompressed
+            )
+            result.isProfessionallyMixed = !(result.unmixedDetection!.isLikelyUnmixed || hasSevereTechnicalIssues)
             
             // Provide more specific error messages based on error type
             if let claudeError = error as? ClaudeAPIError {
@@ -305,12 +349,17 @@ public class AudioKitService: ObservableObject {
             
         }
         
+        // Update progress: Done
+        await MainActor.run {
+            AnalysisProgressTracker.shared.updateProgress(step: "Complete!", progress: 1.0)
+        }
+        
         return result
     }
     
     // MARK: - AudioKit Analysis Implementation
     
-    nonisolated private func performAudioKitBufferAnalysis(_ buffer: AVAudioPCMBuffer, duration: TimeInterval, sampleRate: Double, fileName: String, genre: String? = nil) async -> AudioKitAnalysisResult {
+    nonisolated private func performAudioKitBufferAnalysis(_ buffer: AVAudioPCMBuffer, duration: TimeInterval, sampleRate: Double, fileName: String, genre: String? = nil, mixStage: String? = nil) async -> AudioKitAnalysisResult {
         // AudioKit-based buffer analysis
         
         guard let leftData = buffer.floatChannelData?[0] else {
@@ -321,14 +370,15 @@ public class AudioKitService: ObservableObject {
         let channelCount = Int(buffer.format.channelCount)
         let rightData = channelCount > 1 ? buffer.floatChannelData?[1] : nil
         
-        // AudioKit frequency analysis
-        let fftAnalysis = performAudioKitFFT(leftData, frameCount: frameCount, sampleRate: sampleRate)
+        // AudioKit frequency analysis (now genre-aware)
+        let fftAnalysis = performAudioKitFFT(leftData, frameCount: frameCount, sampleRate: sampleRate, genre: genre)
         
         // AudioKit amplitude analysis
         let amplitudeAnalysis = performAudioKitAmplitudeAnalysis(leftData, frameCount: frameCount)
         
         // AudioKit stereo analysis (if stereo)
-        let stereoAnalysis = performAudioKitStereoAnalysis(leftData, rightData, frameCount: frameCount)
+        // FIXED: Use analyzeStereoCorrelation instead of non-existent performAudioKitStereoAnalysis
+        let stereoAnalysis = analyzeStereoCorrelation(leftData, rightData ?? leftData, frameCount: frameCount)
         
         // AudioKit dynamic range analysis
         let dynamicAnalysis = performAudioKitDynamicAnalysis(leftData, frameCount: frameCount)
@@ -344,8 +394,10 @@ public class AudioKitService: ObservableObject {
         
         // MARK: - Unmixed Detection Analysis (RE-ENABLED with CONSERVATIVE thresholds)
         // Using professional audio engineering standards to detect unmixed tracks
+        // NOW GENRE-AWARE: Different genres have different dynamic range expectations
         let unmixedDetection = detectUnmixedAudio(
             fileName: fileName,
+            genre: genre,  // Pass user-selected genre for genre-aware detection
             dynamicRange: dynamicRangeAnalysis.lufsRange,
             loudness: amplitudeAnalysis.loudness,
             peakLevel: amplitudeAnalysis.peak,
@@ -353,15 +405,169 @@ public class AudioKitService: ObservableObject {
             peakToAverage: peakToAverageRatio,
             spectralBalance: spectralBalance,
             monoCompatibility: stereoAnalysis.monoCompatibility,
-            phaseCoherence: stereoAnalysis.coherence,
-            stereoWidth: stereoAnalysis.width,
-            stereoBalance: stereoAnalysis.balance
+            phaseCoherence: stereoAnalysis.phaseCoherence,  // FIXED: was .coherence
+            stereoWidth: stereoAnalysis.stereoWidth,  // FIXED: was .width
+            stereoBalance: stereoAnalysis.correlationCoefficient  // FIXED: was .balance - using correlation as balance proxy
         )
+        
+        // MARK: - Genre-Aware Phase Coherence Check
+        // Determine if phase coherence is acceptable for this genre
+        // Based on professional standards from PHASE_COHERENCE_FIX.md
+        // 
+        // IMPORTANT: Phase coherence is calculated as abs(correlationCoeff)
+        // Professional stereo mixes typically have correlation 0.3-0.8
+        // Higher = more mono-compatible, Lower = wider stereo but phase risk
+        //
+        // ADJUSTED THRESHOLDS (previously too high at 0.55-0.85):
+        let hasPhaseIssues: Bool
+        let minPhaseCoherenceForGenre: Double
+        
+        switch genre?.lowercased() {
+        case "hip-hop", "hip hop", "rap", "trap":
+            minPhaseCoherenceForGenre = 0.50  // 50% - High (sub-bass must be centered)
+            hasPhaseIssues = stereoAnalysis.phaseCoherence < minPhaseCoherenceForGenre
+            
+        case "electronic", "edm", "dance", "house", "techno", "dubstep":
+            minPhaseCoherenceForGenre = 0.50  // 50% - High (club systems need mono-compatible bass)
+            hasPhaseIssues = stereoAnalysis.phaseCoherence < minPhaseCoherenceForGenre
+            
+        case "pop", "r&b", "soul":
+            minPhaseCoherenceForGenre = 0.45  // 45% - Moderate-High (radio-friendly but allows stereo width)
+            hasPhaseIssues = stereoAnalysis.phaseCoherence < minPhaseCoherenceForGenre
+            
+        case "rock", "metal", "punk":
+            minPhaseCoherenceForGenre = 0.40  // 40% - Moderate (wide guitars acceptable)
+            hasPhaseIssues = stereoAnalysis.phaseCoherence < minPhaseCoherenceForGenre
+            
+        case "country", "folk":
+            minPhaseCoherenceForGenre = 0.40  // 40% - Moderate (natural acoustic spread)
+            hasPhaseIssues = stereoAnalysis.phaseCoherence < minPhaseCoherenceForGenre
+            
+        case "jazz", "blues":
+            minPhaseCoherenceForGenre = 0.30  // 30% - Lower (natural room ambience, wide soundstage)
+            hasPhaseIssues = stereoAnalysis.phaseCoherence < minPhaseCoherenceForGenre
+            
+        case "classical", "orchestral":
+            minPhaseCoherenceForGenre = 0.25  // 25% - Low (wide stereo imaging is essential)
+            hasPhaseIssues = stereoAnalysis.phaseCoherence < minPhaseCoherenceForGenre
+            
+        case "ambient", "drone", "experimental":
+            minPhaseCoherenceForGenre = 0.20  // 20% - Very Low (artistic wide stereo)
+            hasPhaseIssues = stereoAnalysis.phaseCoherence < minPhaseCoherenceForGenre
+            
+        case "acoustic", "singer-songwriter":
+            minPhaseCoherenceForGenre = 0.35  // 35% - Moderate (intimate but natural)
+            hasPhaseIssues = stereoAnalysis.phaseCoherence < minPhaseCoherenceForGenre
+            
+        case "alternative", "indie":
+            minPhaseCoherenceForGenre = 0.30  // 30% - Lower (character and width valued)
+            hasPhaseIssues = stereoAnalysis.phaseCoherence < minPhaseCoherenceForGenre
+            
+        default:
+            minPhaseCoherenceForGenre = 0.35  // 35% - Conservative default
+            hasPhaseIssues = stereoAnalysis.phaseCoherence < minPhaseCoherenceForGenre
+        }
+        
+        // Log phase coherence check for debugging
+        print("🌊 PHASE COHERENCE CHECK:")
+        print("  Genre: \(genre ?? "unknown")")
+        print("  Measured: \(String(format: "%.1f", stereoAnalysis.phaseCoherence * 100))%")  // FIXED: was .coherence
+        print("  Min Required: \(String(format: "%.1f", minPhaseCoherenceForGenre * 100))%")
+        print("  Has Issues: \(hasPhaseIssues)")
+        
+        // MARK: - Genre-Aware Stereo Width Check
+        // Stereo width expectations vary dramatically by genre
+        // 
+        // STEREO WIDTH SCALE:
+        // 0-20%: Very narrow (mono-focused, bass-heavy genres)
+        // 20-40%: Moderate (balanced commercial mixes)
+        // 40-60%: Wide (rock, pop with wide guitars/synths)
+        // 60%+: Very wide (ambient, classical, experimental)
+        //
+        let hasStereoIssues: Bool
+        let minStereoWidthForGenre: Double
+        let maxStereoWidthForGenre: Double
+        
+        switch genre?.lowercased() {
+        case "hip-hop", "hip hop", "rap", "trap":
+            minStereoWidthForGenre = 0.10  // 10% - Narrow is NORMAL (centered bass/vocals)
+            maxStereoWidthForGenre = 0.35  // 35% - Don't go too wide (phase issues in clubs)
+            hasStereoIssues = stereoAnalysis.stereoWidth < minStereoWidthForGenre || stereoAnalysis.stereoWidth > maxStereoWidthForGenre
+            
+        case "electronic", "edm", "dance", "house", "techno", "dubstep":
+            minStereoWidthForGenre = 0.15  // 15% - Narrow is GOOD (mono bass essential)
+            maxStereoWidthForGenre = 0.40  // 40% - Moderate width acceptable
+            hasStereoIssues = stereoAnalysis.stereoWidth < minStereoWidthForGenre || stereoAnalysis.stereoWidth > maxStereoWidthForGenre
+            
+        case "pop", "r&b", "soul":
+            minStereoWidthForGenre = 0.25  // 25% - Balanced stereo
+            maxStereoWidthForGenre = 0.55  // 55% - Can be moderately wide
+            hasStereoIssues = stereoAnalysis.stereoWidth < minStereoWidthForGenre || stereoAnalysis.stereoWidth > maxStereoWidthForGenre
+            
+        case "rock", "rock/indie", "indie", "punk", "alternative":
+            minStereoWidthForGenre = 0.15  // 15% - Modern rock can be bass-heavy/narrow
+            maxStereoWidthForGenre = 0.95  // 95% - Very wide acceptable (wall of sound)
+            hasStereoIssues = stereoAnalysis.stereoWidth < minStereoWidthForGenre || stereoAnalysis.stereoWidth > maxStereoWidthForGenre
+            
+        case "metal", "death metal", "black metal", "thrash metal", "metalcore", "djent":
+            minStereoWidthForGenre = 0.15  // 15% - Modern metal can have mono bass/kick
+            maxStereoWidthForGenre = 1.00  // 100% - EXTREMELY wide IS professional for metal (Korn uses 99%+)
+            hasStereoIssues = stereoAnalysis.stereoWidth < minStereoWidthForGenre || stereoAnalysis.stereoWidth > maxStereoWidthForGenre
+            
+        case "country", "folk":
+            minStereoWidthForGenre = 0.30  // 30% - Natural acoustic spread
+            maxStereoWidthForGenre = 0.60  // 60% - Moderately wide
+            hasStereoIssues = stereoAnalysis.stereoWidth < minStereoWidthForGenre || stereoAnalysis.stereoWidth > maxStereoWidthForGenre
+            
+        case "jazz", "blues":
+            minStereoWidthForGenre = 0.40  // 40% - Natural soundstage
+            maxStereoWidthForGenre = 0.75  // 75% - Wide is natural
+            hasStereoIssues = stereoAnalysis.stereoWidth < minStereoWidthForGenre || stereoAnalysis.stereoWidth > maxStereoWidthForGenre
+            
+        case "classical", "orchestral":
+            minStereoWidthForGenre = 0.50  // 50% - Wide stereo essential
+            maxStereoWidthForGenre = 0.90  // 90% - Very wide is correct
+            hasStereoIssues = stereoAnalysis.stereoWidth < minStereoWidthForGenre || stereoAnalysis.stereoWidth > maxStereoWidthForGenre
+            
+        case "ambient", "drone", "experimental":
+            minStereoWidthForGenre = 0.45  // 45% - Wide soundscapes
+            maxStereoWidthForGenre = 0.95  // 95% - Extreme width is artistic
+            hasStereoIssues = stereoAnalysis.stereoWidth < minStereoWidthForGenre || stereoAnalysis.stereoWidth > maxStereoWidthForGenre
+            
+        case "acoustic", "singer-songwriter":
+            minStereoWidthForGenre = 0.25  // 25% - Intimate but natural
+            maxStereoWidthForGenre = 0.55  // 55% - Moderate width
+            hasStereoIssues = stereoAnalysis.stereoWidth < minStereoWidthForGenre || stereoAnalysis.stereoWidth > maxStereoWidthForGenre
+            
+        default:
+            minStereoWidthForGenre = 0.25  // 25% - Conservative default
+            maxStereoWidthForGenre = 0.60  // 60% - Moderate ceiling
+            hasStereoIssues = stereoAnalysis.stereoWidth < minStereoWidthForGenre || stereoAnalysis.stereoWidth > maxStereoWidthForGenre
+        }
+        
+        // INTELLIGENT OVERRIDE: Don't flag wide stereo as an issue if mono compatibility is excellent
+        // If mono compatibility > 85%, the wide stereo is SAFE and intentional (not problematic)
+        var finalStereoIssues = hasStereoIssues
+        if hasStereoIssues && stereoAnalysis.stereoWidth > maxStereoWidthForGenre {
+            // Only flagged because it's "too wide" - check if mono is safe
+            if stereoAnalysis.monoCompatibility > 0.85 {  // 85%+ = excellent mono translation
+                finalStereoIssues = false  // Override: Wide stereo is intentional and safe!
+                print("  ✅ OVERRIDE: Wide stereo is SAFE (excellent mono compatibility: \(String(format: "%.1f", stereoAnalysis.monoCompatibility * 100))%)")
+            }
+        }
+        
+        // Log stereo width check for debugging
+        print("↔️ STEREO WIDTH CHECK:")
+        print("  Genre: \(genre ?? "unknown")")
+        print("  Measured: \(String(format: "%.1f", stereoAnalysis.stereoWidth * 100))%")
+        print("  Acceptable Range: \(String(format: "%.1f", minStereoWidthForGenre * 100))% - \(String(format: "%.1f", maxStereoWidthForGenre * 100))%")
+        print("  Mono Compatibility: \(String(format: "%.1f", stereoAnalysis.monoCompatibility * 100))%")
+        print("  Has Issues: \(finalStereoIssues)")
         
         // Combine AudioKit results
         return AudioKitAnalysisResult(
-            stereoWidth: stereoAnalysis.width,
-            phaseCoherence: stereoAnalysis.coherence,
+            stereoWidth: stereoAnalysis.stereoWidth,  // FIXED: was .width
+            phaseCoherence: stereoAnalysis.phaseCoherence,  // FIXED: was .coherence
             monoCompatibility: stereoAnalysis.monoCompatibility,
             spectralCentroid: fftAnalysis.spectralCentroid,
             hasClipping: amplitudeAnalysis.hasClipping,
@@ -374,12 +580,12 @@ public class AudioKitService: ObservableObject {
             loudness: amplitudeAnalysis.loudness,
             rmsLevel: amplitudeAnalysis.rms,
             peakLevel: amplitudeAnalysis.peak,
-            phaseIssues: stereoAnalysis.coherence < 0.3,  // Only flag serious phase problems
-            stereoIssues: abs(stereoAnalysis.balance) > 0.3,
+            phaseIssues: hasPhaseIssues,  // Now genre-aware!
+            stereoIssues: finalStereoIssues,  // NOW GENRE-AWARE with intelligent mono compatibility override!
             frequencyImbalance: fftAnalysis.hasImbalance,
             dynamicRangeIssues: dynamicAnalysis.range < 4.0,  // Only flag severely over-compressed material
             instrumentBalance: instrumentBalance,
-            recommendations: generateAudioKitRecommendations(fftAnalysis, amplitudeAnalysis, stereoAnalysis, dynamicAnalysis, instrumentBalance),
+            recommendations: stereoAnalysis.recommendations + instrumentBalance.recommendations + spectralBalance.recommendations + dynamicRangeAnalysis.recommendations + peakToAverageRatio.recommendations,  // FIXED: Combine recommendations from analyses that have them
             spectralBalance: spectralBalance,
             stereoCorrelation: stereoCorrelation,
             dynamicRangeAnalysis: dynamicRangeAnalysis,
@@ -391,37 +597,19 @@ public class AudioKitService: ObservableObject {
     
     // MARK: - AudioKit Analysis Methods
     
-    nonisolated private func performAudioKitFFT(_ data: UnsafePointer<Float>, frameCount: Int, sampleRate: Double) -> AudioKitFFTResult {
-        // 🧪 TEST MODE: Generate test signal instead of using real audio
-        _ = Array(UnsafeBufferPointer(start: data, count: frameCount))
+    nonisolated private func performAudioKitFFT(_ data: UnsafePointer<Float>, frameCount: Int, sampleRate: Double, genre: String? = nil) -> AudioKitFFTResult {
+        // Use REAL audio data for analysis
+        let samples = Array(UnsafeBufferPointer(start: data, count: frameCount))
         
-        let frequencies: [Double] = [100, 200, 300, 500, 800, 1200, 2400, 4800, 9600]
-        let amplitudes: [Float] = [1.0, 0.7, 0.5, 0.6, 0.4, 0.3, 0.25, 0.15, 0.08]
-        let actualFFTSize = 4096
-        var samples = [Float](repeating: 0, count: actualFFTSize)
-        for i in 0..<samples.count {
-            let t = Double(i) / sampleRate
-            var sample: Float = 0.0
-             for (freq, amp) in zip(frequencies, amplitudes) {
-                sample += amp * Float(sin(2.0 * .pi * freq * t))
-            }
-            samples[i] = sample / Float(frequencies.count)
-        }
-        
-        // Use the test signal samples directly (already actualFFTSize = 4096)
-        let actualSamples = samples
-        
+        // Use optimal FFT size (power of 2, typically 4096 for good frequency resolution)
+        let actualFFTSize = min(4096, Int(pow(2, floor(log2(Double(samples.count))))))
+        let actualSamples = Array(samples.prefix(actualFFTSize))
         
         // Enhanced FFT analysis with professional smoothing
         let magnitudes = performFFTAnalysis(actualSamples)
         
-        // 🧪 TEST MODE: NO SMOOTHING - use raw FFT to see peaks!
-        let smoothedMagnitudes = magnitudes  // Skip smoothing to show test peaks
-        
-        // Debug: Check FFT spectrum quality with smoothed data
-        let totalMagnitude = smoothedMagnitudes.reduce(0.0) { sum, mag in sum + Double(mag) }
-        let maxMagnitude = smoothedMagnitudes.max() ?? 0.0
-        let nonZeroCount = smoothedMagnitudes.filter { $0 > 0.0001 }.count
+        // Use raw magnitudes (smoothing can be added later if needed)
+        let smoothedMagnitudes = magnitudes
         
         // Define frequency bands (using actual sample rate)
         let nyquist = sampleRate / 2.0
@@ -508,11 +696,18 @@ public class AudioKitService: ObservableObject {
         let combinedHighMid = highMidPercent                   // High-mid
         let combinedHigh = presencePercent + airPercent        // Combined presence + air
         
-        // Detect genre for frequency balance assessment
-        let detectedGenre = detectGenreFromFrequencies(combinedLowEnd, combinedLowMid, combinedMid, combinedHighMid, combinedHigh)
+        // Use user-selected genre if provided, otherwise auto-detect
+        let effectiveGenre: String
+        if let userGenre = genre, !userGenre.isEmpty {
+            effectiveGenre = userGenre
+            print("🎵 Using USER-SELECTED genre: \(userGenre)")
+        } else {
+            effectiveGenre = detectGenreFromFrequencies(combinedLowEnd, combinedLowMid, combinedMid, combinedHighMid, combinedHigh)
+            print("🎵 Auto-detected genre: \(effectiveGenre)")
+        }
         
-        // Check for frequency imbalance
-        let hasImbalance = checkFrequencyImbalance(combinedLowEnd, combinedLowMid, combinedMid, combinedHighMid, combinedHigh, genre: detectedGenre)
+        // Check for frequency imbalance using effective genre
+        let hasImbalance = checkFrequencyImbalance(combinedLowEnd, combinedLowMid, combinedMid, combinedHighMid, combinedHigh, genre: effectiveGenre)
         
         // For spectrum visualization, use RAW unsmoothed magnitudes to show all frequency detail
         // Professional analyzers show the actual measured spectrum, not overly smoothed data
@@ -2485,6 +2680,8 @@ enum AudioKitError: Error {
         
         // Calculate stereo correlation coefficient
         let correlationCoeff = calculateCorrelationCoefficient(leftSamples, rightSamples)
+        print("🔍 STEREO CORRELATION DEBUG:")
+        print("  Raw Correlation Coefficient: \(String(format: "%.3f", correlationCoeff))")
         
         // Calculate Mid/Side signals
         var midSignal: [Float] = []
@@ -2504,39 +2701,102 @@ enum AudioKitError: Error {
         let sideEnergy = sideSignal.map { $0 * $0 }.reduce(0, +)
         
         // Stereo width calculation using proper Mid/Side analysis
+        // IMPROVED: Use multiple methods to get accurate stereo perception
         let totalEnergy = midEnergy + sideEnergy
         let rawSideRatio = totalEnergy > 0 ? Double(sideEnergy / totalEnergy) : 0.0
         
-        // Apply professional scaling (same as AudioFeatureExtractor)
-        let stereoWidth: Double
-        if rawSideRatio < 0.25 {
-            stereoWidth = rawSideRatio * 1.6
-        } else if rawSideRatio < 0.40 {
-            stereoWidth = 0.4 + (rawSideRatio - 0.25) * 1.67
-        } else {
-            stereoWidth = 0.65 + (rawSideRatio - 0.40) * 0.583
+        // Method 1: Raw side energy ratio (0-1 scale)
+        // Professional mixes typically have 0.05-0.30 side ratio
+        // Because bass is mono (Mid) and only highs are stereo (Side)
+        
+        // Method 2: Peak-based stereo width (more perceptually accurate)
+        // Compare the difference between L and R channels
+        var stereoMoments = 0
+        var totalMoments = 0
+        let threshold: Float = 0.01  // Noise floor
+        
+        for i in 0..<frameCount {
+            let leftAbs = abs(leftSamples[i])
+            let rightAbs = abs(rightSamples[i])
+            
+            if leftAbs > threshold || rightAbs > threshold {
+                totalMoments += 1
+                let diff = abs(leftSamples[i] - rightSamples[i])
+                let sum = abs(leftSamples[i] + rightSamples[i])
+                if sum > threshold {
+                    let momentWidth = Double(diff / sum)
+                    if momentWidth > 0.1 {  // Consider it "stereo" if >10% difference
+                        stereoMoments += 1
+                    }
+                }
+            }
         }
+        
+        let peakBasedWidth = totalMoments > 0 ? Double(stereoMoments) / Double(totalMoments) : 0.0
+        
+        // Method 3: RMS difference between channels
+        let leftRMS = sqrt(Double(leftEnergy / Float(frameCount)))
+        let rightRMS = sqrt(Double(rightEnergy / Float(frameCount)))
+        let channelBalance = min(leftRMS, rightRMS) / max(leftRMS, rightRMS)
+        
+        // Combine methods for final stereo width:
+        // - Use peak-based width as primary (more perceptually accurate)
+        // - Use side energy ratio as secondary
+        // - Weight towards higher values (professional mixes ARE stereo, just bass is mono)
+        let combinedStereoWidth = (peakBasedWidth * 0.7) + (rawSideRatio * 0.3)
+        
+        // Apply professional scaling with better range
+        let stereoWidth: Double
+        if combinedStereoWidth < 0.15 {
+            stereoWidth = combinedStereoWidth * 2.0  // Very narrow → boost to 0-30%
+        } else if combinedStereoWidth < 0.35 {
+            stereoWidth = 0.30 + (combinedStereoWidth - 0.15) * 1.5  // Narrow-moderate → 30-60%
+        } else {
+            stereoWidth = 0.60 + (combinedStereoWidth - 0.35) * 1.2  // Wide → 60-100%+
+        }
+        
+        print("🔍 STEREO WIDTH CALCULATION:")
+        print("  Raw Side Ratio: \(String(format: "%.3f", rawSideRatio))")
+        print("  Peak-Based Width: \(String(format: "%.3f", peakBasedWidth))")
+        print("  Channel Balance: \(String(format: "%.3f", channelBalance))")
+        print("  Combined Width: \(String(format: "%.3f", combinedStereoWidth))")
+        print("  Final Stereo Width: \(String(format: "%.1f", stereoWidth * 100))%")
         
         
         // Side chain energy (for stereo imaging)
         let sidechainEnergy = totalEnergy > 0 ? Double(sideEnergy / totalEnergy) : 0.3
         
         // Mono compatibility (how much energy is RETAINED when summed to mono)
-        // Professional standard: Compare mono sum energy vs theoretical maximum (2x original)
-        // High compatibility (85-100%) = most energy retained, minimal phase cancellation
-        // Low compatibility (<70%) = significant energy loss due to phase issues
+        // FIXED: Professional standard calculation
+        // When L+R are summed to mono, energy increases due to signal addition
+        // Perfect mono compatibility = 100% (all energy retained, no phase cancellation)
+        // Poor mono compatibility < 70% (significant energy loss due to out-of-phase content)
+        //
+        // CORRECT FORMULA:
+        // Mono energy should be approximately 2x the average of L and R (if perfectly in-phase)
+        // monoCompatibility = (actual mono energy / expected mono energy) * 100
         let monoSum = leftSamples.indices.map { leftSamples[$0] + rightSamples[$0] }
         let monoEnergy = monoSum.map { $0 * $0 }.reduce(0, +)
-        let originalEnergy = leftEnergy + rightEnergy
         
-        // Calculate what percentage of the theoretical maximum energy is retained
-        // Theoretical max in mono = 4x original (if L+R perfectly in phase)
-        // Actual mono energy / theoretical max * 100 = compatibility %
-        let theoreticalMaxMono = originalEnergy * 4.0
-        let monoCompatibility = theoreticalMaxMono > 0 ? Double(monoEnergy / theoreticalMaxMono) * 100 : 85.0
+        // Expected mono energy if perfectly in-phase (no cancellation)
+        // When you sum L+R, if they're perfectly correlated, energy should be 4x average channel energy
+        let avgChannelEnergy = (leftEnergy + rightEnergy) / 2.0
+        let expectedMonoEnergy = avgChannelEnergy * 4.0  // Perfect addition: (L+R)^2 = 4*L^2 when L=R
+        
+        // Calculate compatibility as percentage of expected energy retained
+        // Return as fraction (0-1) for consistency with phaseCoherence
+        let monoCompatibility = expectedMonoEnergy > 0 ? min(1.0, Double(monoEnergy / expectedMonoEnergy)) : 0.85
+        
+        print("🔍 MONO COMPATIBILITY DEBUG:")
+        print("  Left Energy: \(leftEnergy)")
+        print("  Right Energy: \(rightEnergy)")
+        print("  Mono Energy: \(monoEnergy)")
+        print("  Expected Mono: \(expectedMonoEnergy)")
+        print("  Compatibility: \(String(format: "%.3f", monoCompatibility)) = \(String(format: "%.1f", monoCompatibility * 100))%")
         
         // Phase coherence analysis
         let phaseCoherence = abs(correlationCoeff)
+        print("  Phase Coherence (abs): \(String(format: "%.3f", phaseCoherence)) = \(String(format: "%.1f", phaseCoherence * 100))%")
         
         // Center image strength
         let centerImage = totalEnergy > 0 ? Double(midEnergy / totalEnergy) : 0.7
@@ -2547,7 +2807,7 @@ enum AudioKitError: Error {
         if correlationCoeff < 0.3 {
             recommendations.append("⚠️ Poor stereo correlation - check for phase issues")
         }
-        if monoCompatibility < 70 {
+        if monoCompatibility < 0.70 {  // FIXED: Compare against 0-1 fraction, not 0-100
             recommendations.append("📻 Poor mono compatibility - fix phase relationships")
         }
         if stereoWidth < 0.5 {
@@ -2754,8 +3014,10 @@ enum AudioKitError: Error {
     /// Detects if audio is unmixed (raw recording/arrangement) vs. professionally mixed
     /// Based on: https://chat.com analysis of mixing characteristics
     /// RE-ENABLED with improved detection patterns for bass-heavy and frequency-imbalanced tracks
+    /// NOW GENRE-AWARE: Different genres have different expectations for dynamics, loudness, and frequency balance
     private func detectUnmixedAudio(
         fileName: String,
+        genre: String?,  // User-selected genre for genre-aware analysis
         dynamicRange: Double,
         loudness: Double,
         peakLevel: Double,
@@ -2768,14 +3030,143 @@ enum AudioKitError: Error {
         stereoBalance: Double
     ) -> UnmixedDetectionResult {
         
+        // ========================================
+        // GENRE-AWARE THRESHOLD CONFIGURATION
+        // Different genres have different professional standards
+        // ========================================
+        
+        struct GenreThresholds {
+            let maxDynamicRange: Double      // Max DR before flagging as unmixed
+            let minLoudness: Double          // Min LUFS before flagging as too quiet
+            let maxCrestFactor: Double       // Max crest factor before flagging
+            let minMonoCompatibility: Double // Min mono compatibility
+            let description: String
+        }
+        
+        let genreThresholds: GenreThresholds
+        
+        // Determine thresholds based on user-selected genre
+        switch genre?.lowercased() {
+        case "jazz", "classical", "acoustic":
+            // Jazz/Classical: HIGH dynamic range is EXPECTED and professional
+            genreThresholds = GenreThresholds(
+                maxDynamicRange: 22.0,        // Allow up to 22dB DR (very dynamic)
+                minLoudness: -23.0,           // Can be quieter (-23 LUFS broadcast standard)
+                maxCrestFactor: 20.0,         // Higher transients are normal
+                minMonoCompatibility: 0.45,   // Slightly lower (wide stereo recording)
+                description: "Jazz/Classical/Acoustic"
+            )
+            print("🎼 Using JAZZ/CLASSICAL thresholds: High DR (\(genreThresholds.maxDynamicRange)dB), Quieter (\(genreThresholds.minLoudness)LUFS) is NORMAL")
+            
+        case "rock", "metal", "punk":
+            // Rock/Metal: Moderate dynamics, loud and punchy
+            genreThresholds = GenreThresholds(
+                maxDynamicRange: 16.0,        // Moderate compression
+                minLoudness: -16.0,           // Loud masters
+                maxCrestFactor: 14.0,         // Controlled transients
+                minMonoCompatibility: 0.40,   // Wide stereo guitars
+                description: "Rock/Metal"
+            )
+            print("🎸 Using ROCK/METAL thresholds: Moderate DR (\(genreThresholds.maxDynamicRange)dB), Loud (\(genreThresholds.minLoudness)LUFS)")
+            
+        case "pop", "r&b", "soul":
+            // Pop/R&B: Moderate-low dynamics, consistent loudness
+            genreThresholds = GenreThresholds(
+                maxDynamicRange: 14.0,        // Moderate-heavy compression
+                minLoudness: -14.0,           // Very loud streaming masters
+                maxCrestFactor: 12.0,         // Well-controlled
+                minMonoCompatibility: 0.50,   // Good mono compatibility
+                description: "Pop/R&B"
+            )
+            print("🎤 Using POP/R&B thresholds: Lower DR (\(genreThresholds.maxDynamicRange)dB), Very Loud (\(genreThresholds.minLoudness)LUFS)")
+            
+        case "electronic", "edm", "dance", "house", "techno":
+            // Electronic/EDM: LOW dynamics, VERY loud, heavily compressed
+            genreThresholds = GenreThresholds(
+                maxDynamicRange: 10.0,        // Heavy compression/limiting
+                minLoudness: -10.0,           // Extremely loud
+                maxCrestFactor: 10.0,         // Very controlled
+                minMonoCompatibility: 0.45,   // Wide stereo effects
+                description: "Electronic/EDM"
+            )
+            print("🎛️ Using ELECTRONIC/EDM thresholds: Low DR (\(genreThresholds.maxDynamicRange)dB), Very Loud (\(genreThresholds.minLoudness)LUFS)")
+            
+        case "hip-hop", "hip hop", "rap", "trap":
+            // Hip-Hop: Low dynamics, very loud, bass-heavy
+            genreThresholds = GenreThresholds(
+                maxDynamicRange: 12.0,        // Heavy compression
+                minLoudness: -12.0,           // Very loud
+                maxCrestFactor: 11.0,         // Controlled with punch
+                minMonoCompatibility: 0.50,   // Good compatibility
+                description: "Hip-Hop/Rap"
+            )
+            print("🎙️ Using HIP-HOP thresholds: Low DR (\(genreThresholds.maxDynamicRange)dB), Very Loud (\(genreThresholds.minLoudness)LUFS)")
+            
+        case "alternative", "indie":
+            // Alternative/Indie: Varies widely, moderate defaults
+            genreThresholds = GenreThresholds(
+                maxDynamicRange: 18.0,        // Can be dynamic
+                minLoudness: -18.0,           // Moderate loudness
+                maxCrestFactor: 16.0,         // Fairly dynamic
+                minMonoCompatibility: 0.45,   // Creative stereo
+                description: "Alternative/Indie"
+            )
+            print("🎵 Using ALTERNATIVE/INDIE thresholds: Flexible DR (\(genreThresholds.maxDynamicRange)dB), Moderate (\(genreThresholds.minLoudness)LUFS)")
+            
+        default:
+            // Unknown genre: Conservative middle-ground thresholds
+            genreThresholds = GenreThresholds(
+                maxDynamicRange: 16.0,        // Moderate
+                minLoudness: -18.0,           // Moderate
+                maxCrestFactor: 14.0,         // Moderate
+                minMonoCompatibility: 0.45,   // Standard
+                description: "Unknown/General"
+            )
+            print("❓ Using DEFAULT thresholds: Genre '\(genre ?? "none")' - using conservative defaults")
+        }
+
+        // ========================================
+        // TIER 0: DEFINITE PROFESSIONAL MASTER - EARLY EXIT
+        // These characteristics are IMPOSSIBLE for unmixed/raw recordings to have
+        // Skip entire detection if the track is clearly a professional master
+        // ========================================
+        let crestFactor = peakToAverage.peakToRmsRatio
+        let isDefinitelyMastered = (
+            loudness >= -14.0 && loudness <= -6.0 &&  // Pro mastering loudness
+            peakLevel > -1.5 &&  // Optimized peaks
+            dynamicRange >= 4.0 && dynamicRange <= 14.0 &&  // Controlled dynamics
+            crestFactor >= 4.0 && crestFactor <= 14.0  // Processed transients
+        )
+
+        if isDefinitelyMastered {
+            print("🎯 DEFINITE PROFESSIONAL MASTER DETECTED - Skipping unmixed detection entirely")
+            print("   Loudness: \(String(format: "%.1f", loudness)) LUFS (pro: -14 to -6)")
+            print("   Peak: \(String(format: "%.1f", peakLevel)) dBFS (pro: > -1.5)")
+            print("   DR: \(String(format: "%.1f", dynamicRange)) dB (pro: 4-14)")
+            print("   Crest: \(String(format: "%.1f", crestFactor)) dB (pro: 4-14)")
+            return UnmixedDetectionResult(
+                isLikelyUnmixed: false,
+                confidenceScore: 0.0,
+                detectionCriteria: ["Definite Professional Master": true],
+                mixingQualityScore: 95.0,
+                recommendations: ["Professional master detected - excellent quality"],
+                dynamicRangeTest: false,
+                peakToLoudnessRatioTest: false,
+                transientAnalysis: false,
+                rmsVsPeakTest: false,
+                frequencyMaskingTest: false,
+                loudnessTest: false,
+                crestFactorTest: false
+            )
+        }
+
         var detectionCriteria: [String: Bool] = [:]
         var recommendations: [String] = []
         var failedTests = 0
-        
+
         // CRITICAL METRICS - These are the most reliable indicators
         // Professional mixes MUST pass these, unmixed audio typically fails multiple
-        
-        let crestFactor = peakToAverage.peakToRmsRatio
+
         let truePeak = peakToAverage.truePeakLevel
         let loudnessRange = peakToAverage.loudnessRange
         let punchiness = peakToAverage.punchiness
@@ -2831,47 +3222,61 @@ enum AudioKitError: Error {
         }
         
         // ========================================
-        // TIER 2: DYNAMIC PROCESSING - CRITICAL
-        // Professional mixes ALWAYS use compression/limiting
+        // TIER 2: DYNAMIC PROCESSING - CRITICAL (NOW GENRE-AWARE)
+        // Professional mixes use compression appropriate to their genre
         // ========================================
         
-        // No compression: High DR + High CF + High LRA together
-        let noCompressionTest = dynamicRange > 15.0 && crestFactor > 13.0 && loudnessRange > 15.0
+        // No compression: High DR + High CF + High LRA together (GENRE-AWARE)
+        let noCompressionTest = dynamicRange > genreThresholds.maxDynamicRange && 
+                                crestFactor > genreThresholds.maxCrestFactor && 
+                                loudnessRange > 15.0
         detectionCriteria["No Compression"] = noCompressionTest
         if noCompressionTest {
+            // Only penalize if it exceeds GENRE-SPECIFIC threshold
             failedTests += 3  // Very high weight - compression is essential
-            recommendations.append("🎚️ No compression detected (DR: \(String(format: "%.1f", dynamicRange))dB, CF: \(String(format: "%.1f", crestFactor))dB, LRA: \(String(format: "%.1f", loudnessRange))LU)")
+            recommendations.append("🎚️ No compression detected for \(genreThresholds.description) (DR: \(String(format: "%.1f", dynamicRange))dB > \(genreThresholds.maxDynamicRange)dB, CF: \(String(format: "%.1f", crestFactor))dB > \(genreThresholds.maxCrestFactor)dB)")
         }
         
-        // Light compression only: Moderate indicators
-        // FIXED: Reduced penalty from 1 to 0 points - intentionally dynamic masters (jazz/classical) are valid
-        // Note: This test is kept for informational purposes but won't contribute to unmixed detection
-        let lightCompressionTest = !noCompressionTest && (dynamicRange > 14.0 || crestFactor > 12.0)
+        // Light compression only: Moderate indicators (GENRE-AWARE)
+        let lightCompressionTest = !noCompressionTest && 
+                                   (dynamicRange > genreThresholds.maxDynamicRange * 0.85 || 
+                                    crestFactor > genreThresholds.maxCrestFactor * 0.85)
         detectionCriteria["Light Compression"] = lightCompressionTest
         if lightCompressionTest {
-            // No penalty - dynamic mixes are a valid artistic choice
-            recommendations.append("💡 Intentionally dynamic - suitable for certain genres (jazz, classical, acoustic)")
+            // Only inform, don't penalize - dynamic mixes are valid for some genres
+            if genreThresholds.description == "Jazz/Classical/Acoustic" {
+                recommendations.append("✅ Intentionally dynamic - appropriate for \(genreThresholds.description)")
+            } else {
+                recommendations.append("💡 Light compression detected - consider if more is needed for \(genreThresholds.description)")
+            }
         }
         
         // ========================================
-        // TIER 3: LOUDNESS OPTIMIZATION
-        // Professional mixes target specific loudness standards
+        // TIER 3: LOUDNESS OPTIMIZATION (NOW GENRE-AWARE)
+        // Professional mixes target genre-specific loudness standards
         // ========================================
         
-        // Quiet + Unprocessed: Low loudness + High DR + Quiet peak
-        let quietUnprocessedTest = loudness < -18.0 && dynamicRange > 14.0 && peakLevel < -6.0
+        // Quiet + Unprocessed: Low loudness + High DR + Quiet peak (GENRE-AWARE)
+        let quietUnprocessedTest = loudness < genreThresholds.minLoudness && 
+                                   dynamicRange > genreThresholds.maxDynamicRange && 
+                                   peakLevel < -6.0
         detectionCriteria["Quiet & Unprocessed"] = quietUnprocessedTest
         if quietUnprocessedTest {
             failedTests += 3  // High weight - clear sign of no mastering
-            recommendations.append("📉 Severely under-leveled: \(String(format: "%.1f", loudness))LUFS - needs gain staging and limiting")
+            recommendations.append("📉 Under-leveled for \(genreThresholds.description): \(String(format: "%.1f", loudness))LUFS (target: \(genreThresholds.minLoudness)LUFS) - needs gain staging")
         }
         
-        // Just quiet (might be intentional dynamic master)
-        let justQuietTest = !quietUnprocessedTest && loudness < -18.0
+        // Just quiet for the genre (might be intentional)
+        let justQuietTest = !quietUnprocessedTest && loudness < genreThresholds.minLoudness
         detectionCriteria["Low Loudness"] = justQuietTest
         if justQuietTest {
+            if genreThresholds.description == "Jazz/Classical/Acoustic" {
+                // Don't penalize quiet jazz/classical - it's often intentional
+                recommendations.append("ℹ️ Dynamic range preserved (\(String(format: "%.1f", loudness))LUFS) - appropriate for \(genreThresholds.description)")
+            } else {
             failedTests += 1
-            recommendations.append("Loudness below professional standards (\(String(format: "%.1f", loudness))LUFS)")
+                recommendations.append("📊 Quieter than typical \(genreThresholds.description) (\(String(format: "%.1f", loudness))LUFS vs target \(genreThresholds.minLoudness)LUFS)")
+            }
         }
         
         // ========================================
@@ -2992,6 +3397,10 @@ enum AudioKitError: Error {
         let severeFreqImbalance = ((spectralBalance.subBassEnergy + spectralBalance.bassEnergy) > 0.70 ||
                                    (spectralBalance.highMidEnergy + spectralBalance.presenceEnergy + spectralBalance.airEnergy) < 0.03) &&
                                    loudness < -15.0
+        
+        // Pattern 8: Severe phase coherence issues = poorly recorded/unmixed
+        // Professional mixes always have phase coherence > 50%
+        let severePhaseIssues = phaseCoherence < 0.40
 
         // ========================================
         // INTELLIGENT MULTI-TIER DETECTION SYSTEM
@@ -3003,58 +3412,75 @@ enum AudioKitError: Error {
         // 5. Truly unmixed/raw recordings
         // ========================================
 
-        // TIER 1: OBVIOUSLY UNMIXED - Very conservative, only flag clear cases
-        let extremeDynamicRange = dynamicRange > 25.0  // No master would EVER have >25dB DR
-        let veryLowLoudness = loudness < -25.0  // Changed from -22 to -25 (more conservative)
-        let criticallyUnprocessed = dynamicRange > 20.0 && crestFactor > 18.0 && loudnessRange > 20.0
+        // ========================================
+        // GENRE-AWARE INTELLIGENT CLASSIFICATION
+        // ========================================
+        
+        // TIER 1: OBVIOUSLY UNMIXED - Very conservative, only flag clear cases (GENRE-AWARE)
+        let extremeDynamicRange = dynamicRange > (genreThresholds.maxDynamicRange + 10.0)  // Way beyond genre norms
+        let veryLowLoudness = loudness < (genreThresholds.minLoudness - 7.0)  // Much quieter than genre expects
+        let criticallyUnprocessed = dynamicRange > (genreThresholds.maxDynamicRange + 5.0) && 
+                                    crestFactor > (genreThresholds.maxCrestFactor + 4.0) && 
+                                    loudnessRange > 20.0
 
-        // TIER 2: PROFESSIONAL DYNAMIC MASTER DETECTION (Abbey Road, jazz, classical)
+        // TIER 2: PROFESSIONAL DYNAMIC MASTER DETECTION (GENRE-AWARE)
         // These should PASS as mastered, not flagged as unmixed
         let isProfessionalDynamicMaster = (
-            loudness >= -18.0 && loudness <= -12.0 &&  // Professional loudness range
-            dynamicRange >= 12.0 && dynamicRange <= 20.0 &&  // Intentional dynamics (not over-compressed)
+            loudness >= genreThresholds.minLoudness - 5.0 && 
+            loudness <= genreThresholds.minLoudness + 4.0 &&  // Within genre expectations
+            dynamicRange >= genreThresholds.maxDynamicRange * 0.6 && 
+            dynamicRange <= genreThresholds.maxDynamicRange + 2.0 &&  // Dynamic but mastered
             peakLevel > -3.0 &&  // Proper peak optimization
-            crestFactor < 18.0  // Some compression applied
+            crestFactor <= genreThresholds.maxCrestFactor + 2.0  // Appropriate compression for genre
         )
 
-        // TIER 3: STREAMING-ERA MASTER DETECTION (-16 LUFS target)
-        // Abbey Road and modern studios often master to -16 LUFS for streaming
+        // TIER 3: STREAMING-ERA MASTER DETECTION (GENRE-AWARE)
+        // Modern studios master for streaming with genre-appropriate dynamics
         let isStreamingMaster = (
-            loudness >= -18.0 && loudness <= -13.0 &&  // Streaming sweet spot
-            dynamicRange >= 8.0 && dynamicRange <= 18.0 &&  // Controlled but dynamic
+            loudness >= genreThresholds.minLoudness - 4.0 && 
+            loudness <= genreThresholds.minLoudness + 2.0 &&  // Streaming target range
+            dynamicRange >= genreThresholds.maxDynamicRange * 0.5 && 
+            dynamicRange <= genreThresholds.maxDynamicRange + 2.0 &&  // Controlled but appropriate
             peakLevel > -3.0 &&  // Optimized peaks
-            monoCompatibility > 0.40  // Basic compatibility check
+            monoCompatibility > genreThresholds.minMonoCompatibility  // Genre-appropriate compatibility
         )
 
-        // TIER 4: AMATEUR/LEARNING MIXER DETECTION
+        // TIER 4: AMATEUR/LEARNING MIXER DETECTION (GENRE-AWARE)
         // Good effort but needs improvement - score fairly but provide guidance
         let isAmateurMix = (
-            loudness >= -20.0 && loudness <= -12.0 &&  // Reasonable loudness attempt
-            dynamicRange >= 6.0 && dynamicRange <= 22.0 &&  // Some compression applied
+            loudness >= genreThresholds.minLoudness - 8.0 && 
+            loudness <= genreThresholds.minLoudness + 2.0 &&  // Reasonable attempt at genre loudness
+            dynamicRange >= genreThresholds.maxDynamicRange * 0.4 && 
+            dynamicRange <= genreThresholds.maxDynamicRange + 6.0 &&  // Some compression applied
             peakLevel > -12.0 &&  // Not severely under-leveled
             failedTests < 10  // Not completely broken
         )
 
-        // TIER 5: PRE-MASTER MIX DETECTION (professional mix engineer work)
+        // TIER 5: PRE-MASTER MIX DETECTION (GENRE-AWARE)
         let isPreMaster = (
-            loudness >= -23.0 && loudness <= -12.0 &&  // Pre-master range
-            dynamicRange >= 8.0 && dynamicRange <= 20.0 &&  // Proper mixing dynamics
+            loudness >= genreThresholds.minLoudness - 9.0 && 
+            loudness <= genreThresholds.minLoudness + 1.0 &&  // Pre-master range with headroom
+            dynamicRange >= genreThresholds.maxDynamicRange * 0.5 && 
+            dynamicRange <= genreThresholds.maxDynamicRange + 4.0 &&  // Proper mixing dynamics
             peakLevel >= -10.0 && peakLevel <= -3.0 &&  // Good headroom for mastering
-            monoCompatibility > 0.45  // Mixed properly
+            monoCompatibility > genreThresholds.minMonoCompatibility  // Mixed properly for genre
         )
 
-        // TIER 6: TRULY UNMIXED - Only flag if it doesn't match ANY professional pattern
+        // TIER 6: TRULY UNMIXED - Only flag if it doesn't match ANY professional pattern (GENRE-AWARE)
         let isTrulyUnmixed = (
             !isProfessionalDynamicMaster &&
             !isStreamingMaster &&
             !isAmateurMix &&
             !isPreMaster &&
             (
-                extremeDynamicRange ||  // Extreme DR (>25dB)
-                veryLowLoudness ||  // Very quiet (<-25 LUFS)
-                criticallyUnprocessed ||  // Completely raw
-                (loudness < -22.0 && dynamicRange > 18.0 && crestFactor > 16.0) ||  // Unprocessed combo
-                (failedTests >= 10) ||  // Many technical failures
+                extremeDynamicRange ||  // Extreme DR way beyond genre norms
+                veryLowLoudness ||  // Much quieter than genre expects
+                criticallyUnprocessed ||  // Completely raw for this genre
+                severePhaseIssues ||  // Poor phase coherence < 40%
+                (loudness < genreThresholds.minLoudness - 5.0 && 
+                 dynamicRange > genreThresholds.maxDynamicRange + 2.0 && 
+                 crestFactor > genreThresholds.maxCrestFactor + 2.0) ||  // Unprocessed for genre
+                (failedTests >= 12) ||  // Many technical failures - increased threshold to reduce false positives
                 criticalMonoFailure  // Critical phase issues
             )
         )
@@ -3079,16 +3505,19 @@ enum AudioKitError: Error {
             trackClassification = "Unmixed/Raw Recording"
         }
 
-        // DEBUG: Print intelligent detection details
-        print("🔍 INTELLIGENT TRACK ANALYSIS: \(fileName)")
+        // DEBUG: Print intelligent genre-aware detection details
+        print("🔍 GENRE-AWARE INTELLIGENT TRACK ANALYSIS: \(fileName)")
+        print("  🎵 GENRE: \(genreThresholds.description)")
         print("  📊 CLASSIFICATION: \(trackClassification)")
         print("  Failed Tests: \(failedTests)/\(Int(maxPoints)) points")
-        print("  Mono Compatibility: \(String(format: "%.1f", monoCompatibility * 100))%")
-        print("  Stereo Width: \(String(format: "%.1f", stereoWidth * 100))%")
-        print("  Loudness: \(String(format: "%.1f", loudness)) LUFS")
-        print("  Dynamic Range: \(String(format: "%.1f", dynamicRange)) dB")
-        print("  Crest Factor: \(String(format: "%.1f", crestFactor)) dB")
-        print("  Peak Level: \(String(format: "%.1f", peakLevel)) dBFS")
+        print("  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print("  📈 MEASURED vs GENRE TARGET:")
+        print("     Mono Compatibility: \(String(format: "%.1f", monoCompatibility * 100))% (min: \(String(format: "%.0f", genreThresholds.minMonoCompatibility * 100))%)")
+        print("     Stereo Width: \(String(format: "%.1f", stereoWidth * 100))%")
+        print("     Loudness: \(String(format: "%.1f", loudness)) LUFS (target: \(genreThresholds.minLoudness) LUFS)")
+        print("     Dynamic Range: \(String(format: "%.1f", dynamicRange)) dB (max: \(genreThresholds.maxDynamicRange) dB)")
+        print("     Crest Factor: \(String(format: "%.1f", crestFactor)) dB (max: \(genreThresholds.maxCrestFactor) dB)")
+        print("     Peak Level: \(String(format: "%.1f", peakLevel)) dBFS")
         print("  Bass+Low-Mid+Sub: \(String(format: "%.1f", (spectralBalance.subBassEnergy + spectralBalance.bassEnergy + spectralBalance.lowMidEnergy) * 100))%")
         print("  High Freqs (HM+P+A): \(String(format: "%.1f", (spectralBalance.highMidEnergy + spectralBalance.presenceEnergy + spectralBalance.airEnergy) * 100))%")
         print("  🎯 TIER DETECTION:")

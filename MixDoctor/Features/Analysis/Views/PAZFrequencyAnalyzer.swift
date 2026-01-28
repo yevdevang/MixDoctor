@@ -204,6 +204,7 @@ struct PAZFrequencyAnalyzer: View {
 
                 Spacer()
 
+                // Show checkmark if good (score >= 60), warning/error only if issues
                 Image(systemName: frequencyStatusIcon)
                     .foregroundStyle(frequencyStatusColor)
             }
@@ -262,20 +263,20 @@ struct PAZFrequencyAnalyzer: View {
     
     private var frequencyStatusIcon: String {
         let score = frequencyBalanceScore
-        if score >= 85 { return "checkmark.circle.fill" }
-        if score >= 70 { return "checkmark.circle.fill" }
-        if score >= 50 { return "exclamationmark.triangle.fill" }
-        if score >= 30 { return "exclamationmark.triangle" }
-        return "xmark.circle.fill"
+        // Show checkmark for "Acceptable balance" (35-60%) and better
+        if score >= 60 { return "checkmark.circle.fill" }  // Good or excellent
+        if score >= 35 { return "checkmark.circle.fill" }  // Acceptable
+        if score >= 20 { return "exclamationmark.triangle.fill" }  // Needs EQ work
+        return "xmark.circle.fill"  // Critical imbalance
     }
     
     private var frequencyStatusColor: Color {
         let score = frequencyBalanceScore
-        if score >= 85 { return .green }
-        if score >= 70 { return .green }
-        if score >= 50 { return .orange }
-        if score >= 30 { return .orange }
-        return .red
+        // Green for acceptable and better
+        if score >= 60 { return .green }  // Good or excellent
+        if score >= 35 { return .green }  // Acceptable - matches "Acceptable balance" description
+        if score >= 20 { return .orange }  // Needs EQ work
+        return .red  // Critical imbalance
     }
     
     private var shouldShowInsights: Bool {

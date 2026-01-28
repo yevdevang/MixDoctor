@@ -11,6 +11,8 @@ struct SettingsView: View {
     @State private var showClearCacheAlert = false
     @State private var showPaywall = false
     @State private var isRefreshingSubscription = false
+    @State private var showClearAnalysisAlert = false
+    @State private var isClearingAnalysis = false
     @AppStorage("muteLaunchSound") private var muteLaunchSound = false
     @Environment(\.modelContext) private var modelContext
     
@@ -229,6 +231,22 @@ struct SettingsView: View {
                         exit(0)
                     }
                     .foregroundStyle(.red)
+                    
+                    Button {
+                        showClearAnalysisAlert = true
+                    } label: {
+                        HStack {
+                            if isClearingAnalysis {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text("Clearing Analysis...")
+                            } else {
+                                Text("Clear All Analysis")
+                            }
+                        }
+                    }
+                    .foregroundStyle(.orange)
+                    .disabled(isClearingAnalysis)
                 }
                 #endif
             }
@@ -252,6 +270,14 @@ struct SettingsView: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("This will free up space by removing temporary files")
+            }
+            .alert("Clear All Analysis", isPresented: $showClearAnalysisAlert) {
+                Button("Clear Analysis", role: .destructive) {
+                    clearAllAnalysis()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This will remove all analysis results (including JSON files in iCloud) from your files. The audio files will remain, but you'll need to re-analyze them. This is useful for testing score changes.")
             }
             .sheet(isPresented: $viewModel.showAbout) {
                 AboutView()
@@ -299,6 +325,78 @@ struct SettingsView: View {
                 await loadStorageInfo()
             } catch {
             }
+        }
+    }
+    
+    private func clearAllAnalysis() {
+        Task { @MainActor in
+            isClearingAnalysis = true
+            
+            do {
+                // Fetch all audio files
+                let audioFilesDescriptor = FetchDescriptor<AudioFile>()
+                let audioFiles = try modelContext.fetch(audioFilesDescriptor)
+                
+                print("🧹 Clearing analysis for \(audioFiles.count) files...")
+                
+                // Step 1: Delete JSON files from iCloud (prevent re-loading)
+                var jsonDeletedCount = 0
+                for audioFile in audioFiles {
+                    if audioFile.analysisResult != nil {
+                        // Delete the JSON file for this audio file
+                        AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: audioFile.fileName)
+                        jsonDeletedCount += 1
+                        print("🗑️ Deleted JSON for: \(audioFile.fileName)")
+                    }
+                }
+                print("💾 Deleted \(jsonDeletedCount) JSON files from iCloud")
+                
+                // Step 2: Clear the relationship from SwiftData (don't delete yet)
+                var clearedCount = 0
+                for audioFile in audioFiles {
+                    if audioFile.analysisResult != nil {
+                        audioFile.analysisResult = nil
+                        audioFile.dateAnalyzed = nil
+                        clearedCount += 1
+                        print("✅ Cleared relationship for: \(audioFile.fileName)")
+                    }
+                }
+                
+                // Step 3: Save to commit relationship changes
+                try modelContext.save()
+                print("💾 Saved relationship changes for \(clearedCount) files")
+                
+                // Step 4: Now fetch and delete orphaned AnalysisResults from SwiftData
+                let analysisDescriptor = FetchDescriptor<AnalysisResult>()
+                let allAnalysisResults = try modelContext.fetch(analysisDescriptor)
+                
+                var deletedCount = 0
+                for result in allAnalysisResults {
+                    // Delete only orphaned results (no associated audio file)
+                    if result.audioFile == nil {
+                        modelContext.delete(result)
+                        deletedCount += 1
+                    }
+                }
+                
+                // Step 5: Final save to commit deletions
+                try modelContext.save()
+                print("🗑️ Deleted \(deletedCount) orphaned analysis results from SwiftData")
+                
+                // Verify remaining files
+                let remainingFiles = try modelContext.fetch(audioFilesDescriptor)
+                print("✅ Successfully cleared all analysis data")
+                print("📊 Audio files remaining: \(remainingFiles.count) (should be \(audioFiles.count))")
+                print("📊 Files now ready for re-analysis")
+                
+                // Small delay for visual feedback
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                
+            } catch {
+                print("❌ Error clearing analysis: \(error.localizedDescription)")
+            }
+            
+            isClearingAnalysis = false
         }
     }
     

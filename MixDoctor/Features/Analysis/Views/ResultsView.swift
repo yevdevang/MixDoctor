@@ -156,8 +156,16 @@ struct ResultsView: View {
             }
             .frame(maxWidth: .infinity, alignment: .center)
 
+            // Genre and Mix Stage Selection
+            analysisSettingsCard()
+
             // Overall Score Card - always show
             overallScoreCard(result: result)
+
+            // Unmixed Track Warning Banner (if detected)
+            if !result.isProfessionallyMixed {
+                unmixedTrackWarningBanner(result: result)
+            }
 
             // Individual Metrics
             VStack(spacing: 16) {
@@ -180,8 +188,8 @@ struct ResultsView: View {
                 modernAnalysisOnlySection(result: result)
             }
 
-            // Recommendations Section - ONLY show for scores < 85
-            if !result.aiRecommendations.isEmpty && result.overallScore < 85 {
+            // Recommendations Section - ALWAYS show for unmixed tracks OR scores < 85
+            if !result.aiRecommendations.isEmpty && (!result.isProfessionallyMixed || result.overallScore < 85) {
                 modernRecommendationsOnlySection(result: result)
             }
 
@@ -306,6 +314,69 @@ struct ResultsView: View {
         .background(Color.backgroundSecondary)
         .cornerRadius(AppConstants.cornerRadius)
     }
+    
+    // MARK: - Analysis Settings Card
+    
+    private func analysisSettingsCard() -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Image(systemName: "slider.horizontal.3")
+                    .foregroundStyle(.blue)
+                
+                Text("Analysis Settings")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                
+                Spacer()
+            }
+            
+            VStack(spacing: 12) {
+                // Genre Display (read-only)
+                HStack {
+                    Text("Genre:")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 80, alignment: .leading)
+                    
+                    Text(audioFile.genre ?? "Auto-detect")
+                        .foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.gray.opacity(0.05))
+                        .cornerRadius(8)
+                }
+                
+                // Mix Stage Display (read-only)
+                HStack {
+                    Text("Stage:")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 80, alignment: .leading)
+                    
+                    Text(mixStageDisplayName(audioFile.mixStage))
+                        .foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.gray.opacity(0.05))
+                        .cornerRadius(8)
+                }
+            }
+        }
+        .padding()
+        .background(Color.backgroundSecondary)
+        .cornerRadius(AppConstants.cornerRadius)
+    }
+    
+    private func mixStageDisplayName(_ stage: String?) -> String {
+        switch stage {
+        case "mix": return "Mix (Pre-Master)"
+        case "master_streaming": return "Master (Streaming)"
+        case "master_cd": return "Master (CD/Loud)"
+        default: return "Mix (Pre-Master)"
+        }
+    }
 
     // MARK: - Modern Score Card
 
@@ -333,43 +404,63 @@ struct ResultsView: View {
             }
             
             // Score Circle with Modern Design
-            ZStack {
-                // Background Circle
-                Circle()
-                    .stroke(Color.gray.opacity(0.15), lineWidth: 12)
-                    .frame(width: 160, height: 160)
+            if result.isProfessionallyMixed {
+                ZStack {
+                    // Background Circle
+                    Circle()
+                        .stroke(Color.gray.opacity(0.15), lineWidth: 12)
+                        .frame(width: 160, height: 160)
 
-                // Progress Circle
-                Circle()
-                    .trim(from: 0, to: result.overallScore / 100)
-                    .stroke(
-                        LinearGradient(
-                            gradient: Gradient(colors: [Color.scoreColor(for: result.overallScore).opacity(0.7), Color.scoreColor(for: result.overallScore)]),
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        style: StrokeStyle(lineWidth: 12, lineCap: .round)
-                    )
-                    .frame(width: 160, height: 160)
-                    .rotationEffect(.degrees(-90))
-                    .animation(.easeOut(duration: 1.5), value: result.overallScore)
+                    // Progress Circle
+                    Circle()
+                        .trim(from: 0, to: result.overallScore / 100)
+                        .stroke(
+                            LinearGradient(
+                                gradient: Gradient(colors: [Color.scoreColor(for: result.overallScore).opacity(0.7), Color.scoreColor(for: result.overallScore)]),
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            style: StrokeStyle(lineWidth: 12, lineCap: .round)
+                        )
+                        .frame(width: 160, height: 160)
+                        .rotationEffect(.degrees(-90))
+                        .animation(.easeOut(duration: 1.5), value: result.overallScore)
 
-                // Score Content
-                VStack(spacing: 4) {
-                    Text("\(Int(result.overallScore))")
-                        .font(.system(size: 44, weight: .bold, design: .rounded))
-                        .foregroundColor(Color.scoreColor(for: result.overallScore))
+                    // Score Content
+                    VStack(spacing: 4) {
+                        Text("\(Int(result.overallScore))")
+                            .font(.system(size: 44, weight: .bold, design: .rounded))
+                            .foregroundColor(Color.scoreColor(for: result.overallScore))
 
-                    Text("Score")
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .foregroundStyle(.secondary)
+                        Text("Score")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } else {
+                // Unmixed track - show indicator instead of score
+                ZStack {
+                    Circle()
+                        .stroke(Color.orange.opacity(0.3), lineWidth: 12)
+                        .frame(width: 160, height: 160)
+
+                    VStack(spacing: 8) {
+                        Image(systemName: "waveform.badge.exclamationmark")
+                            .font(.system(size: 40))
+                            .foregroundColor(.orange)
+
+                        Text("Unmixed")
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.orange)
+                    }
                 }
             }
             
             // Score Description with Status
             VStack(spacing: 8) {
-                Text(scoreDescription(result.overallScore))
+                Text(scoreDescription(result.overallScore, isProfessionallyMixed: result.isProfessionallyMixed, mixStage: audioFile.mixStage))
                     .font(.title3)
                     .fontWeight(.medium)
                     .multilineTextAlignment(.center)
@@ -427,16 +518,23 @@ struct ResultsView: View {
             issues.append("Clipping detected")
         }
         
-        // Phase issues - only flag poor phase coherence
-        if result.phaseCoherence < 0.25 {
+        // Phase issues - flag if phase coherence is below 50% (professional standard for "Problems")
+        // Note: 50-70% is "Acceptable", 70%+ is "Excellent" per industry standards
+        if result.phaseCoherence < 0.50 {
             issues.append("Poor phase coherence")
         }
         
-        // Stereo width - only flag extreme issues
+        // Mono compatibility - flag if below 45% (poor mono compatibility range)
+        if result.monoCompatibility < 0.45 {
+            issues.append("Poor mono compatibility")
+        }
+        
+        // Stereo width - only flag truly extreme issues
+        // Metal with good mono compatibility can use 95-100% professionally
         if result.stereoWidthScore < 10 {
             issues.append("Mono or very narrow stereo")
-        } else if result.stereoWidthScore > 98 {
-            issues.append("Excessive stereo width")
+        } else if result.stereoWidthScore > 100 {
+            issues.append("Impossible stereo width value")
         }
         
         // Frequency balance - use FFT data if available, otherwise use old values
@@ -720,6 +818,88 @@ struct ResultsView: View {
                 .fill(Color.backgroundSecondary)
                 .shadow(color: Color.black.opacity(0.05), radius: 10, x: 0, y: 2)
         )
+    }
+
+    // MARK: - Unmixed Track Warning Banner
+    
+    private func unmixedTrackWarningBanner(result: AnalysisResult) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Header with icon
+            HStack(spacing: 12) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.title)
+                    .foregroundStyle(.orange)
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Unmixed/Raw Recording Detected")
+                        .font(.headline)
+                        .fontWeight(.bold)
+                    
+                    Text("This track needs mixing and mastering")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                
+                Spacer()
+            }
+            
+            Divider()
+            
+            // Explanation
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Why are all metrics showing green?")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                            .font(.caption)
+                        Text("**Technical checks passed** - no phase issues, clipping, or extreme distortion")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "waveform.badge.exclamationmark")
+                            .foregroundStyle(.orange)
+                            .font(.caption)
+                        Text("**Audio balance is problematic** - frequency spectrum is severely imbalanced (see Analysis below)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.leading, 4)
+            }
+            
+            // What to do
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Image(systemName: "lightbulb.fill")
+                        .foregroundStyle(.orange)
+                        .font(.caption)
+                    Text("Next Steps:")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                }
+                
+                Text("This track needs professional mixing to balance frequencies, add compression, and optimize loudness. Check the **Recommendations** below for specific guidance.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 4)
+            }
+        }
+        .padding(20)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color.orange.opacity(0.08))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color.orange.opacity(0.3), lineWidth: 2)
+                )
+        )
+        .shadow(color: Color.orange.opacity(0.1), radius: 10, x: 0, y: 2)
     }
 
     // MARK: - Modern Analysis Only Section
@@ -1129,11 +1309,23 @@ struct ResultsView: View {
         return strengths
     }
 
-    private func scoreDescription(_ score: Double) -> String {
+    private func scoreDescription(_ score: Double, isProfessionallyMixed: Bool, mixStage: String?) -> String {
+        let isMaster = mixStage == "master_streaming" || mixStage == "master_cd"
+        let qualityType = isMaster ? "Master" : "Mix"
+
+        // If unmixed, don't show positive quality labels
+        if !isProfessionallyMixed {
+            switch score {
+            case 70...100: return "Unmixed - Needs Processing"
+            case 50..<70: return "Unmixed - Raw Recording"
+            default: return "Unmixed - Needs Work"
+            }
+        }
+
         switch score {
-        case 85...100: return "Excellent Mix Quality"
-        case 70..<85: return "Good Mix Quality"
-        case 50..<70: return "Fair Mix Quality"
+        case 85...100: return "Excellent \(qualityType) Quality"
+        case 70..<85: return "Good \(qualityType) Quality"
+        case 50..<70: return "Fair \(qualityType) Quality"
         default: return "Needs Improvement"
         }
     }
@@ -1141,31 +1333,77 @@ struct ResultsView: View {
     // MARK: - Metric Cards
 
     private func stereoWidthCard(result: AnalysisResult) -> some View {
-        let hideIssues = (result.overallScore >= 85)
+        // Only hide issues for truly excellent scores (90+), not just good scores (85+)
+        let hideIssues = (result.overallScore >= 90)
+        
+        // Get genre-aware description
+        let genre = audioFile.genre
+        let description = hideIssues ? "" : stereoWidthDescription(result.stereoWidthScore, genre: genre)
+        
         return MetricCard(
             title: "Stereo Width",
             icon: "arrow.left.and.right",
             value: result.stereoWidthScore,
             unit: "%",
             status: hideIssues ? .good : (result.hasStereoIssues ? .warning : .good),
-            description: hideIssues ? "" : stereoWidthDescription(result.stereoWidthScore)
+            description: description
         )
     }
 
     private func phaseCoherenceCard(result: AnalysisResult) -> some View {
-        MetricCard(
+        // Genre-aware phase coherence status (aligned with AudioKitService.swift logic)
+        let minPhaseCoherenceForGenre: Double
+        let genreLower = audioFile.genre?.lowercased() ?? ""
+        
+        // FIXED: Handle compound genres like "EDM/Electronic", "Rock/Indie", etc.
+        if genreLower.contains("edm") || genreLower.contains("electronic") || genreLower.contains("hip") || genreLower.contains("rap") || genreLower.contains("trap") || genreLower.contains("dance") || genreLower.contains("techno") || genreLower.contains("dubstep") {
+            minPhaseCoherenceForGenre = 0.50  // 50% - Tight, centered mix
+        } else if genreLower.contains("pop") || genreLower.contains("r&b") || genreLower.contains("soul") {
+            minPhaseCoherenceForGenre = 0.45  // 45% - Balanced commercial width
+        } else if genreLower.contains("rock") || genreLower.contains("indie") || genreLower.contains("metal") || genreLower.contains("punk") || genreLower.contains("alternative") {
+            minPhaseCoherenceForGenre = 0.40  // 40% - Moderate (wide guitars acceptable)
+        } else if genreLower.contains("country") || genreLower.contains("folk") {
+            minPhaseCoherenceForGenre = 0.40  // 40% - Moderate (natural acoustic spread)
+        } else if genreLower.contains("jazz") || genreLower.contains("blues") {
+            minPhaseCoherenceForGenre = 0.30  // 30% - Lower (natural room ambience, wide soundstage)
+        } else if genreLower.contains("classical") || genreLower.contains("orchestral") {
+            minPhaseCoherenceForGenre = 0.25  // 25% - Low (wide stereo imaging is essential)
+        } else if genreLower.contains("ambient") || genreLower.contains("drone") || genreLower.contains("experimental") {
+            minPhaseCoherenceForGenre = 0.20  // 20% - Very Low (artistic wide stereo)
+        } else if genreLower.contains("acoustic") || genreLower.contains("singer") {
+            minPhaseCoherenceForGenre = 0.35  // 35% - Moderate (intimate but natural)
+        } else {
+            minPhaseCoherenceForGenre = 0.35  // 35% - Conservative default
+        }
+        
+        // Determine status based on genre-aware threshold
+        // ALIGNED WITH DESCRIPTION LOGIC:
+        // - Below minimum: Red error (severe issues)
+        // - Minimum to (minimum + 0.15): Green good ("Good phase coherence")
+        // - Above (minimum + 0.15): Green good ("Excellent phase coherence")
+        let status: MetricCard.Status
+        if result.phaseCoherence < minPhaseCoherenceForGenre {
+            status = .error  // Below minimum = severe phase issues
+        } else if result.phaseCoherence < (minPhaseCoherenceForGenre + 0.15) {
+            status = .good  // ✅ FIXED: "Good" description should show green checkmark!
+        } else {
+            status = .good  // Excellent phase = green checkmark
+        }
+        
+        return MetricCard(
             title: "Phase Coherence",
             icon: "waveform.path",
             value: result.phaseCoherence * 100,
             unit: "%",
-            status: result.hasPhaseIssues ? .error : .good,
-            description: phaseDescription(result.phaseCoherence)
+            status: status,
+            description: phaseDescription(result.phaseCoherence, genre: audioFile.genre)
         )
     }
     
     private func monoCompatibilityCard(result: AnalysisResult) -> some View {
         let compatibilityPercent = result.monoCompatibility * 100
-        let hideIssues = (result.overallScore >= 85)
+        // Only hide issues for truly excellent scores (90+)
+        let hideIssues = (result.overallScore >= 90)
         let status: MetricCard.Status = hideIssues ? .good : (compatibilityPercent >= 60 ? .good : .error)
         
         return MetricCard(
@@ -1182,7 +1420,8 @@ struct ResultsView: View {
         
         // Use score-based logic: ≥80% = good (green), <80% = issue (red)
         let isBalanced = result.frequencyBalanceScore >= 80
-        let hideIssues = (result.overallScore >= 85)
+        // Only hide issues for truly excellent scores (90+)
+        let hideIssues = (result.overallScore >= 90)
         
         return VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -1231,7 +1470,8 @@ struct ResultsView: View {
     }
 
     private func dynamicRangeCard(result: AnalysisResult) -> some View {
-        let hideIssues = (result.overallScore >= 85)
+        // Only hide issues for truly excellent scores (90+)
+        let hideIssues = (result.overallScore >= 90)
         return VStack(alignment: .leading, spacing: 16) {
             // Header
             HStack {
@@ -1474,21 +1714,82 @@ struct ResultsView: View {
 
     // MARK: - Helper Functions
 
-    private func stereoWidthDescription(_ width: Double) -> String {
-        switch width {
-        case 0..<30: return "Very narrow stereo image"
-        case 30..<60: return "Good stereo width"
-        case 60..<80: return "Wide stereo image"
-        default: return "Very wide - mono compatibility risk"
+    private func stereoWidthDescription(_ width: Double, genre: String?) -> String {
+        // Define genre-specific expectations (same as backend logic)
+        let minExpected: Double
+        let maxExpected: Double
+        
+        switch genre?.lowercased() {
+        case "hip-hop", "hip hop", "rap", "trap", "edm", "dance", "techno":
+            minExpected = 15  // 15% - Can be very mono-focused
+            maxExpected = 60  // 60% - Avoid overly wide mixes
+        case "pop", "r&b", "soul", "country", "folk":
+            minExpected = 25  // 25% - Good balance
+            maxExpected = 75  // 75% - Commercial width
+        case "rock", "rock/indie", "indie", "metal", "punk", "alternative":
+            minExpected = 15  // 15% - Modern rock can be narrow (bass-heavy)
+            maxExpected = 100  // 100% - Extremely wide IS professional for metal (Korn masters use 99%+)
+        case "jazz", "blues", "acoustic", "singer-songwriter":
+            minExpected = 35  // 35% - Natural, spacious
+            maxExpected = 90  // 90% - Live feel
+        case "classical", "orchestral", "ambient", "drone", "experimental":
+            minExpected = 40  // 40% - Wide, immersive soundstage
+            maxExpected = 120 // 120% - Very wide, artistic
+        default:
+            minExpected = 20  // 20% - Default conservative
+            maxExpected = 80  // 80% - Default conservative
+        }
+        
+        // Generate description based on genre context
+        if width < minExpected {
+            return "Narrow for \(genre ?? "this genre") - consider widening"
+        } else if width > maxExpected {
+            return "Very wide for \(genre ?? "this genre") - check mono compatibility"
+        } else if width < (minExpected + maxExpected) / 2 {
+            return "Good stereo width for \(genre ?? "this genre")"
+        } else {
+            return "Wide stereo image - great for \(genre ?? "this genre")"
         }
     }
 
-    private func phaseDescription(_ coherence: Double) -> String {
-        switch coherence {
-        case -1..<(-0.3): return "Severe phase cancellation"
-        case (-0.3)..<0.3: return "Possible phase issues"
-        case 0.3..<0.7: return "Good phase relationship"
-        default: return "Excellent phase coherence"
+    private func phaseDescription(_ coherence: Double, genre: String?) -> String {
+        // Genre-aware phase coherence descriptions
+        let minExpected: Double
+        let genreName = genre ?? "this genre"
+        let genreLower = genre?.lowercased() ?? ""
+        
+        // FIXED: Handle compound genres like "EDM/Electronic", "Rock/Indie", etc.
+        if genreLower.contains("edm") || genreLower.contains("electronic") || genreLower.contains("hip") || genreLower.contains("rap") || genreLower.contains("trap") || genreLower.contains("dance") || genreLower.contains("techno") || genreLower.contains("dubstep") {
+            minExpected = 0.50  // 50% minimum
+        } else if genreLower.contains("pop") || genreLower.contains("r&b") || genreLower.contains("soul") {
+            minExpected = 0.45  // 45% minimum
+        } else if genreLower.contains("rock") || genreLower.contains("indie") || genreLower.contains("metal") || genreLower.contains("punk") || genreLower.contains("alternative") {
+            minExpected = 0.40  // 40% minimum
+        } else if genreLower.contains("country") || genreLower.contains("folk") {
+            minExpected = 0.40  // 40% minimum
+        } else if genreLower.contains("jazz") || genreLower.contains("blues") {
+            minExpected = 0.30  // 30% minimum - wide soundstage is normal
+        } else if genreLower.contains("classical") || genreLower.contains("orchestral") {
+            minExpected = 0.25  // 25% minimum - very wide is expected
+        } else if genreLower.contains("ambient") || genreLower.contains("drone") || genreLower.contains("experimental") {
+            minExpected = 0.20  // 20% minimum - artistic wide stereo
+        } else if genreLower.contains("acoustic") || genreLower.contains("singer") {
+            minExpected = 0.35  // 35% minimum
+        } else {
+            minExpected = 0.35  // 35% default
+        }
+        
+        // Generate description based on genre-specific threshold
+        if coherence < 0 {
+            return "Severe phase cancellation"
+        } else if coherence < minExpected {
+            return "Poor phase coherence - mono cancellation risk"
+        } else if coherence < (minExpected + 0.15) {
+            return "Good phase coherence for \(genreName)"
+        } else if coherence < 0.8 {
+            return "Excellent phase coherence for \(genreName)"
+        } else {
+            return "Perfect phase alignment - very tight stereo"
         }
     }
     
@@ -1548,8 +1849,9 @@ struct ResultsView: View {
             // Perform the analysis completely off the main thread to prevent UI freezing
             let fileURL = audioFile.fileURL
             let genre = audioFile.genre
+            let mixStage = audioFile.mixStage
             let result = try await Task.detached(priority: .userInitiated) {
-                try await AudioKitService.shared.getDetailedAnalysis(for: fileURL, genre: genre)
+                try await AudioKitService.shared.getDetailedAnalysis(for: fileURL, genre: genre, mixStage: mixStage)
             }.value
             
             
@@ -1700,6 +2002,7 @@ struct AnimatedGradientLoader: View {
     @State private var animationOffset: CGFloat = 0
     @State private var pulseScale: CGFloat = 1.0
     @State private var dotScale: [CGFloat] = [1.0, 1.0, 1.0]
+    @State private var progressTracker = AnalysisProgressTracker.shared
     
     var body: some View {
         ZStack {
@@ -1739,15 +2042,43 @@ struct AnimatedGradientLoader: View {
                         .foregroundColor(.white)
                 }
                 
-                VStack(spacing: 12) {
+                VStack(spacing: 16) {
                     Text("Analyzing Audio")
                         .font(.title2.bold())
                         .foregroundColor(.white)
                     
-                    Text("Using advanced AI to analyze your mix...")
+                    // Progress bar with percentage
+                    VStack(spacing: 8) {
+                        ProgressView(value: progressTracker.progress, total: 1.0)
+                            .progressViewStyle(.linear)
+                            .tint(.white)
+                            .frame(maxWidth: 280)
+                            .scaleEffect(x: 1.0, y: 2.0)  // Make it thicker
+                        
+                        HStack(spacing: 12) {
+                            Text("\(Int(progressTracker.progress * 100))%")
+                                .font(.caption.bold())
+                                .foregroundColor(.white.opacity(0.9))
+                                .monospacedDigit()
+                            
+                            #if DEBUG
+                            // Timer - Debug mode only
+                            Text("⏱ \(progressTracker.formattedElapsedTime)")
+                                .font(.caption.bold())
+                                .foregroundColor(.yellow)
+                                .monospacedDigit()
+                            #endif
+                        }
+                    }
+                    .padding(.horizontal, 40)
+                    
+                    // Current step
+                    Text(progressTracker.currentStep)
                         .font(.subheadline)
                         .foregroundColor(.white.opacity(0.9))
                         .multilineTextAlignment(.center)
+                        .frame(height: 40)  // Fixed height to prevent jumping
+                        .padding(.horizontal, 20)
                     
                     Text(fileName)
                         .font(.caption)
@@ -1832,18 +2163,10 @@ struct ScoreGuideView: View {
                     // Score Ranges
                     VStack(spacing: 16) {
                         scoreRangeCard(
-                            range: "95-100",
-                            title: "Reference Quality",
-                            description: "Major label commercial masters (Korn, Green Day, etc.). Perfect loudness, dynamics, and frequency balance. Ready for streaming platforms.",
-                            color: .green,
-                            icon: "star.fill"
-                        )
-
-                        scoreRangeCard(
-                            range: "85-94",
+                            range: "85-100",
                             title: "Professional Commercial",
-                            description: "Radio-ready, streaming-optimized. Excellent mastering with minor room for improvement. Competitive professional quality.",
-                            color: Color(red: 0.0, green: 0.6, blue: 0.0),
+                            description: "Radio-ready, streaming-optimized. Excellent mastering quality. Competitive professional sound ready for major streaming platforms and commercial release.",
+                            color: .green,
                             icon: "checkmark.seal.fill"
                         )
 

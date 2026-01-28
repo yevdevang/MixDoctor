@@ -218,24 +218,34 @@ struct AudioFileRow: View {
             }
 
             // Info
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(audioFile.fileName)
                     .font(.subheadline)
                     .fontWeight(.medium)
                     .lineLimit(1)
 
-                HStack(spacing: 8) {
+                // Row 1: Duration and sample rate
+                HStack(spacing: 4) {
                     Label(formatDuration(audioFile.duration), systemImage: "clock")
+                    Text("•")
                     Text("\(Int(audioFile.sampleRate / 1000))kHz")
-                    
+
                     // Show download status
                     if !fileExists {
-                        Text("• Downloading...")
+                        Text("•")
+                        Text("Downloading...")
                             .foregroundStyle(.orange)
                     }
                 }
-                .font(.caption2)
+                .font(.system(size: 10))
                 .foregroundStyle(.secondary)
+
+                // Row 2: Mix stage
+                if let mixStage = audioFile.mixStage {
+                    Text(formatMixStage(mixStage))
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(mixStageColor(mixStage))
+                }
             }
 
             Spacer()
@@ -251,15 +261,28 @@ struct AudioFileRow: View {
                 }
                 .padding(.trailing, 8)
             } else if let result = audioFile.analysisResult {
-                VStack(spacing: 2) {
-                    Text("\(Int(result.overallScore))")
-                        .font(.title3)
-                        .fontWeight(.bold)
-                        .foregroundColor(Color.scoreColor(for: result.overallScore))
-                    
-                    Text("score")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                if result.isProfessionallyMixed {
+                    VStack(spacing: 2) {
+                        Text("\(Int(result.overallScore))")
+                            .font(.title3)
+                            .fontWeight(.bold)
+                            .foregroundColor(Color.scoreColor(for: result.overallScore))
+
+                        Text("score")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    // Unmixed track indicator
+                    VStack(spacing: 2) {
+                        Image(systemName: "waveform.badge.exclamationmark")
+                            .font(.title3)
+                            .foregroundColor(.orange)
+
+                        Text("Unmixed")
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                    }
                 }
             }
             
@@ -360,6 +383,32 @@ struct AudioFileRow: View {
         let minutes = Int(duration) / 60
         let seconds = Int(duration) % 60
         return String(format: "%d:%02d", minutes, seconds)
+    }
+
+    private func formatMixStage(_ stage: String) -> String {
+        switch stage.lowercased() {
+        case "mix":
+            return "Mix"
+        case "master_streaming":
+            return "Master (Streaming)"
+        case "master_cd":
+            return "Master (CD)"
+        default:
+            return stage.capitalized
+        }
+    }
+
+    private func mixStageColor(_ stage: String) -> Color {
+        switch stage.lowercased() {
+        case "mix":
+            return .blue
+        case "master_streaming":
+            return .green
+        case "master_cd":
+            return .orange
+        default:
+            return .secondary
+        }
     }
 }
 

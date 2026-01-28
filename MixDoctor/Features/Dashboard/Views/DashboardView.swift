@@ -48,6 +48,7 @@ struct DashboardView: View {
     @State private var cachedAnalyzedCount: Int = 0
     @State private var cachedIssuesCount: Int = 0
     @State private var cachedAverageScore: Double = 0.0
+    @State private var isInitialLoad = true // Track if we're still loading files initially
 #if targetEnvironment(macCatalyst)
     @State private var fileToDelete: AudioFile?
     @State private var showDeleteConfirmation = false
@@ -138,6 +139,14 @@ struct DashboardView: View {
                 performInitialSync()
                 updateStatistics()
                 
+                // Mark initial load complete after a short delay to allow files to load
+                Task {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+                    await MainActor.run {
+                        isInitialLoad = false
+                    }
+                }
+                
                 // Load missing analysis results from JSON files on app startup
                 Task(priority: .userInitiated) {
                     // Wait for SwiftData to finish loading files
@@ -153,6 +162,10 @@ struct DashboardView: View {
             }
             .onChange(of: audioFiles.count) { old, new in
                 updateStatistics()
+                // Mark initial load complete once files appear
+                if new > 0 && isInitialLoad {
+                    isInitialLoad = false
+                }
             }
 #endif
             .onChange(of: iCloudMonitor.isSyncing) { old, new in
@@ -236,6 +249,12 @@ struct DashboardView: View {
         performInitialSync()
         // Statistics will be updated by loadAudioFiles() in performInitialSync
         
+        // Mark initial load complete after a short delay to allow files to load
+        try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+        await MainActor.run {
+            isInitialLoad = false
+        }
+        
         // Log Firebase Analytics event
         if !hasLoggedDashboardView {
             Analytics.logEvent("dashboard_viewed", parameters: nil)
@@ -316,7 +335,10 @@ struct DashboardView: View {
     
     private var dashboardContent: some View {
         VStack(spacing: 0) {
-            if audioFiles.isEmpty {
+            if isInitialLoad && (audioFiles.isEmpty || iCloudMonitor.isSyncing) {
+                // Show loading state during initial load
+                loadingStateView
+            } else if audioFiles.isEmpty {
                 emptyStateView
             } else {
                 // Statistics cards
@@ -636,6 +658,69 @@ struct DashboardView: View {
     
     // MARK: - Empty State
     
+    private var loadingStateView: some View {
+        GeometryReader { geometry in
+            ScrollView {
+                HStack {
+                    Spacer()
+                    
+                    VStack(spacing: 20) {
+                        Spacer()
+                        
+                        // Show loader when loading files
+                        VStack(spacing: 16) {
+                            ZStack {
+                                // Circular progress indicator
+                                if iCloudMonitor.syncProgress > 0 && iCloudMonitor.syncProgress < 1.0 {
+                                    Circle()
+                                        .stroke(Color.primaryAccent.opacity(0.2), lineWidth: 4)
+                                        .frame(width: 60, height: 60)
+                                    Circle()
+                                        .trim(from: 0, to: iCloudMonitor.syncProgress)
+                                        .stroke(Color.primaryAccent, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                                        .rotationEffect(.degrees(-90))
+                                        .animation(.linear, value: iCloudMonitor.syncProgress)
+                                        .frame(width: 60, height: 60)
+                                }
+                                // Spinning indicator in center
+                                ProgressView()
+                                    .tint(.primaryAccent)
+                                    .scaleEffect(1.2)
+                            }
+                            
+                            VStack(spacing: 8) {
+                                Text("Loading files...")
+                                    .font(.headline)
+                                    .foregroundStyle(.primary)
+                                
+                                if iCloudMonitor.syncProgress > 0 && iCloudMonitor.syncProgress < 1.0 {
+                                    Text("\(Int(iCloudMonitor.syncProgress * 100))% complete")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    Text("Syncing from iCloud")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        
+                        Spacer()
+                    }
+                    .frame(maxWidth: 500, minHeight: geometry.size.height)
+                    
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, minHeight: geometry.size.height)
+            }
+            .refreshable {
+                await iCloudMonitor.syncNow()
+                await scanAndImportFromiCloud()
+                await loadMissingAnalysisResults()
+            }
+        }
+    }
+    
     private var emptyStateView: some View {
         GeometryReader { geometry in
             ScrollView {
@@ -779,6 +864,11 @@ struct DashboardView: View {
             cachedFilteredFiles = files
             isLoadingFiles = false
             
+            // Mark initial load complete once files are loaded
+            if !files.isEmpty {
+                isInitialLoad = false
+            }
+            
             // Update statistics
             updateStatistics()
         }
@@ -847,6 +937,7 @@ struct DashboardView: View {
             // Get filename for analysis
             let fileName = audioFile.fileName
             let genre = audioFile.genre
+            let mixStage = audioFile.mixStage
 
             do {
                 // Run analysis on low-priority background thread to keep UI responsive
@@ -854,7 +945,7 @@ struct DashboardView: View {
                     // Construct fileURL inside background task to avoid blocking main thread
                     let audioDir = iCloudStorageService.shared.getAudioFilesDirectory()
                     let fileURL = audioDir.appendingPathComponent(fileName)
-                    return try await AudioKitService.analyzeAudioFileIsolated(url: fileURL, genre: genre)
+                    return try await AudioKitService.analyzeAudioFileIsolated(url: fileURL, genre: genre, mixStage: mixStage)
                 }.value
 
                 // Now update UI and SwiftData on main actor
@@ -968,6 +1059,7 @@ struct DashboardView: View {
             // Get filename for analysis
             let fileName = audioFile.fileName
             let genre = audioFile.genre
+            let mixStage = audioFile.mixStage
             
             do {
                 // Construct fileURL inside background task to avoid blocking main thread
@@ -975,7 +1067,7 @@ struct DashboardView: View {
                 let fileURL = audioDir.appendingPathComponent(fileName)
                 
                 // This runs completely off main thread
-                let result = try await AudioKitService.analyzeAudioFileIsolated(url: fileURL, genre: genre)
+                let result = try await AudioKitService.analyzeAudioFileIsolated(url: fileURL, genre: genre, mixStage: mixStage)
 
                 // Now update UI and SwiftData on main actor
                 await MainActor.run {
@@ -1386,6 +1478,9 @@ struct DashboardView: View {
                     let sampleRate = basicDescription?.pointee.mSampleRate ?? 44100.0
                     let channels = Int(basicDescription?.pointee.mChannelsPerFrame ?? 2)
                     
+                    // Extract mix stage from filename if present
+                    let mixStage = extractMixStageFromFileName(fileName)
+                    
                     let audioFile = AudioFile(
                         fileName: fileName,
                         fileURL: fileURL,
@@ -1393,7 +1488,9 @@ struct DashboardView: View {
                         sampleRate: sampleRate,
                         bitDepth: 16,
                         numberOfChannels: channels,
-                        fileSize: fileSize
+                        fileSize: fileSize,
+                        genre: nil,  // Genre must be set manually by user
+                        mixStage: mixStage
                     )
                     
                     modelContext.insert(audioFile)
@@ -1437,6 +1534,11 @@ struct DashboardView: View {
             await MainActor.run {
                 iCloudMonitor.isSyncing = false
                 iCloudMonitor.syncProgress = filesToDownload.isEmpty ? 0.0 : 1.0
+                
+                // Mark initial load complete
+                if imported > 0 || !audioFiles.isEmpty {
+                    isInitialLoad = false
+                }
             }
             
             if imported > 0 {
@@ -1723,6 +1825,34 @@ struct DashboardView: View {
         
         print("   ✅ Verification passed: File exists, size matches, dates are reasonable")
         return true
+    }
+    
+    /// Extract mix stage from filename
+    /// Examples:
+    /// - "filename - Mix.mp3" → "mix"
+    /// - "filename - Master(Streaming).mp3" → "master_streaming"
+    /// - "filename - Master(CD-Loud).mp3" → "master_cd"
+    /// - "filename.mp3" → "mix" (default)
+    private func extractMixStageFromFileName(_ fileName: String) -> String {
+        let fileNameWithoutExtension = (fileName as NSString).deletingPathExtension
+        
+        // Check for " - Mix" suffix
+        if fileNameWithoutExtension.hasSuffix(" - Mix") {
+            return "mix"
+        }
+        
+        // Check for " - Master(Streaming)" suffix
+        if fileNameWithoutExtension.hasSuffix(" - Master(Streaming)") {
+            return "master_streaming"
+        }
+        
+        // Check for " - Master(CD-Loud)" suffix
+        if fileNameWithoutExtension.hasSuffix(" - Master(CD-Loud)") {
+            return "master_cd"
+        }
+        
+        // Default to "mix" if no stage suffix found
+        return "mix"
     }
 
     

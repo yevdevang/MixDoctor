@@ -9,9 +9,11 @@ struct ImportView: View {
     @State private var isShowingDocumentPicker = false
     @State private var isDropTargeted = false
     @State private var selectedGenre: String?
+    @State private var selectedMixStage: String? = "mix"  // Default to "mix"
     @Binding var selectedAudioFile: AudioFile?
     @Binding var selectedTab: Int
     @Binding var shouldAutoPlay: Bool
+    @State private var showBatchImportInfo = false
     #if targetEnvironment(macCatalyst)
     @State private var fileToDelete: AudioFile?
     @State private var showDeleteConfirmation = false
@@ -63,6 +65,11 @@ struct ImportView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(viewModel?.infoMessage ?? "")
+        }
+        .alert("Batch Import", isPresented: $showBatchImportInfo) {
+            Button("Got it", role: .cancel) { }
+        } message: {
+            Text("When importing multiple files, all files will receive the same Genre and Stage settings you've selected above.\n\nTo use different settings for different files, import them separately.")
         }
         #if targetEnvironment(macCatalyst)
         .alert("Delete File", isPresented: $showDeleteConfirmation) {
@@ -158,6 +165,9 @@ struct ImportView: View {
         .onChange(of: selectedGenre) { oldValue, newValue in
             viewModel.selectedGenre = newValue
         }
+        .onChange(of: selectedMixStage) { oldValue, newValue in
+            viewModel.selectedMixStage = newValue
+        }
         .task {
             // Run loading operations on background thread to avoid blocking UI during tab switch
             await Task.detached(priority: .userInitiated) {
@@ -252,6 +262,88 @@ struct ImportView: View {
                     }
                     .buttonStyle(.plain)
                     
+                    // Mix Stage selection dropdown - full width
+                    Menu {
+                        Button {
+                            selectedMixStage = "mix"
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Mix (Pre-Master)")
+                                    Text("Raw mix, -16 to -20 LUFS")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                if selectedMixStage == "mix" {
+                                    Spacer()
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(Color.primaryAccent)
+                                }
+                            }
+                        }
+                        
+                        Button {
+                            selectedMixStage = "master_streaming"
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Master (Streaming)")
+                                    Text("Spotify/Apple, -14 LUFS")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                if selectedMixStage == "master_streaming" {
+                                    Spacer()
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(Color.primaryAccent)
+                                }
+                            }
+                        }
+                        
+                        Button {
+                            selectedMixStage = "master_cd"
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Master (CD/Loud)")
+                                    Text("CD/Physical, -9 to -11 LUFS")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                if selectedMixStage == "master_cd" {
+                                    Spacer()
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(Color.primaryAccent)
+                                }
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Text("Stage:")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.primary)
+                            Text(mixStageDisplayName(selectedMixStage))
+                                .font(.subheadline)
+                                .foregroundStyle(Color.primary)
+                            Spacer()
+                            Image(systemName: "chevron.down")
+                                .font(.caption)
+                                .foregroundStyle(Color.secondaryText)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(Color.backgroundSecondary)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .strokeBorder(Color.primaryAccent.opacity(0.3), lineWidth: 1)
+                                )
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    
                     // Browse Files button - full width
                     Button {
                         isShowingDocumentPicker = true
@@ -306,7 +398,16 @@ struct ImportView: View {
                 }
                 .buttonStyle(.bordered)
                 .disabled(viewModel.isImporting)
-                
+
+                // Info button for batch import
+                Button {
+                    showBatchImportInfo = true
+                } label: {
+                    Image(systemName: "info.circle")
+                        .foregroundStyle(Color.primaryAccent)
+                }
+                .buttonStyle(.bordered)
+
                 // Genre selection dropdown
                 Menu {
                     ForEach(AppConstants.availableGenres, id: \.self) { genre in
@@ -344,6 +445,67 @@ struct ImportView: View {
                 }
                 .buttonStyle(.plain)
                 
+                // Mix Stage selection dropdown
+                Menu {
+                    Button {
+                        selectedMixStage = "mix"
+                    } label: {
+                        HStack {
+                            Text("Mix (Pre-Master)")
+                            if selectedMixStage == "mix" {
+                                Spacer()
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(Color.primaryAccent)
+                            }
+                        }
+                    }
+                    
+                    Button {
+                        selectedMixStage = "master_streaming"
+                    } label: {
+                        HStack {
+                            Text("Master (Streaming)")
+                            if selectedMixStage == "master_streaming" {
+                                Spacer()
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(Color.primaryAccent)
+                            }
+                        }
+                    }
+                    
+                    Button {
+                        selectedMixStage = "master_cd"
+                    } label: {
+                        HStack {
+                            Text("Master (CD/Loud)")
+                            if selectedMixStage == "master_cd" {
+                                Spacer()
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(Color.primaryAccent)
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text("Stage:")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Text(mixStageDisplayName(selectedMixStage))
+                            .font(.subheadline)
+                            .foregroundStyle(Color.primary)
+                        Image(systemName: "chevron.down")
+                            .font(.caption2)
+                            .foregroundStyle(Color.secondaryText)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color.backgroundSecondary)
+                    )
+                }
+                .buttonStyle(.plain)
+                
                 Button {
                     isShowingDocumentPicker = true
                 } label: {
@@ -363,6 +525,15 @@ struct ImportView: View {
                         .foregroundStyle(.primary)
                     Spacer()
                     
+                    // Info button for batch import
+                    Button {
+                        showBatchImportInfo = true
+                    } label: {
+                        Image(systemName: "info.circle")
+                            .foregroundStyle(Color.primaryAccent)
+                    }
+                    .font(.subheadline)
+
                     // Scan for orphaned files button
                     Button {
                         Task {
@@ -417,6 +588,88 @@ struct ImportView: View {
                                         selectedGenre == nil ? Color.secondary.opacity(0.3) : Color.primaryAccent.opacity(0.5),
                                         lineWidth: selectedGenre == nil ? 1 : 2
                                     )
+                            )
+                    )
+                }
+                .buttonStyle(.plain)
+                
+                // Mix Stage selection dropdown - full width on iOS
+                Menu {
+                    Button {
+                        selectedMixStage = "mix"
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Mix (Pre-Master)")
+                                Text("Raw mix, -16 to -20 LUFS")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if selectedMixStage == "mix" {
+                                Spacer()
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(Color.primaryAccent)
+                            }
+                        }
+                    }
+                    
+                    Button {
+                        selectedMixStage = "master_streaming"
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Master (Streaming)")
+                                Text("Spotify/Apple, -14 LUFS")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if selectedMixStage == "master_streaming" {
+                                Spacer()
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(Color.primaryAccent)
+                            }
+                        }
+                    }
+                    
+                    Button {
+                        selectedMixStage = "master_cd"
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Master (CD/Loud)")
+                                Text("CD/Physical, -9 to -11 LUFS")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if selectedMixStage == "master_cd" {
+                                Spacer()
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(Color.primaryAccent)
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Text("Stage:")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.primary)
+                        Text(mixStageDisplayName(selectedMixStage))
+                            .font(.subheadline)
+                            .foregroundStyle(Color.primary)
+                        Spacer()
+                        Image(systemName: "chevron.down")
+                            .font(.caption)
+                            .foregroundStyle(Color.secondaryText)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color.backgroundSecondary)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .strokeBorder(Color.primaryAccent.opacity(0.3), lineWidth: 1)
                             )
                     )
                 }
@@ -578,7 +831,7 @@ struct ImportView: View {
             }
             
             if !urls.isEmpty {
-                await viewModel.importFiles(urls, genre: selectedGenre)
+                await viewModel.importFiles(urls, genre: selectedGenre, mixStage: selectedMixStage)
                 
                 // Select the first file if nothing is selected
                 if !viewModel.importedFiles.isEmpty && selectedAudioFile == nil {
@@ -602,7 +855,7 @@ struct ImportView: View {
             }
             
             Task {
-                await viewModel.importFiles(urls, genre: selectedGenre)
+                await viewModel.importFiles(urls, genre: selectedGenre, mixStage: selectedMixStage)
                 
                 // Just select the first file, don't auto-play or switch tabs
                 if !viewModel.importedFiles.isEmpty && selectedAudioFile == nil {
@@ -654,6 +907,15 @@ struct ImportView: View {
             set: { newValue in viewModel?.showInfo = newValue }
         )
     }
+    
+    private func mixStageDisplayName(_ stage: String?) -> String {
+        switch stage {
+        case "mix": return "Mix (Pre-Master)"
+        case "master_streaming": return "Master (Streaming)"
+        case "master_cd": return "Master (CD/Loud)"
+        default: return "Mix (Pre-Master)"
+        }
+    }
 }
 
 // MARK: - Supporting Views
@@ -668,17 +930,32 @@ private struct ImportedFileRow: View {
             // Status icon
             statusIcon
             
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(audioFile.fileName)
                     .font(.headline)
                     .lineLimit(1)
 
-                // Metadata - allow wrapping to multiple lines if needed
-                Text("\(secondsText(duration: audioFile.duration)) • \(sampleRateText(sampleRate: audioFile.sampleRate)) • \(audioFile.bitDepth)-bit • \(channelLabel(for: audioFile.numberOfChannels)) • \(FileManager.default.formatFileSize(audioFile.fileSize))")
-                    .font(.caption)
-                    .foregroundStyle(Color.secondaryText)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
+                // Row 1: Audio specs
+                HStack(spacing: 3) {
+                    Text(secondsText(duration: audioFile.duration))
+                    Text("•")
+                    Text(sampleRateText(sampleRate: audioFile.sampleRate))
+                    Text("•")
+                    Text("\(audioFile.bitDepth)-bit")
+                    Text("•")
+                    Text(channelLabel(for: audioFile.numberOfChannels))
+                    Text("•")
+                    Text(FileManager.default.formatFileSize(audioFile.fileSize))
+                }
+                .font(.system(size: 10))
+                .foregroundStyle(Color.secondaryText)
+
+                // Row 2: Mix stage
+                if let mixStage = audioFile.mixStage {
+                    Text(formatMixStage(mixStage))
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(mixStageColor(mixStage))
+                }
             }
             
             Spacer(minLength: 8)
@@ -806,6 +1083,32 @@ private struct ImportedFileRow: View {
             return "Stereo"
         default:
             return "\(count) ch"
+        }
+    }
+
+    private func formatMixStage(_ stage: String) -> String {
+        switch stage.lowercased() {
+        case "mix":
+            return "Mix"
+        case "master_streaming":
+            return "Master (Streaming)"
+        case "master_cd":
+            return "Master (CD)"
+        default:
+            return stage.capitalized
+        }
+    }
+
+    private func mixStageColor(_ stage: String) -> Color {
+        switch stage.lowercased() {
+        case "mix":
+            return .blue
+        case "master_streaming":
+            return .green
+        case "master_cd":
+            return .orange
+        default:
+            return Color.secondaryText
         }
     }
 }

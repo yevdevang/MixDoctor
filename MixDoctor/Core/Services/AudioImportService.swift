@@ -71,7 +71,7 @@ final class AudioImportService {
     
     // MARK: - Public API
     
-    func importAudioFile(from url: URL, modelContext: ModelContext? = nil, genre: String? = nil) async throws -> AudioFile {
+    func importAudioFile(from url: URL, modelContext: ModelContext? = nil, genre: String? = nil, mixStage: String? = "Mix") async throws -> AudioFile {
         
         // Try to start accessing security-scoped resource
         // Note: This may return false if already accessed by caller, which is OK
@@ -86,6 +86,8 @@ final class AudioImportService {
         print("   Source path: \(url.path)")
         print("   Full URL: \(url.absoluteString)")
         print("   Security-scoped resource: \(didStart ? "started" : "already accessed or not needed")")
+        print("   📋 Genre parameter: \(genre ?? "nil")")
+        print("   📋 Mix Stage parameter: \(mixStage ?? "nil")")
         
         // CRITICAL FIRST CHECK: Try to actually read file data BEFORE anything else
         // This catches files that appear to exist but aren't actually downloaded
@@ -183,37 +185,68 @@ final class AudioImportService {
             }
             
             // Check for duplicates BEFORE copying to iCloud container
+            // Allow same file with different genre/stage combinations
             if let modelContext = modelContext {
                 let fileName = url.lastPathComponent
                 let fileSize = metadata.fileSize
                 let duration = metadata.duration
                 
                 print("🔍 Checking duplicate for: \(fileName), size: \(fileSize), duration: \(duration)")
+                print("   Genre: \(genre ?? "nil"), MixStage: \(mixStage ?? "nil")")
                 
-                // Check if file already exists in app's iCloud container
-                let iCloudService = iCloudStorageService.shared
-                let containerDirectory = iCloudService.getAudioFilesDirectory()
-                let potentialDestinationURL = containerDirectory.appendingPathComponent(fileName)
+                // Check database for existing file with SAME genre AND stage
+                // Extract base name (without stage suffix) for proper comparison
+                // Example: "Song - Mix.wav" -> "Song"
+                let extractBaseName: (String) -> String = { fullName in
+                    let nameWithoutExt = (fullName as NSString).deletingPathExtension
+                    // Remove stage suffix if present (format: "Name - Stage")
+                    if let dashIndex = nameWithoutExt.range(of: " - ", options: .backwards) {
+                        return String(nameWithoutExt[..<dashIndex.lowerBound])
+                    }
+                    return nameWithoutExt
+                }
                 
-                print("   Container directory: \(containerDirectory.path)")
-                print("   Checking if file exists in container at: \(potentialDestinationURL.path)")
-                let existsInContainer = FileManager.default.fileExists(atPath: potentialDestinationURL.path)
-                print("   File exists in container: \(existsInContainer)")
+                let baseNameToImport = extractBaseName(fileName)
+                print("   Base name to import: \(baseNameToImport)")
                 
-                // ONLY throw duplicate error if file physically exists in container
-                if existsInContainer {
-                    print("❌ Duplicate detected: File already exists in app's container")
-                    throw AudioImportError.duplicateFile
+                let descriptor = FetchDescriptor<AudioFile>()
+                if let allFiles = try? modelContext.fetch(descriptor) {
+                    let existingFile = allFiles.first { existingFile in
+                        // Compare base names (without stage suffix)
+                        let existingBaseName = extractBaseName(existingFile.fileName)
+                        let sameBaseName = existingBaseName == baseNameToImport
+                        let sameFileSize = existingFile.fileSize == fileSize
+                        let similarDuration = abs(existingFile.duration - duration) < 1.0
+                        let sameGenre = (existingFile.genre ?? "") == (genre ?? "")
+                        let sameStage = (existingFile.mixStage ?? "") == (mixStage ?? "")
+                        
+                        // Only consider duplicate if ALL match: base name, file size, duration, genre, AND stage
+                        return sameBaseName && sameFileSize && similarDuration && sameGenre && sameStage
+                    }
+                    
+                    if let existingFile = existingFile {
+                        // Verify the existing file actually exists
+                        let existingFileURL = existingFile.fileURL
+                        let fileExists = FileManager.default.fileExists(atPath: existingFileURL.path)
+                        
+                        if fileExists {
+                            print("❌ Duplicate detected: Same file with same genre (\(genre ?? "nil")) and stage (\(mixStage ?? "nil")) already exists")
+                            throw AudioImportError.duplicateFile
+                        } else {
+                            print("⚠️ Database record exists but file is missing - will create new entry")
+                        }
+                    } else {
+                        print("✅ No duplicate found - proceeding with import (same file with different genre/stage is allowed)")
+                    }
                 } else {
-                    print("✅ File doesn't exist in container - proceeding with import")
-                    // If database has stale record, it will be overwritten/updated
+                    print("⚠️ Failed to fetch files - proceeding with import")
                 }
             } else {
                 print("⚠️ No modelContext provided - skipping duplicate check")
             }
             
             print("📁 Copying file to app's iCloud container...")
-            let destinationURL = try copyToDocuments(from: url)
+            let destinationURL = try copyToDocuments(from: url, genre: genre, mixStage: mixStage)
             print("✅ File copied to: \(destinationURL.path)")
             
             let audioFile = AudioFile(
@@ -224,7 +257,8 @@ final class AudioImportService {
                 bitDepth: metadata.bitDepth,
                 numberOfChannels: metadata.numberOfChannels,
                 fileSize: metadata.fileSize,
-                genre: genre
+                genre: genre,
+                mixStage: mixStage
             )
             
             return audioFile
@@ -237,7 +271,7 @@ final class AudioImportService {
         }
     }
     
-    func importMultipleFiles(_ urls: [URL], modelContext: ModelContext? = nil, genre: String? = nil) async throws -> [AudioFile] {
+    func importMultipleFiles(_ urls: [URL], modelContext: ModelContext? = nil, genre: String? = nil, mixStage: String? = nil) async throws -> [AudioFile] {
         var importedFiles: [AudioFile] = []
         var duplicateErrors: [Error] = []
         var iCloudError: Error?
@@ -245,7 +279,7 @@ final class AudioImportService {
         
         for url in urls {
             do {
-                let audioFile = try await importAudioFile(from: url, modelContext: modelContext, genre: genre)
+                let audioFile = try await importAudioFile(from: url, modelContext: modelContext, genre: genre, mixStage: mixStage)
                 importedFiles.append(audioFile)
             } catch let error as AudioImportError where error == .duplicateFile {
                 // Track duplicates separately - don't fail the whole operation
@@ -418,7 +452,7 @@ final class AudioImportService {
         
         // MARK: - File Management
         
-        private func copyToDocuments(from sourceURL: URL) throws -> URL {
+        private func copyToDocuments(from sourceURL: URL, genre: String? = nil, mixStage: String? = nil) throws -> URL {
             print("  📂 copyToDocuments called")
             print("  Source: \(sourceURL.path)")
             
@@ -438,8 +472,38 @@ final class AudioImportService {
             let baseName = sourceURL.deletingPathExtension().lastPathComponent
             let fileExtension = sourceURL.pathExtension
             
+            // Generate filename with stage suffix
+            // Convert internal stage names to display names
+            let stageDisplayName: String?
+            if let mixStage = mixStage, !mixStage.isEmpty {
+                switch mixStage.lowercased() {
+                case "mix":
+                    stageDisplayName = "Mix"
+                case "master_streaming", "master(streaming)":
+                    stageDisplayName = "Master(Streaming)"
+                case "master_cd", "master(cd/loud)":
+                    stageDisplayName = "Master(CD-Loud)"
+                default:
+                    stageDisplayName = mixStage
+                }
+            } else {
+                stageDisplayName = nil
+            }
             
-            let destinationURL = directoryURL.appendingPathComponent(originalFileName)
+            let finalFileName: String
+            if let displayName = stageDisplayName {
+                // Format: "Original Name - Stage.ext"
+                // Example: "Twisted Transistor - Master(Streaming).wav"
+                finalFileName = "\(baseName) - \(displayName).\(fileExtension)"
+            } else {
+                // No stage specified, use original filename
+                finalFileName = originalFileName
+            }
+            
+            let destinationURL = directoryURL.appendingPathComponent(finalFileName)
+            print("  Original filename: \(originalFileName)")
+            print("  Mix stage: \(mixStage ?? "nil")")
+            print("  Final filename: \(finalFileName)")
             print("  Destination path: \(destinationURL.path)")
             
             // Check if the source file is already in our app's container

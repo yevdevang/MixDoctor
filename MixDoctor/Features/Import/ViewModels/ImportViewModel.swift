@@ -17,6 +17,7 @@ final class ImportViewModel {
     var infoMessage: String?
     var showInfo = false
     var selectedGenre: String?
+    var selectedMixStage: String? = "mix"  // Default to "mix"
 
     init(modelContext: ModelContext, importService: AudioImportService = AudioImportService()) {
         self.modelContext = modelContext
@@ -34,7 +35,7 @@ final class ImportViewModel {
         }
     }
 
-    func importFiles(_ urls: [URL], genre: String? = nil) async {
+    func importFiles(_ urls: [URL], genre: String? = nil, mixStage: String? = nil) async {
         guard !urls.isEmpty else { return }
 
         for (index, url) in urls.enumerated() {
@@ -49,8 +50,21 @@ final class ImportViewModel {
         defer { isImporting = false }
 
         do {
-            // Pass modelContext and genre to importService so it can check for duplicates BEFORE copying to iCloud
-            let files = try await importService.importMultipleFiles(urls, modelContext: modelContext, genre: genre ?? selectedGenre)
+            // Get the final genre and mixStage that will be used
+            let finalGenre = genre ?? selectedGenre
+            let finalMixStage = mixStage ?? selectedMixStage
+            
+            print("📋 ImportViewModel.importFiles - Final params:")
+            print("   Genre: \(finalGenre ?? "nil")")
+            print("   Mix Stage: \(finalMixStage ?? "nil")")
+            
+            // Pass modelContext, genre, and mixStage to importService
+            let files = try await importService.importMultipleFiles(
+                urls,
+                modelContext: modelContext,
+                genre: finalGenre,
+                mixStage: finalMixStage
+            )
             
             
             // Check for duplicates before inserting
@@ -126,8 +140,9 @@ final class ImportViewModel {
     }
     // MARK: - Duplicate Detection
     
-    /// Check if a file is a duplicate based on fileName, fileSize, and duration
+    /// Check if a file is a duplicate based on fileName, fileSize, duration, genre, and mixStage
     /// Also verifies that the existing file physically exists before treating as duplicate
+    /// Allows same file with different genre/stage combinations
     private func isDuplicate(_ file: AudioFile) -> Bool {
         let descriptor = FetchDescriptor<AudioFile>()
         guard let allFiles = try? modelContext.fetch(descriptor) else {
@@ -135,7 +150,7 @@ final class ImportViewModel {
         }
         
         
-        // Check for exact match on fileName and fileSize
+        // Check for exact match on fileName, fileSize, duration, genre, AND mixStage
         // Duration check within 1 second tolerance (for encoding variations)
         for existingFile in allFiles {
             // Skip comparing the file to itself (same object ID)
@@ -146,11 +161,11 @@ final class ImportViewModel {
             let sameFileName = existingFile.fileName == file.fileName
             let sameFileSize = existingFile.fileSize == file.fileSize
             let similarDuration = abs(existingFile.duration - file.duration) < 1.0
+            let sameGenre = (existingFile.genre ?? "") == (file.genre ?? "")
+            let sameStage = (existingFile.mixStage ?? "") == (file.mixStage ?? "")
             
-            if sameFileName {
-            }
-            
-            if sameFileName && sameFileSize && similarDuration {
+            // Only consider duplicate if ALL match: file, genre, AND stage
+            if sameFileName && sameFileSize && similarDuration && sameGenre && sameStage {
                 // Before treating as duplicate, verify the existing file actually exists
                 let existingFileURL = existingFile.fileURL
                 let fileExists = FileManager.default.fileExists(atPath: existingFileURL.path)
@@ -163,7 +178,7 @@ final class ImportViewModel {
                     return false // Not a duplicate since existing file is gone
                 }
                 
-                return true // It's a real duplicate
+                return true // It's a real duplicate (same file, genre, AND stage)
             }
         }
         
