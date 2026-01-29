@@ -726,12 +726,18 @@ class ClaudeAPIService {
             • High-Mid 10-20%: Synth clarity (no penalty)
             • High 8-18%: Synthetic sparkle and FX (no penalty)
             
-            JAZZ:
+            JAZZ (includes Big Band, Vocal Jazz, Bebop, Swing):
             • Bass 15-30%: Controlled foundation (no penalty)
             • Low-Mid 20-30%: Instrument warmth (no penalty)
             • Mid 25-40%: Instrument clarity (no penalty)
             • High-Mid 12-22%: Presence (no penalty)
             • High 8-18%: Air and detail (no penalty)
+            ⚠️ BIG BAND/VOCAL JAZZ CHARACTERISTICS (ALL NORMAL):
+            • Higher dynamic range (14-26dB): EXPECTED for brass sections (no penalty)
+            • Wider stereo image: NORMAL for large ensemble (no penalty)
+            • Lower phase coherence (35-60%): NORMAL for multi-mic live recording (no penalty)
+            • Quieter masters (-18 to -26 LUFS): INTENTIONAL dynamic preservation (no penalty)
+            • High crest factor (14-24dB): NORMAL brass transients (no penalty)
             
             CLASSICAL/ORCHESTRAL:
             • Bass 10-25%: Natural orchestral balance (no penalty)

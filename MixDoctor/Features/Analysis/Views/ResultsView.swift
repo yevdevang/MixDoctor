@@ -2163,66 +2163,64 @@ struct ScoreGuideView: View {
                     // Score Ranges
                     VStack(spacing: 16) {
                         scoreRangeCard(
-                            range: "85-100",
-                            title: "Professional Commercial",
-                            description: "Radio-ready, streaming-optimized. Excellent mastering quality. Competitive professional sound ready for major streaming platforms and commercial release.",
+                            range: "88-100",
+                            title: "Professional Master",
+                            description: "Commercial release quality. Optimal loudness (-14 to -6 LUFS), controlled dynamics (4-14 dB), excellent stereo imaging. Ready for streaming platforms.",
                             color: .green,
                             icon: "checkmark.seal.fill"
                         )
 
                         scoreRangeCard(
+                            range: "85-87",
+                            title: "Good Professional",
+                            description: "High quality mix/master with minor areas for improvement. Ready for release with optional refinements.",
+                            color: Color(red: 0.4, green: 0.8, blue: 0.4),
+                            icon: "star.fill"
+                        )
+
+                        scoreRangeCard(
                             range: "75-84",
                             title: "Semi-Professional",
-                            description: "Good mix quality but needs mastering polish. Suitable for demos or independent releases with some refinement.",
+                            description: "Decent mix quality. May need mastering polish or have minor balance issues. Suitable for demos or indie releases.",
                             color: .orange,
                             icon: "waveform.circle.fill"
                         )
-                        
+
                         scoreRangeCard(
-                            range: "60-74",
-                            title: "Amateur/Unmixed",
-                            description: "Track needs professional mixing. Issues with balance, dynamics, or loudness. Not ready for public release.",
-                            color: Color(red: 1.0, green: 0.6, blue: 0.0),
+                            range: "65-74",
+                            title: "Amateur Mix",
+                            description: "Track needs professional mixing. Issues with loudness, frequency balance, or dynamics. Review recommendations for improvement.",
+                            color: Color(red: 1.0, green: 0.5, blue: 0.0),
                             icon: "exclamationmark.triangle.fill"
                         )
-                        
+
                         scoreRangeCard(
-                            range: "Below 60",
-                            title: "Raw/Unprocessed",
-                            description: "Major mixing issues detected. Likely unmixed or has critical technical problems. Requires significant professional work.",
+                            range: "50-64",
+                            title: "Unmixed/Raw",
+                            description: "Raw recording or severely unbalanced mix. Very quiet (<-18 LUFS), poor frequency distribution, or technical issues. Requires complete mixing and mastering.",
                             color: .red,
+                            icon: "waveform.badge.exclamationmark"
+                        )
+
+                        scoreRangeCard(
+                            range: "Below 50",
+                            title: "Critical Issues",
+                            description: "Major technical problems detected. May have severe clipping, phase cancellation, or missing frequency content. Needs re-recording or significant repair.",
+                            color: Color(red: 0.6, green: 0.0, blue: 0.0),
                             icon: "xmark.circle.fill"
                         )
                     }
-                    
-                    // What Affects Score
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text("What Affects Your Score?")
-                            .font(.headline)
-                            .padding(.horizontal)
-                        
-                        VStack(spacing: 12) {
-                            scoreFactorRow(icon: "waveform", title: "Frequency Balance", description: "Sub-bass, bass, mids, and highs distribution")
-                            scoreFactorRow(icon: "speaker.wave.3.fill", title: "Loudness & Dynamics", description: "LUFS levels and dynamic range")
-                            scoreFactorRow(icon: "circle.lefthalf.filled", title: "Stereo Imaging", description: "Stereo width and phase coherence")
-                            scoreFactorRow(icon: "checkmark.circle.fill", title: "Mono Compatibility", description: "How well it translates to mono")
-                            scoreFactorRow(icon: "gauge.with.dots.needle.67percent", title: "Peak Levels", description: "Clipping and headroom management")
-                            scoreFactorRow(icon: "waveform.path.ecg", title: "Compression", description: "Dynamic processing quality")
-                        }
-                        .padding(.horizontal)
-                    }
-                    .padding(.top)
-                    
-                    // Footer Note
+
+                    // Unmixed Detection Note
                     VStack(spacing: 8) {
                         HStack(spacing: 8) {
-                            Image(systemName: "info.circle.fill")
-                                .foregroundStyle(.blue)
-                            Text("Bonus Points")
+                            Image(systemName: "waveform.badge.exclamationmark")
+                                .foregroundStyle(.orange)
+                            Text("Unmixed Detection")
                                 .font(.subheadline.bold())
                         }
-                        
-                        Text("Exceptional tracks can earn up to +12 bonus points for outstanding loudness, phase coherence, mono compatibility, stereo width, and frequency balance.")
+
+                        Text("Mix Doctor automatically detects unmixed/raw recordings based on loudness, frequency balance, and dynamics. When detected, an orange \"Unmixed\" banner appears with specific recommendations for professional mixing.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
@@ -2230,7 +2228,67 @@ struct ScoreGuideView: View {
                     .padding()
                     .background(
                         RoundedRectangle(cornerRadius: 12)
-                            .fill(Color.blue.opacity(0.1))
+                            .fill(Color.orange.opacity(0.1))
+                    )
+                    .padding(.horizontal)
+                    
+                    // What Affects Score
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("Key Scoring Factors")
+                            .font(.headline)
+                            .padding(.horizontal)
+
+                        VStack(spacing: 12) {
+                            scoreFactorRow(icon: "speaker.wave.3.fill", title: "Loudness (LUFS)", description: "Professional: -14 to -6 LUFS. Amateur: below -18 LUFS")
+                            scoreFactorRow(icon: "waveform.path.ecg", title: "Dynamic Range", description: "Professional: 4-14 dB. Over-compressed: <4 dB. Unmixed: >15 dB")
+                            scoreFactorRow(icon: "gauge.with.dots.needle.67percent", title: "Peak Levels", description: "Optimal: -1.5 to 0 dB. Clipping penalized heavily")
+                            scoreFactorRow(icon: "waveform", title: "Frequency Balance", description: "Even distribution across sub, bass, mids, highs")
+                            scoreFactorRow(icon: "circle.lefthalf.filled", title: "Stereo Width", description: "Genre-appropriate width with good mono compatibility")
+                            scoreFactorRow(icon: "waveform.path", title: "Phase Coherence", description: "No phase cancellation, clean stereo image")
+                        }
+                        .padding(.horizontal)
+                    }
+                    .padding(.top)
+
+                    // Professional Standards
+                    VStack(spacing: 8) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "checkmark.seal.fill")
+                                .foregroundStyle(.green)
+                            Text("Professional Standards")
+                                .font(.subheadline.bold())
+                        }
+
+                        Text("Professional masters typically have: -14 to -6 LUFS loudness, peaks at -1.5 to 0 dB, 4-14 dB dynamic range, and >45% mono compatibility. Tracks meeting these standards score 85+.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding()
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color.green.opacity(0.1))
+                    )
+                    .padding(.horizontal)
+
+                    // Amateur/Unmixed Indicators
+                    VStack(spacing: 8) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                            Text("Amateur Mix Indicators")
+                                .font(.subheadline.bold())
+                        }
+
+                        Text("Tracks are flagged as amateur/unmixed when they have: loudness below -18 LUFS, dynamic range over 15 dB, poor frequency balance, or mono compatibility below 45%.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding()
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color.orange.opacity(0.1))
                     )
                     .padding(.horizontal)
                 }

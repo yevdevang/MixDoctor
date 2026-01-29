@@ -282,19 +282,37 @@ public class AudioKitService: ObservableObject {
                 AnalysisProgressTracker.shared.updateProgress(step: "Finalizing results...", progress: 0.95)
             }
             
-            // Use unmixed detection result OR low score to set mixing status
-            // If detected as unmixed OR score < 75 (amateur/unmixed quality), mark it as such for UI banner
+            // ========================================
+            // SMART UNMIXED DETECTION
+            // Genre-aware + Stage-aware logic
+            // ========================================
             let isUnmixedByDetection = result.unmixedDetection!.isLikelyUnmixed
-            let isUnmixedByScore = claudeResponse.score < 75  // Scores below 75 indicate amateur/unmixed quality
-            
-            // Additional check: Severe technical issues (even with ok score) = unmixed
+            let isUnmixedByScore = claudeResponse.score < 70  // Lowered threshold - only very low scores indicate unmixed
+
+            let genreLower = genre?.lowercased() ?? ""
+            let isJazzOrClassical = genreLower.contains("jazz") || genreLower.contains("classical") ||
+                                    genreLower.contains("blues") || genreLower.contains("acoustic") ||
+                                    genreLower.contains("orchestral") || genreLower.contains("live") ||
+                                    genreLower.contains("singer-songwriter")
+
+            // Genre-aware thresholds - Jazz/Classical/Live have naturally different characteristics
+            let minPhaseForGenre: Double = isJazzOrClassical ? 0.15 : 0.40
+            let maxDynamicRangeForGenre: Double = isJazzOrClassical ? 35.0 : 22.0
+
             let hasSevereTechnicalIssues = (
-                result.phaseCoherence < 0.45 ||  // Poor phase coherence
-                (result.stereoWidthScore > 95 && result.monoCompatibility < 0.75) ||  // Excessive width + poor mono
-                result.dynamicRange > 20.0  // Uncompressed
+                result.phaseCoherence < minPhaseForGenre ||
+                (result.stereoWidthScore > 98 && result.monoCompatibility < 0.60) ||  // More lenient
+                result.dynamicRange > maxDynamicRangeForGenre
             )
-            
-            result.isProfessionallyMixed = !(isUnmixedByDetection || isUnmixedByScore || hasSevereTechnicalIssues)
+
+            // Stage-aware: If user selected Master stage, be MORE lenient (mastered = processed)
+            let isMasterStage = mixStage?.lowercased().contains("master") == true
+            let claudeOverride = claudeResponse.score >= (isMasterStage ? 70 : 78)  // Lower threshold for masters
+
+            // Final decision: Claude score can override, OR no unmixed indicators
+            result.isProfessionallyMixed = claudeOverride || !(isUnmixedByDetection || isUnmixedByScore || hasSevereTechnicalIssues)
+
+            print("🔍 UNMIXED CHECK: detection=\(isUnmixedByDetection), score<70=\(isUnmixedByScore), techIssues=\(hasSevereTechnicalIssues), claudeOverride=\(claudeOverride) → isPro=\(result.isProfessionallyMixed)")
             result.aiSummary = claudeResponse.summary
             result.aiRecommendations = claudeResponse.recommendations
             result.isReadyForMastering = claudeResponse.isReadyForMastering
@@ -312,13 +330,21 @@ public class AudioKitService: ObservableObject {
                 print("❌ Analysis Error: \(error.localizedDescription)")
             }
             
-            // API failed - use unmixed detection result OR check for severe technical issues
-            let hasSevereTechnicalIssues = (
-                result.phaseCoherence < 0.45 ||  // Poor phase coherence
-                (result.stereoWidthScore > 95 && result.monoCompatibility < 0.75) ||  // Excessive width + poor mono
-                result.dynamicRange > 20.0  // Uncompressed
+            // API failed - use genre-aware detection logic
+            let genreLowerFallback = genre?.lowercased() ?? ""
+            let isJazzOrClassicalFallback = genreLowerFallback.contains("jazz") || genreLowerFallback.contains("classical") ||
+                                            genreLowerFallback.contains("blues") || genreLowerFallback.contains("acoustic") ||
+                                            genreLowerFallback.contains("orchestral") || genreLowerFallback.contains("live") ||
+                                            genreLowerFallback.contains("singer-songwriter")
+            let minPhaseFallback: Double = isJazzOrClassicalFallback ? 0.15 : 0.40
+            let maxDRFallback: Double = isJazzOrClassicalFallback ? 35.0 : 22.0
+
+            let hasSevereTechnicalIssuesFallback = (
+                result.phaseCoherence < minPhaseFallback ||
+                (result.stereoWidthScore > 98 && result.monoCompatibility < 0.60) ||
+                result.dynamicRange > maxDRFallback
             )
-            result.isProfessionallyMixed = !(result.unmixedDetection!.isLikelyUnmixed || hasSevereTechnicalIssues)
+            result.isProfessionallyMixed = !(result.unmixedDetection!.isLikelyUnmixed || hasSevereTechnicalIssuesFallback)
             
             // Provide more specific error messages based on error type
             if let claudeError = error as? ClaudeAPIError {
@@ -398,6 +424,7 @@ public class AudioKitService: ObservableObject {
         let unmixedDetection = detectUnmixedAudio(
             fileName: fileName,
             genre: genre,  // Pass user-selected genre for genre-aware detection
+            mixStage: mixStage,  // Pass user-selected stage - if set, skip unmixed detection
             dynamicRange: dynamicRangeAnalysis.lufsRange,
             loudness: amplitudeAnalysis.loudness,
             peakLevel: amplitudeAnalysis.peak,
@@ -421,52 +448,37 @@ public class AudioKitService: ObservableObject {
         // ADJUSTED THRESHOLDS (previously too high at 0.55-0.85):
         let hasPhaseIssues: Bool
         let minPhaseCoherenceForGenre: Double
-        
-        switch genre?.lowercased() {
-        case "hip-hop", "hip hop", "rap", "trap":
+
+        // Use .contains() matching for genre strings like "Classical/Orchestral"
+        let genreLowerPhase = genre?.lowercased() ?? ""
+
+        if genreLowerPhase.contains("hip-hop") || genreLowerPhase.contains("hip hop") || genreLowerPhase.contains("rap") || genreLowerPhase.contains("trap") {
             minPhaseCoherenceForGenre = 0.50  // 50% - High (sub-bass must be centered)
-            hasPhaseIssues = stereoAnalysis.phaseCoherence < minPhaseCoherenceForGenre
-            
-        case "electronic", "edm", "dance", "house", "techno", "dubstep":
+        } else if genreLowerPhase.contains("electronic") || genreLowerPhase.contains("edm") || genreLowerPhase.contains("dance") ||
+                  genreLowerPhase.contains("house") || genreLowerPhase.contains("techno") || genreLowerPhase.contains("dubstep") {
             minPhaseCoherenceForGenre = 0.50  // 50% - High (club systems need mono-compatible bass)
-            hasPhaseIssues = stereoAnalysis.phaseCoherence < minPhaseCoherenceForGenre
-            
-        case "pop", "r&b", "soul":
-            minPhaseCoherenceForGenre = 0.45  // 45% - Moderate-High (radio-friendly but allows stereo width)
-            hasPhaseIssues = stereoAnalysis.phaseCoherence < minPhaseCoherenceForGenre
-            
-        case "rock", "metal", "punk":
+        } else if genreLowerPhase.contains("pop") || genreLowerPhase.contains("r&b") || genreLowerPhase.contains("soul") {
+            minPhaseCoherenceForGenre = 0.45  // 45% - Moderate-High (radio-friendly)
+        } else if genreLowerPhase.contains("rock") || genreLowerPhase.contains("metal") || genreLowerPhase.contains("punk") {
             minPhaseCoherenceForGenre = 0.40  // 40% - Moderate (wide guitars acceptable)
-            hasPhaseIssues = stereoAnalysis.phaseCoherence < minPhaseCoherenceForGenre
-            
-        case "country", "folk":
+        } else if genreLowerPhase.contains("country") || genreLowerPhase.contains("folk") {
             minPhaseCoherenceForGenre = 0.40  // 40% - Moderate (natural acoustic spread)
-            hasPhaseIssues = stereoAnalysis.phaseCoherence < minPhaseCoherenceForGenre
-            
-        case "jazz", "blues":
-            minPhaseCoherenceForGenre = 0.30  // 30% - Lower (natural room ambience, wide soundstage)
-            hasPhaseIssues = stereoAnalysis.phaseCoherence < minPhaseCoherenceForGenre
-            
-        case "classical", "orchestral":
-            minPhaseCoherenceForGenre = 0.25  // 25% - Low (wide stereo imaging is essential)
-            hasPhaseIssues = stereoAnalysis.phaseCoherence < minPhaseCoherenceForGenre
-            
-        case "ambient", "drone", "experimental":
+        } else if genreLowerPhase.contains("jazz") || genreLowerPhase.contains("blues") {
+            minPhaseCoherenceForGenre = 0.20  // 20% - Low (Big Band/ensemble room ambience)
+        } else if genreLowerPhase.contains("classical") || genreLowerPhase.contains("orchestral") {
+            minPhaseCoherenceForGenre = 0.20  // 20% - Low (wide stereo imaging essential)
+        } else if genreLowerPhase.contains("live") {
+            minPhaseCoherenceForGenre = 0.15  // 15% - Very Low (room mics, audience spread)
+        } else if genreLowerPhase.contains("ambient") || genreLowerPhase.contains("drone") || genreLowerPhase.contains("experimental") {
             minPhaseCoherenceForGenre = 0.20  // 20% - Very Low (artistic wide stereo)
-            hasPhaseIssues = stereoAnalysis.phaseCoherence < minPhaseCoherenceForGenre
-            
-        case "acoustic", "singer-songwriter":
-            minPhaseCoherenceForGenre = 0.35  // 35% - Moderate (intimate but natural)
-            hasPhaseIssues = stereoAnalysis.phaseCoherence < minPhaseCoherenceForGenre
-            
-        case "alternative", "indie":
+        } else if genreLowerPhase.contains("acoustic") || genreLowerPhase.contains("singer-songwriter") {
+            minPhaseCoherenceForGenre = 0.25  // 25% - Low (intimate but natural)
+        } else if genreLowerPhase.contains("alternative") || genreLowerPhase.contains("indie") {
             minPhaseCoherenceForGenre = 0.30  // 30% - Lower (character and width valued)
-            hasPhaseIssues = stereoAnalysis.phaseCoherence < minPhaseCoherenceForGenre
-            
-        default:
+        } else {
             minPhaseCoherenceForGenre = 0.35  // 35% - Conservative default
-            hasPhaseIssues = stereoAnalysis.phaseCoherence < minPhaseCoherenceForGenre
         }
+        hasPhaseIssues = stereoAnalysis.phaseCoherence < minPhaseCoherenceForGenre
         
         // Log phase coherence check for debugging
         print("🌊 PHASE COHERENCE CHECK:")
@@ -487,63 +499,49 @@ public class AudioKitService: ObservableObject {
         let hasStereoIssues: Bool
         let minStereoWidthForGenre: Double
         let maxStereoWidthForGenre: Double
-        
-        switch genre?.lowercased() {
-        case "hip-hop", "hip hop", "rap", "trap":
-            minStereoWidthForGenre = 0.10  // 10% - Narrow is NORMAL (centered bass/vocals)
-            maxStereoWidthForGenre = 0.35  // 35% - Don't go too wide (phase issues in clubs)
-            hasStereoIssues = stereoAnalysis.stereoWidth < minStereoWidthForGenre || stereoAnalysis.stereoWidth > maxStereoWidthForGenre
-            
-        case "electronic", "edm", "dance", "house", "techno", "dubstep":
-            minStereoWidthForGenre = 0.15  // 15% - Narrow is GOOD (mono bass essential)
-            maxStereoWidthForGenre = 0.40  // 40% - Moderate width acceptable
-            hasStereoIssues = stereoAnalysis.stereoWidth < minStereoWidthForGenre || stereoAnalysis.stereoWidth > maxStereoWidthForGenre
-            
-        case "pop", "r&b", "soul":
+
+        // Use .contains() matching for genre strings like "Classical/Orchestral", "Acoustic/Singer-Songwriter"
+        let genreLowerStereo = genre?.lowercased() ?? ""
+
+        if genreLowerStereo.contains("hip-hop") || genreLowerStereo.contains("hip hop") || genreLowerStereo.contains("rap") || genreLowerStereo.contains("trap") {
+            minStereoWidthForGenre = 0.10  // 10% - Narrow is NORMAL
+            maxStereoWidthForGenre = 0.35  // 35% - Don't go too wide
+        } else if genreLowerStereo.contains("electronic") || genreLowerStereo.contains("edm") || genreLowerStereo.contains("dance") ||
+                  genreLowerStereo.contains("house") || genreLowerStereo.contains("techno") || genreLowerStereo.contains("dubstep") {
+            minStereoWidthForGenre = 0.15  // 15% - Narrow is GOOD
+            maxStereoWidthForGenre = 0.40  // 40% - Moderate width
+        } else if genreLowerStereo.contains("pop") || genreLowerStereo.contains("r&b") || genreLowerStereo.contains("soul") {
             minStereoWidthForGenre = 0.25  // 25% - Balanced stereo
-            maxStereoWidthForGenre = 0.55  // 55% - Can be moderately wide
-            hasStereoIssues = stereoAnalysis.stereoWidth < minStereoWidthForGenre || stereoAnalysis.stereoWidth > maxStereoWidthForGenre
-            
-        case "rock", "rock/indie", "indie", "punk", "alternative":
-            minStereoWidthForGenre = 0.15  // 15% - Modern rock can be bass-heavy/narrow
-            maxStereoWidthForGenre = 0.95  // 95% - Very wide acceptable (wall of sound)
-            hasStereoIssues = stereoAnalysis.stereoWidth < minStereoWidthForGenre || stereoAnalysis.stereoWidth > maxStereoWidthForGenre
-            
-        case "metal", "death metal", "black metal", "thrash metal", "metalcore", "djent":
-            minStereoWidthForGenre = 0.15  // 15% - Modern metal can have mono bass/kick
-            maxStereoWidthForGenre = 1.00  // 100% - EXTREMELY wide IS professional for metal (Korn uses 99%+)
-            hasStereoIssues = stereoAnalysis.stereoWidth < minStereoWidthForGenre || stereoAnalysis.stereoWidth > maxStereoWidthForGenre
-            
-        case "country", "folk":
+            maxStereoWidthForGenre = 0.55  // 55% - Moderately wide
+        } else if genreLowerStereo.contains("rock") || genreLowerStereo.contains("indie") || genreLowerStereo.contains("punk") || genreLowerStereo.contains("alternative") {
+            minStereoWidthForGenre = 0.15  // 15% - Modern rock can be narrow
+            maxStereoWidthForGenre = 0.95  // 95% - Very wide acceptable
+        } else if genreLowerStereo.contains("metal") {
+            minStereoWidthForGenre = 0.15  // 15% - Modern metal can have mono bass
+            maxStereoWidthForGenre = 1.00  // 100% - EXTREMELY wide IS professional
+        } else if genreLowerStereo.contains("country") || genreLowerStereo.contains("folk") {
             minStereoWidthForGenre = 0.30  // 30% - Natural acoustic spread
             maxStereoWidthForGenre = 0.60  // 60% - Moderately wide
-            hasStereoIssues = stereoAnalysis.stereoWidth < minStereoWidthForGenre || stereoAnalysis.stereoWidth > maxStereoWidthForGenre
-            
-        case "jazz", "blues":
-            minStereoWidthForGenre = 0.40  // 40% - Natural soundstage
-            maxStereoWidthForGenre = 0.75  // 75% - Wide is natural
-            hasStereoIssues = stereoAnalysis.stereoWidth < minStereoWidthForGenre || stereoAnalysis.stereoWidth > maxStereoWidthForGenre
-            
-        case "classical", "orchestral":
-            minStereoWidthForGenre = 0.50  // 50% - Wide stereo essential
-            maxStereoWidthForGenre = 0.90  // 90% - Very wide is correct
-            hasStereoIssues = stereoAnalysis.stereoWidth < minStereoWidthForGenre || stereoAnalysis.stereoWidth > maxStereoWidthForGenre
-            
-        case "ambient", "drone", "experimental":
+        } else if genreLowerStereo.contains("jazz") || genreLowerStereo.contains("blues") {
+            minStereoWidthForGenre = 0.30  // 30% - Natural soundstage
+            maxStereoWidthForGenre = 0.90  // 90% - Wide is natural (Big Band)
+        } else if genreLowerStereo.contains("classical") || genreLowerStereo.contains("orchestral") {
+            minStereoWidthForGenre = 0.40  // 40% - Wide stereo essential
+            maxStereoWidthForGenre = 0.95  // 95% - Very wide is correct
+        } else if genreLowerStereo.contains("live") {
+            minStereoWidthForGenre = 0.30  // 30% - Room spread
+            maxStereoWidthForGenre = 0.95  // 95% - Very wide (audience, room)
+        } else if genreLowerStereo.contains("ambient") || genreLowerStereo.contains("drone") || genreLowerStereo.contains("experimental") {
             minStereoWidthForGenre = 0.45  // 45% - Wide soundscapes
-            maxStereoWidthForGenre = 0.95  // 95% - Extreme width is artistic
-            hasStereoIssues = stereoAnalysis.stereoWidth < minStereoWidthForGenre || stereoAnalysis.stereoWidth > maxStereoWidthForGenre
-            
-        case "acoustic", "singer-songwriter":
-            minStereoWidthForGenre = 0.25  // 25% - Intimate but natural
-            maxStereoWidthForGenre = 0.55  // 55% - Moderate width
-            hasStereoIssues = stereoAnalysis.stereoWidth < minStereoWidthForGenre || stereoAnalysis.stereoWidth > maxStereoWidthForGenre
-            
-        default:
+            maxStereoWidthForGenre = 0.95  // 95% - Extreme width
+        } else if genreLowerStereo.contains("acoustic") || genreLowerStereo.contains("singer-songwriter") {
+            minStereoWidthForGenre = 0.20  // 20% - Intimate but natural
+            maxStereoWidthForGenre = 0.60  // 60% - Moderate width
+        } else {
             minStereoWidthForGenre = 0.25  // 25% - Conservative default
             maxStereoWidthForGenre = 0.60  // 60% - Moderate ceiling
-            hasStereoIssues = stereoAnalysis.stereoWidth < minStereoWidthForGenre || stereoAnalysis.stereoWidth > maxStereoWidthForGenre
         }
+        hasStereoIssues = stereoAnalysis.stereoWidth < minStereoWidthForGenre || stereoAnalysis.stereoWidth > maxStereoWidthForGenre
         
         // INTELLIGENT OVERRIDE: Don't flag wide stereo as an issue if mono compatibility is excellent
         // If mono compatibility > 85%, the wide stereo is SAFE and intentional (not problematic)
@@ -3018,6 +3016,7 @@ enum AudioKitError: Error {
     private func detectUnmixedAudio(
         fileName: String,
         genre: String?,  // User-selected genre for genre-aware analysis
+        mixStage: String?,  // User-selected stage - CRITICAL for override logic
         dynamicRange: Double,
         loudness: Double,
         peakLevel: Double,
@@ -3029,10 +3028,16 @@ enum AudioKitError: Error {
         stereoWidth: Double,
         stereoBalance: Double
     ) -> UnmixedDetectionResult {
-        
+
+        // Log stage info for debugging
+        if let stage = mixStage, !stage.isEmpty {
+            print("🎛️ Analyzing with stage: '\(stage)' and genre: '\(genre ?? "unknown")'")
+        }
+
         // ========================================
         // GENRE-AWARE THRESHOLD CONFIGURATION
         // Different genres have different professional standards
+        // Jazz/Classical/Live naturally have high DR, low phase coherence - NOT unmixed!
         // ========================================
         
         struct GenreThresholds {
@@ -3044,21 +3049,59 @@ enum AudioKitError: Error {
         }
         
         let genreThresholds: GenreThresholds
-        
+
         // Determine thresholds based on user-selected genre
-        switch genre?.lowercased() {
-        case "jazz", "classical", "acoustic":
-            // Jazz/Classical: HIGH dynamic range is EXPECTED and professional
+        // IMPORTANT: Use .contains() matching because genre strings are like "Classical/Orchestral" not just "classical"
+        let genreLower = genre?.lowercased() ?? ""
+
+        if genreLower.contains("classical") || genreLower.contains("orchestral") {
+            // CLASSICAL/ORCHESTRAL - Based on professional Classical mixing guide:
+            // DR12-DR18+ is NORMAL, Crest Factor 12-20dB is NORMAL
+            // Stereo Width 80-100% is NORMAL, Phase 0.5-0.8 is NORMAL
+            // Loudness -18 to -14 LUFS is NORMAL
             genreThresholds = GenreThresholds(
-                maxDynamicRange: 22.0,        // Allow up to 22dB DR (very dynamic)
-                minLoudness: -23.0,           // Can be quieter (-23 LUFS broadcast standard)
-                maxCrestFactor: 20.0,         // Higher transients are normal
-                minMonoCompatibility: 0.45,   // Slightly lower (wide stereo recording)
-                description: "Jazz/Classical/Acoustic"
+                maxDynamicRange: 22.0,        // DR18+ is normal, allow up to 22dB
+                minLoudness: -20.0,           // -18 to -14 LUFS is normal, allow -20
+                maxCrestFactor: 22.0,         // 12-20dB is normal, allow up to 22
+                minMonoCompatibility: 0.40,   // Phase 0.5-0.8 is normal, 0.4 is floor
+                description: "Classical/Orchestral"
             )
-            print("🎼 Using JAZZ/CLASSICAL thresholds: High DR (\(genreThresholds.maxDynamicRange)dB), Quieter (\(genreThresholds.minLoudness)LUFS) is NORMAL")
-            
-        case "rock", "metal", "punk":
+            print("🎼 Using CLASSICAL thresholds (per guide): DR≤22dB, LUFS≥-20, Crest≤22, Phase≥0.4")
+
+        } else if genreLower.contains("jazz") || genreLower.contains("blues") {
+            // JAZZ/BLUES - Big Band can have even more dynamics than Classical
+            genreThresholds = GenreThresholds(
+                maxDynamicRange: 26.0,        // Big Band can have 20-26dB DR
+                minLoudness: -24.0,           // Jazz can be quieter for dynamics
+                maxCrestFactor: 24.0,         // Brass transients are sharp
+                minMonoCompatibility: 0.35,   // Wide ensemble spread
+                description: "Jazz/Blues"
+            )
+            print("🎷 Using JAZZ/BLUES thresholds: DR≤26dB, LUFS≥-24, Crest≤24, Phase≥0.35")
+
+        } else if genreLower.contains("acoustic") || genreLower.contains("singer-songwriter") {
+            // ACOUSTIC/SINGER-SONGWRITER - Natural dynamics but not as extreme as Classical
+            genreThresholds = GenreThresholds(
+                maxDynamicRange: 20.0,        // Natural dynamics
+                minLoudness: -20.0,           // Can be quieter
+                maxCrestFactor: 18.0,         // Natural transients
+                minMonoCompatibility: 0.45,   // Moderate stereo
+                description: "Acoustic/Singer-Songwriter"
+            )
+            print("🎸 Using ACOUSTIC thresholds: DR≤20dB, LUFS≥-20, Crest≤18, Phase≥0.45")
+
+        } else if genreLower.contains("live") {
+            // LIVE recordings: VERY high dynamic range, room ambience, natural sound
+            genreThresholds = GenreThresholds(
+                maxDynamicRange: 28.0,        // Live can have 20-28dB DR (audience dynamics)
+                minLoudness: -28.0,           // Can be quieter (dynamic preservation)
+                maxCrestFactor: 26.0,         // High transients (crowd, instruments)
+                minMonoCompatibility: 0.25,   // Wide room mics, audience spread
+                description: "Live Recording"
+            )
+            print("🎤 Using LIVE RECORDING thresholds: Very High DR (\(genreThresholds.maxDynamicRange)dB), Quieter (\(genreThresholds.minLoudness)LUFS) is NORMAL for live")
+
+        } else if genreLower.contains("rock") || genreLower.contains("metal") || genreLower.contains("punk") {
             // Rock/Metal: Moderate dynamics, loud and punchy
             genreThresholds = GenreThresholds(
                 maxDynamicRange: 16.0,        // Moderate compression
@@ -3068,8 +3111,8 @@ enum AudioKitError: Error {
                 description: "Rock/Metal"
             )
             print("🎸 Using ROCK/METAL thresholds: Moderate DR (\(genreThresholds.maxDynamicRange)dB), Loud (\(genreThresholds.minLoudness)LUFS)")
-            
-        case "pop", "r&b", "soul":
+
+        } else if genreLower.contains("pop") || genreLower.contains("r&b") || genreLower.contains("soul") {
             // Pop/R&B: Moderate-low dynamics, consistent loudness
             genreThresholds = GenreThresholds(
                 maxDynamicRange: 14.0,        // Moderate-heavy compression
@@ -3079,8 +3122,9 @@ enum AudioKitError: Error {
                 description: "Pop/R&B"
             )
             print("🎤 Using POP/R&B thresholds: Lower DR (\(genreThresholds.maxDynamicRange)dB), Very Loud (\(genreThresholds.minLoudness)LUFS)")
-            
-        case "electronic", "edm", "dance", "house", "techno":
+
+        } else if genreLower.contains("electronic") || genreLower.contains("edm") || genreLower.contains("dance") ||
+                  genreLower.contains("house") || genreLower.contains("techno") {
             // Electronic/EDM: LOW dynamics, VERY loud, heavily compressed
             genreThresholds = GenreThresholds(
                 maxDynamicRange: 10.0,        // Heavy compression/limiting
@@ -3090,8 +3134,8 @@ enum AudioKitError: Error {
                 description: "Electronic/EDM"
             )
             print("🎛️ Using ELECTRONIC/EDM thresholds: Low DR (\(genreThresholds.maxDynamicRange)dB), Very Loud (\(genreThresholds.minLoudness)LUFS)")
-            
-        case "hip-hop", "hip hop", "rap", "trap":
+
+        } else if genreLower.contains("hip-hop") || genreLower.contains("hip hop") || genreLower.contains("rap") || genreLower.contains("trap") {
             // Hip-Hop: Low dynamics, very loud, bass-heavy
             genreThresholds = GenreThresholds(
                 maxDynamicRange: 12.0,        // Heavy compression
@@ -3101,8 +3145,8 @@ enum AudioKitError: Error {
                 description: "Hip-Hop/Rap"
             )
             print("🎙️ Using HIP-HOP thresholds: Low DR (\(genreThresholds.maxDynamicRange)dB), Very Loud (\(genreThresholds.minLoudness)LUFS)")
-            
-        case "alternative", "indie":
+
+        } else if genreLower.contains("alternative") || genreLower.contains("indie") {
             // Alternative/Indie: Varies widely, moderate defaults
             genreThresholds = GenreThresholds(
                 maxDynamicRange: 18.0,        // Can be dynamic
@@ -3112,8 +3156,8 @@ enum AudioKitError: Error {
                 description: "Alternative/Indie"
             )
             print("🎵 Using ALTERNATIVE/INDIE thresholds: Flexible DR (\(genreThresholds.maxDynamicRange)dB), Moderate (\(genreThresholds.minLoudness)LUFS)")
-            
-        default:
+
+        } else {
             // Unknown genre: Conservative middle-ground thresholds
             genreThresholds = GenreThresholds(
                 maxDynamicRange: 16.0,        // Moderate
@@ -3285,7 +3329,9 @@ enum AudioKitError: Error {
         // ========================================
         
         // Clipping with phase issues - Amateur recording
-        let clippingWithPhaseTest = peakLevel > -1.0 && monoCompatibility < 0.6
+        // GENRE-AWARE: Jazz/Classical can have lower mono compatibility
+        let clippingPhaseThreshold = max(genreThresholds.minMonoCompatibility + 0.15, 0.45)  // At least 15% above genre min
+        let clippingWithPhaseTest = peakLevel > -1.0 && monoCompatibility < clippingPhaseThreshold
         detectionCriteria["Clipping + Phase Issues"] = clippingWithPhaseTest
         if clippingWithPhaseTest {
             failedTests += 3  // High weight - clear amateur mistake
@@ -3306,28 +3352,34 @@ enum AudioKitError: Error {
         // ========================================
         
         // No limiting: True peak way below optimal
-        let noLimitingTest = truePeak < -4.0
+        // GENRE-AWARE: Jazz/Classical mixes often have more headroom intentionally
+        let noLimitingThreshold: Double = (genreThresholds.description == "Jazz/Classical/Acoustic") ? -8.0 : -4.0
+        let noLimitingTest = truePeak < noLimitingThreshold
         detectionCriteria["No Limiting"] = noLimitingTest
         if noLimitingTest {
             failedTests += 1
-            recommendations.append("True peak at \(String(format: "%.1f", truePeak))dBFS - no limiting applied")
+            recommendations.append("True peak at \(String(format: "%.1f", truePeak))dBFS - consider if more headroom optimization is needed for \(genreThresholds.description)")
         }
         
-        // Phase coherence issues
-        let phaseTest = phaseCoherence < 0.6
+        // Phase coherence issues - GENRE-AWARE
+        // Jazz/Classical/Big Band recordings naturally have lower phase coherence (room mics, ensemble spread)
+        let phaseTestThreshold = genreThresholds.minMonoCompatibility + 0.20  // 20% above genre minimum
+        let phaseTest = phaseCoherence < phaseTestThreshold
         detectionCriteria["Low Phase Coherence"] = phaseTest
         if phaseTest {
             failedTests += 1
-            recommendations.append("Low phase coherence (\(String(format: "%.0f", phaseCoherence * 100))%) - check stereo imaging")
+            recommendations.append("Low phase coherence (\(String(format: "%.0f", phaseCoherence * 100))%) for \(genreThresholds.description) - check stereo imaging")
         }
         
-        // Uncontrolled transients
-        let wildTransientsTest = punchiness > 90.0 || punchiness < 35.0
+        // Uncontrolled transients - GENRE-AWARE
+        // Jazz/Classical: High punchiness (brass transients, drum attacks) is NORMAL
+        let maxPunchinessForGenre: Double = (genreThresholds.description == "Jazz/Classical/Acoustic") ? 98.0 : 90.0
+        let wildTransientsTest = punchiness > maxPunchinessForGenre || punchiness < 35.0
         detectionCriteria["Uncontrolled Transients"] = wildTransientsTest
         if wildTransientsTest {
             failedTests += 1
-            if punchiness > 90.0 {
-                recommendations.append("Very high punchiness (\(String(format: "%.0f", punchiness))) - uncontrolled transients")
+            if punchiness > maxPunchinessForGenre {
+                recommendations.append("Very high punchiness (\(String(format: "%.0f", punchiness))) for \(genreThresholds.description)")
             } else {
                 recommendations.append("Very low punchiness (\(String(format: "%.0f", punchiness))) - lacks punch")
             }
@@ -3399,8 +3451,9 @@ enum AudioKitError: Error {
                                    loudness < -15.0
         
         // Pattern 8: Severe phase coherence issues = poorly recorded/unmixed
-        // Professional mixes always have phase coherence > 50%
-        let severePhaseIssues = phaseCoherence < 0.40
+        // GENRE-AWARE: Jazz/Classical can have lower phase coherence (room mics, wide ensembles)
+        let severePhaseThreshold = genreThresholds.minMonoCompatibility - 0.10  // 10% below genre minimum
+        let severePhaseIssues = phaseCoherence < severePhaseThreshold
 
         // ========================================
         // INTELLIGENT MULTI-TIER DETECTION SYSTEM

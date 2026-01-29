@@ -60,7 +60,11 @@ final class AnalysisResultPersistence {
             // FFT spectrum data for visualization
             "frequencySpectrum": result.frequencySpectrum as Any,
             "spectrumSampleRate": result.spectrumSampleRate as Any,
-            "rmsLevel": result.rmsLevel
+            "rmsLevel": result.rmsLevel,
+            // Unmixed detection fields
+            "isProfessionallyMixed": result.isProfessionallyMixed,
+            "monoCompatibility": result.monoCompatibility,
+            "unmixedDetectionData": result.unmixedDetectionData?.base64EncodedString() as Any
         ]
         
         // Convert to JSON
@@ -253,7 +257,15 @@ final class AnalysisResultPersistence {
             }
             result.spectrumSampleRate = data["spectrumSampleRate"] as? Double
             result.rmsLevel = data["rmsLevel"] as? Double ?? 0
-            
+
+            // Load unmixed detection fields
+            result.isProfessionallyMixed = data["isProfessionallyMixed"] as? Bool ?? true
+            result.monoCompatibility = data["monoCompatibility"] as? Double ?? 1.0
+            if let base64String = data["unmixedDetectionData"] as? String,
+               let decodedData = Data(base64Encoded: base64String) {
+                result.unmixedDetectionData = decodedData
+            }
+
             if result.frequencySpectrum != nil {
             }
             return result

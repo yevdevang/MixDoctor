@@ -47,7 +47,7 @@ final class ProfessionalMasterOverrideTests: XCTestCase {
             dynamicRange: dynamicRange,
             stereoWidth: 35.0,
             phaseCoherence: 65.0,
-            monoCompatibility: monoCompatibility * 100, // Convert to percentage
+            monoCompatibility: monoCompatibility, // Keep as decimal (0.0-1.0) - detection function expects decimal
             lowEnd: 25.0,
             lowMid: 20.0,
             mid: 30.0,
