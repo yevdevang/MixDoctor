@@ -73,6 +73,10 @@ final class ImportViewModel {
             
             for file in files {
                 if !isDuplicate(file) {
+                    print("📝 Inserting file into database:")
+                    print("   Filename: \(file.fileName)")
+                    print("   Genre: \(file.genre ?? "nil")")
+                    print("   MixStage: \(file.mixStage ?? "nil")")
                     modelContext.insert(file)
                     insertedCount += 1
                 } else {
@@ -88,12 +92,15 @@ final class ImportViewModel {
             }
 
             try modelContext.save()
+            print("✅ ModelContext saved successfully")
             
             // Force refresh the query
             try? await Task.sleep(for: .milliseconds(100))
             
             loadImports()
+            print("📋 After loadImports(), checking first few files:")
             for file in importedFiles.prefix(10) {
+                print("   \(file.fileName): genre=\(file.genre ?? "nil"), stage=\(file.mixStage ?? "nil")")
             }
             
             importProgress = 1.0
@@ -302,10 +309,34 @@ final class ImportViewModel {
             }
             
             if !orphanedURLs.isEmpty {
+                print("📁 Found \(orphanedURLs.count) orphaned file(s) - checking if they need import")
+                
+                // Get all existing files from database
+                let descriptor = FetchDescriptor<AudioFile>()
+                let existingFiles = (try? modelContext.fetch(descriptor)) ?? []
+                let existingFileNames = Set(existingFiles.map { $0.fileName })
+                
+                // Only import files that DON'T already have a database record
+                let filesToImport = orphanedURLs.filter { url in
+                    let fileName = url.lastPathComponent
+                    let alreadyExists = existingFileNames.contains(fileName)
+                    if alreadyExists {
+                        print("   ⏭️ Skipping \(fileName) - already in database")
+                    }
+                    return !alreadyExists
+                }
+                
+                if filesToImport.isEmpty {
+                    print("   ✅ All orphaned files already have database records")
+                    return
+                }
+                
+                print("   📥 Importing \(filesToImport.count) truly orphaned file(s)")
+                
                 // Re-import orphaned files (silently - don't show errors for background scanning)
                 // Use a separate method that doesn't trigger error dialogs
                 do {
-                    let importedFiles = try await importService.importMultipleFiles(orphanedURLs, modelContext: modelContext)
+                    let importedFiles = try await importService.importMultipleFiles(filesToImport, modelContext: modelContext)
                     
                     // Insert imported files into database
                     for file in importedFiles {

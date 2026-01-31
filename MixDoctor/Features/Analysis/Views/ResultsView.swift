@@ -2345,7 +2345,7 @@ struct ScoreGuideView: View {
                         Text("Understanding Your Score")
                             .font(.title2.bold())
 
-                        Text("Scores depend on your selected Mix Stage. Masters, Mixes, and Raw Recordings have different scoring ranges.")
+                        Text("Scores depend on your selected Mix Stage. Masters and Mixes have different scoring ranges.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
@@ -2356,7 +2356,6 @@ struct ScoreGuideView: View {
                     Picker("Track Type", selection: $selectedTab) {
                         Text("Master").tag(0)
                         Text("Mix").tag(1)
-                        Text("Recording").tag(2)
                     }
                     .pickerStyle(.segmented)
                     .padding(.horizontal)
@@ -2368,8 +2367,6 @@ struct ScoreGuideView: View {
                             masterScoreRanges
                         case 1: // Mix
                             mixScoreRanges
-                        case 2: // Recording
-                            unmixedScoreRanges
                         default:
                             masterScoreRanges
                         }
@@ -2656,12 +2653,6 @@ struct ScoreGuideView: View {
                     target: "-16 to -23 LUFS",
                     maxScore: "90",
                     color: .blue
-                )
-                stageRow(
-                    stage: "Raw Recording",
-                    target: "Detected automatically",
-                    maxScore: "75",
-                    color: .orange
                 )
             }
         }
