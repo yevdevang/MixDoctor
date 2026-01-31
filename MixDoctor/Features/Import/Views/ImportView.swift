@@ -175,6 +175,9 @@ struct ImportView: View {
                     viewModel.loadImports()
                 }
                 
+                // Update metadata from filenames for legacy files
+                await viewModel.updateAllFilesMetadataFromFilenames()
+                
                 // Check for orphaned files (files deleted on other devices)
                 await viewModel.scanForOrphanedFiles()
             }.value
@@ -950,11 +953,25 @@ private struct ImportedFileRow: View {
                 .font(.system(size: 10))
                 .foregroundStyle(Color.secondaryText)
 
-                // Row 2: Mix stage
-                if let mixStage = audioFile.mixStage {
-                    Text(formatMixStage(mixStage))
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(mixStageColor(mixStage))
+                // Row 2: Genre and Mix stage
+                HStack(spacing: 4) {
+                    if let genre = audioFile.genre {
+                        Text(genre)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.purple)
+                        
+                        if audioFile.mixStage != nil {
+                            Text("•")
+                                .font(.system(size: 10))
+                                .foregroundStyle(Color.secondaryText)
+                        }
+                    }
+                    
+                    if let mixStage = audioFile.mixStage {
+                        Text(formatMixStage(mixStage))
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(mixStageColor(mixStage))
+                    }
                 }
             }
             

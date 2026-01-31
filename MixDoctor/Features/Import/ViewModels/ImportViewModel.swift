@@ -338,6 +338,117 @@ final class ImportViewModel {
         }
     }
     
+    /// Extract genre and stage from filename for legacy files
+    /// Expected filename patterns:
+    /// - "Song Name - Pop - Mix.wav"
+    /// - "Song Name - Rock/Indie - Master(Streaming).wav"
+    func updateMetadataFromFilename(_ file: AudioFile) -> Bool {
+        var updated = false
+        let fileNameWithoutExtension = (file.fileName as NSString).deletingPathExtension
+        let components = fileNameWithoutExtension.components(separatedBy: " - ")
+        
+        // Pattern: "Song Name - Genre - Stage"
+        if components.count >= 3 {
+            let potentialGenre = components[components.count - 2].trimmingCharacters(in: .whitespaces)
+            let potentialStage = components[components.count - 1].trimmingCharacters(in: .whitespaces)
+            
+            // Extract and set genre if missing
+            if file.genre == nil, AppConstants.availableGenres.contains(potentialGenre) {
+                file.genre = potentialGenre
+                print("📝 Updated genre from filename: \(potentialGenre) for \(file.fileName)")
+                updated = true
+            }
+            
+            // Extract and set stage if missing
+            if file.mixStage == nil {
+                let extractedStage = extractMixStageFromString(potentialStage)
+                if extractedStage != "mix" || potentialStage.lowercased().contains("mix") {
+                    file.mixStage = extractedStage
+                    print("📝 Updated stage from filename: \(extractedStage) for \(file.fileName)")
+                    updated = true
+                }
+            }
+        }
+        // Pattern: "Song Name - Stage" (no genre in filename)
+        else if components.count == 2 {
+            let potentialStage = components[1].trimmingCharacters(in: .whitespaces)
+            
+            // Extract and set stage if missing
+            if file.mixStage == nil {
+                let extractedStage = extractMixStageFromString(potentialStage)
+                if extractedStage != "mix" || potentialStage.lowercased().contains("mix") {
+                    file.mixStage = extractedStage
+                    print("📝 Updated stage from filename: \(extractedStage) for \(file.fileName)")
+                    updated = true
+                }
+            }
+        }
+        
+        return updated
+    }
+    
+    /// Extract mix stage from string (suffix of filename component)
+    private func extractMixStageFromString(_ string: String) -> String {
+        let lower = string.lowercased()
+        
+        // Check for exact matches first
+        if lower == "mix" {
+            return "mix"
+        }
+        if lower == "master(streaming)" || lower == "master (streaming)" {
+            return "master_streaming"
+        }
+        if lower == "master(cd-loud)" || lower == "master (cd-loud)" || lower == "master(cd)" || lower == "master (cd)" {
+            return "master_cd"
+        }
+        
+        // Check for partial matches
+        if lower.contains("streaming") {
+            return "master_streaming"
+        }
+        if lower.contains("cd") || lower.contains("loud") {
+            return "master_cd"
+        }
+        if lower.contains("master") {
+            return "master_streaming"  // Default master type
+        }
+        
+        // Default to mix
+        return "mix"
+    }
+    
+    /// Update metadata from filenames for all files missing genre or stage
+    func updateAllFilesMetadataFromFilenames() async {
+        let descriptor = FetchDescriptor<AudioFile>()
+        guard let allFiles = try? modelContext.fetch(descriptor) else {
+            return
+        }
+        
+        var updatedCount = 0
+        for file in allFiles {
+            // Only update files that are missing genre or stage
+            if file.genre == nil || file.mixStage == nil {
+                if updateMetadataFromFilename(file) {
+                    updatedCount += 1
+                }
+            }
+        }
+        
+        if updatedCount > 0 {
+            do {
+                try modelContext.save()
+                print("✅ Updated metadata for \(updatedCount) file(s) from filenames")
+                
+                // Refresh the list
+                await MainActor.run {
+                    loadImports()
+                }
+            } catch {
+                print("❌ Failed to save metadata updates: \(error)")
+            }
+        }
+    }
+    
     /// Remove database records for files that no longer exist (deleted on other devices)
     func cleanupOrphanedRecords() async {
         

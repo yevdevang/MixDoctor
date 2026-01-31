@@ -339,8 +339,8 @@ struct ResultsView: View {
                         .foregroundStyle(.secondary)
                         .frame(width: 80, alignment: .leading)
                     
-                    Text(audioFile.genre ?? "Auto-detect")
-                        .foregroundStyle(.primary)
+                    Text(audioFile.genre ?? "Not set")
+                        .foregroundStyle(audioFile.genre == nil ? .secondary : .primary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
