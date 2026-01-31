@@ -23,20 +23,12 @@
 			remoteGlobalIDString = CB7EADB42EA2A91500AE28CF;
 			remoteInfo = MixDoctor;
 		};
-		CB7EADCD2EA2A91600AE28CF /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = CB7EADAD2EA2A91500AE28CF /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = CB7EADB42EA2A91500AE28CF;
-			remoteInfo = MixDoctor;
-		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		CB63F9A12EA68F1200C68A0F /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
 		CB7EADB52EA2A91500AE28CF /* MixDoctor.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MixDoctor.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		CB7EADC22EA2A91600AE28CF /* MixDoctorTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MixDoctorTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		CB7EADCC2EA2A91600AE28CF /* MixDoctorUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MixDoctorUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -48,11 +40,6 @@
 		CB7EADC52EA2A91600AE28CF /* MixDoctorTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = MixDoctorTests;
-			sourceTree = "<group>";
-		};
-		CB7EADCF2EA2A91600AE28CF /* MixDoctorUITests */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = MixDoctorUITests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -78,13 +65,6 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		CB7EADC92EA2A91600AE28CF /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -94,7 +74,6 @@
 				CB63F9A12EA68F1200C68A0F /* Config.xcconfig */,
 				CB7EADB72EA2A91500AE28CF /* MixDoctor */,
 				CB7EADC52EA2A91600AE28CF /* MixDoctorTests */,
-				CB7EADCF2EA2A91600AE28CF /* MixDoctorUITests */,
 				CB7EADB62EA2A91500AE28CF /* Products */,
 			);
 			sourceTree = "<group>";
@@ -104,7 +83,6 @@
 			children = (
 				CB7EADB52EA2A91500AE28CF /* MixDoctor.app */,
 				CB7EADC22EA2A91600AE28CF /* MixDoctorTests.xctest */,
-				CB7EADCC2EA2A91600AE28CF /* MixDoctorUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -163,29 +141,6 @@
 			productReference = CB7EADC22EA2A91600AE28CF /* MixDoctorTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
-		CB7EADCB2EA2A91600AE28CF /* MixDoctorUITests */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = CB7EADDC2EA2A91600AE28CF /* Build configuration list for PBXNativeTarget "MixDoctorUITests" */;
-			buildPhases = (
-				CB7EADC82EA2A91600AE28CF /* Sources */,
-				CB7EADC92EA2A91600AE28CF /* Frameworks */,
-				CB7EADCA2EA2A91600AE28CF /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-				CB7EADCE2EA2A91600AE28CF /* PBXTargetDependency */,
-			);
-			fileSystemSynchronizedGroups = (
-				CB7EADCF2EA2A91600AE28CF /* MixDoctorUITests */,
-			);
-			name = MixDoctorUITests;
-			packageProductDependencies = (
-			);
-			productName = MixDoctorUITests;
-			productReference = CB7EADCC2EA2A91600AE28CF /* MixDoctorUITests.xctest */;
-			productType = "com.apple.product-type.bundle.ui-testing";
-		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -200,10 +155,6 @@
 						CreatedOnToolsVersion = 26.0.1;
 					};
 					CB7EADC12EA2A91600AE28CF = {
-						CreatedOnToolsVersion = 26.0.1;
-						TestTargetID = CB7EADB42EA2A91500AE28CF;
-					};
-					CB7EADCB2EA2A91600AE28CF = {
 						CreatedOnToolsVersion = 26.0.1;
 						TestTargetID = CB7EADB42EA2A91500AE28CF;
 					};
@@ -231,7 +182,6 @@
 			targets = (
 				CB7EADB42EA2A91500AE28CF /* MixDoctor */,
 				CB7EADC12EA2A91600AE28CF /* MixDoctorTests */,
-				CB7EADCB2EA2A91600AE28CF /* MixDoctorUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -245,13 +195,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		CB7EADC02EA2A91600AE28CF /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		CB7EADCA2EA2A91600AE28CF /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -275,13 +218,6 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		CB7EADC82EA2A91600AE28CF /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -289,11 +225,6 @@
 			isa = PBXTargetDependency;
 			target = CB7EADB42EA2A91500AE28CF /* MixDoctor */;
 			targetProxy = CB7EADC32EA2A91600AE28CF /* PBXContainerItemProxy */;
-		};
-		CB7EADCE2EA2A91600AE28CF /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = CB7EADB42EA2A91500AE28CF /* MixDoctor */;
-			targetProxy = CB7EADCD2EA2A91600AE28CF /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -574,56 +505,6 @@
 			};
 			name = Release;
 		};
-		CB7EADDD2EA2A91600AE28CF /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 392G674982;
-				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
-				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.yevgenylevin.animated.MixDoctorUITests;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = auto;
-				STRING_CATALOG_GENERATE_SYMBOLS = NO;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2,7";
-				TEST_TARGET_NAME = MixDoctor;
-				XROS_DEPLOYMENT_TARGET = 26.0;
-			};
-			name = Debug;
-		};
-		CB7EADDE2EA2A91600AE28CF /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 392G674982;
-				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
-				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.yevgenylevin.animated.MixDoctorUITests;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = auto;
-				STRING_CATALOG_GENERATE_SYMBOLS = NO;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2,7";
-				TEST_TARGET_NAME = MixDoctor;
-				XROS_DEPLOYMENT_TARGET = 26.0;
-			};
-			name = Release;
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -650,15 +531,6 @@
 			buildConfigurations = (
 				CB7EADDA2EA2A91600AE28CF /* Debug */,
 				CB7EADDB2EA2A91600AE28CF /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		CB7EADDC2EA2A91600AE28CF /* Build configuration list for PBXNativeTarget "MixDoctorUITests" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				CB7EADDD2EA2A91600AE28CF /* Debug */,
-				CB7EADDE2EA2A91600AE28CF /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

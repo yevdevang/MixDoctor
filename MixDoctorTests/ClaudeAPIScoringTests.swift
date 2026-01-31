@@ -10,11 +10,19 @@ import XCTest
 @testable import MixDoctor
 
 final class ClaudeAPIScoringTests: XCTestCase {
-    
+
     var claudeService: ClaudeAPIService!
-    
+
+    /// Check if we should skip API tests
+    private var shouldSkipAPITests: Bool {
+        // Skip by default unless explicitly enabled with RUN_CLAUDE_API_TESTS=1
+        return ProcessInfo.processInfo.environment["RUN_CLAUDE_API_TESTS"] != "1"
+    }
+
     override func setUp() {
         super.setUp()
+        // Skip setup if running in test environment without API key
+        guard !shouldSkipAPITests else { return }
         claudeService = ClaudeAPIService.shared
         // Ensure clean state for each test
         claudeService.reset()

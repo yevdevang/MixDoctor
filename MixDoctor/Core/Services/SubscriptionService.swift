@@ -57,9 +57,18 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
     private override init() {
         super.init()
         loadProAnalysisState()
-        configureRevenueCat()
+        // Skip RevenueCat during tests to prevent crashes
+        if !Self.isRunningTests {
+            configureRevenueCat()
+        }
         checkMonthlyReset()
         checkProAnalysisReset()
+    }
+
+    /// Returns true if running under XCTest
+    private static var isRunningTests: Bool {
+        NSClassFromString("XCTestCase") != nil ||
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
     }
     
     private func configureRevenueCat() {
@@ -85,6 +94,9 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
     // MARK: - Customer Info
     
     func updateCustomerInfo() async {
+        // Skip during tests
+        guard !Self.isRunningTests else { return }
+
         print("🔄 updateCustomerInfo() called at \(Date())")
         do {
             let info = try await Purchases.shared.customerInfo()

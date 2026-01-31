@@ -14,12 +14,21 @@ import FirebaseAnalytics
 class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
+        // Skip Firebase during tests
+        guard !AppDelegate.isRunningTests else { return true }
+
         FirebaseApp.configure()
-        
+
         // Log app launch event
         Analytics.logEvent("app_launched", parameters: nil)
-        
+
         return true
+    }
+
+    /// Returns true if the app is running under XCTest
+    static var isRunningTests: Bool {
+        return NSClassFromString("XCTestCase") != nil ||
+               ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
     }
 }
 
@@ -44,7 +53,9 @@ struct MixDoctorApp: App {
         #endif
         
         // Check if user has enabled iCloud sync (default to true for better UX)
-        let iCloudEnabled = UserDefaults.standard.object(forKey: "iCloudSyncEnabled") as? Bool ?? true
+        // Disable iCloud during tests to prevent crashes
+        let isRunningTests = AppDelegate.isRunningTests
+        let iCloudEnabled = isRunningTests ? false : (UserDefaults.standard.object(forKey: "iCloudSyncEnabled") as? Bool ?? true)
         
         do {
             let schema = Schema([AudioFile.self])
@@ -173,9 +184,12 @@ struct MixDoctorApp: App {
                 }
             }
             .task {
+                // Skip these services during tests
+                guard !AppDelegate.isRunningTests else { return }
+
                 // Check subscription status on launch
                 await subscriptionService.updateCustomerInfo()
-                
+
                 // Defer iCloud monitoring to avoid blocking launch
                 // Start monitoring after a short delay to let UI render first
                 try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second delay

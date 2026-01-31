@@ -15,13 +15,15 @@ final class ClaudeAPIScoringIntegrationTests: XCTestCase {
 
     /// Check if we should skip API tests (e.g., in CI without API key)
     private var shouldSkipAPITests: Bool {
-        // Skip if running in CI environment without API key
+        // Skip by default unless explicitly enabled with RUN_CLAUDE_API_TESTS=1
         // These tests require real Claude API access
-        return ProcessInfo.processInfo.environment["SKIP_CLAUDE_API_TESTS"] == "1"
+        return ProcessInfo.processInfo.environment["RUN_CLAUDE_API_TESTS"] != "1"
     }
 
     override func setUp() {
         super.setUp()
+        // Skip setup if running in test environment without API key
+        guard !shouldSkipAPITests else { return }
         claudeService = ClaudeAPIService.shared
         // Ensure clean state for each test
         claudeService.reset()
@@ -55,6 +57,7 @@ final class ClaudeAPIScoringIntegrationTests: XCTestCase {
     
     /// Test that three different songs get different scores (not all identical)
     func testThreeSongs_Differentiation() async throws {
+        guard !shouldSkipAPITests else { throw XCTSkip("Skipping - RUN_CLAUDE_API_TESTS not set") }
         // Scenario: Korn master, User mix, Abbey Road master
         
         let testCases: [(name: String, metrics: AudioMetricsForClaude, genre: String, stage: String, expectedRange: ClosedRange<Int>)] = [
@@ -107,6 +110,7 @@ final class ClaudeAPIScoringIntegrationTests: XCTestCase {
     
     /// Test that same song with different stages gets different scores
     func testSameSong_DifferentStages() async throws {
+        guard !shouldSkipAPITests else { throw XCTSkip("Skipping - RUN_CLAUDE_API_TESTS not set") }
         let baseMetrics = createKornMetrics()
         
         let stages = [
@@ -141,6 +145,7 @@ final class ClaudeAPIScoringIntegrationTests: XCTestCase {
     
     /// Test that same song with different genres gets appropriate scores
     func testSameSong_DifferentGenres() async throws {
+        guard !shouldSkipAPITests else { throw XCTSkip("Skipping - RUN_CLAUDE_API_TESTS not set") }
         let baseMetrics = createKornMetrics()
         
         let genres: [(name: String, expectedRange: ClosedRange<Int>, placeholderScore: Int)] = [
@@ -163,6 +168,7 @@ final class ClaudeAPIScoringIntegrationTests: XCTestCase {
     
     /// Test that excellent masters score higher than good masters
     func testMasterQuality_Differentiation() async throws {
+        guard !shouldSkipAPITests else { throw XCTSkip("Skipping - RUN_CLAUDE_API_TESTS not set") }
         let excellentMaster = createKornMetrics() // Exceptional quality
         let goodMaster = createAbbeyRoadMetrics() // Excellent but not exceptional
         
@@ -174,6 +180,7 @@ final class ClaudeAPIScoringIntegrationTests: XCTestCase {
     
     /// Test that excellent mixes score higher than good mixes
     func testMixQuality_Differentiation() async throws {
+        guard !shouldSkipAPITests else { throw XCTSkip("Skipping - RUN_CLAUDE_API_TESTS not set") }
         let excellentMix = createUserMixMetrics() // Professional quality
         let goodMix = createDecentMixMetrics()    // Good but not excellent
         
@@ -187,6 +194,7 @@ final class ClaudeAPIScoringIntegrationTests: XCTestCase {
     
     /// Test that unmixed tracks score below 75
     func testUnmixedTrack_LowScore() async throws {
+        guard !shouldSkipAPITests else { throw XCTSkip("Skipping - RUN_CLAUDE_API_TESTS not set") }
         let unmixedMetrics = createUnmixedMetrics()
         
         // Note: Would require actual API call
@@ -197,6 +205,7 @@ final class ClaudeAPIScoringIntegrationTests: XCTestCase {
     
     /// Test that clipping gets penalized heavily
     func testClipping_HeavyPenalty() async throws {
+        guard !shouldSkipAPITests else { throw XCTSkip("Skipping - RUN_CLAUDE_API_TESTS not set") }
         var metrics = createKornMetrics()
         // Note: Would need to modify metrics to have clipping
         // Expected: score significantly lower than non-clipping version
