@@ -23,9 +23,13 @@ final class ClaudeAPIScoringIntegrationTests: XCTestCase {
     override func setUp() {
         super.setUp()
         claudeService = ClaudeAPIService.shared
+        // Ensure clean state for each test
+        claudeService.reset()
     }
 
     override func tearDown() {
+        // Reset singleton state before releasing reference
+        claudeService?.reset()
         claudeService = nil
         super.tearDown()
     }
@@ -392,29 +396,35 @@ final class ClaudeAPIScoringIntegrationTests: XCTestCase {
     /// Test that same song with different stages gets different scores
     func testSameSongDifferentStages_Differentiation() async throws {
         try await runAPITest {
-            // Create metrics for same song at different stages
-            let mixMetrics = createDecentMixMetrics() // Should score 70-84
-            let streamingMetrics = createAbbeyRoadMetrics() // Should score 88-94
-            let cdLoudMetrics = createKornMetrics() // Should score 96-100
+            // Use SAME metrics representing a professional quality master
+            // This tests that stage selection alone influences scoring
+            let baseMetrics = createKornMetrics()
 
-            // Analyze all three stages
-            let mixResponse = try await claudeService.analyzeAudioMetrics(mixMetrics, userGenre: "Rock", mixStage: "Mix")
-            let streamingResponse = try await claudeService.analyzeAudioMetrics(streamingMetrics, userGenre: "Rock", mixStage: "Master(Streaming)")
-            let cdLoudResponse = try await claudeService.analyzeAudioMetrics(cdLoudMetrics, userGenre: "Rock", mixStage: "Master(CD/Loud)")
+            // Analyze the SAME audio as three different stages
+            let mixResponse = try await claudeService.analyzeAudioMetrics(baseMetrics, userGenre: "Metal", mixStage: "Mix")
+            let streamingResponse = try await claudeService.analyzeAudioMetrics(baseMetrics, userGenre: "Metal", mixStage: "Master(Streaming)")
+            let cdLoudResponse = try await claudeService.analyzeAudioMetrics(baseMetrics, userGenre: "Metal", mixStage: "Master(CD/Loud)")
 
-            // All three should have DIFFERENT scores (no convergence)
+            // All three should have DIFFERENT scores (stage influences scoring)
             let scores = [mixResponse.score, streamingResponse.score, cdLoudResponse.score]
             let uniqueScores = Set(scores)
-            XCTAssertGreaterThan(uniqueScores.count, 1, "Different stages should get different scores (got \(scores))")
+            XCTAssertGreaterThan(uniqueScores.count, 1, "Same song at different stages should get different scores (got \(scores))")
 
-            // Masters should score higher than mix
-            XCTAssertGreaterThan(streamingResponse.score, mixResponse.score, "Master(Streaming) should score higher than Mix")
-            XCTAssertGreaterThan(cdLoudResponse.score, mixResponse.score, "Master(CD/Loud) should score higher than Mix")
+            // Masters should score higher than mix (even with same metrics)
+            // Mix is capped at 90, masters can go to 100
+            XCTAssertGreaterThan(streamingResponse.score, mixResponse.score, "Master(Streaming) should score higher than Mix for same audio")
+            XCTAssertGreaterThan(cdLoudResponse.score, mixResponse.score, "Master(CD/Loud) should score higher than Mix for same audio")
 
-            // Verify expected ranges
-            XCTAssertTrue((70...90).contains(mixResponse.score), "Mix should score 70-90")
-            XCTAssertTrue((85...100).contains(streamingResponse.score), "Master(Streaming) should score 85-100")
-            XCTAssertTrue((85...100).contains(cdLoudResponse.score), "Master(CD/Loud) should score 85-100")
+            // Verify expected ranges based on stage
+            // Mix: Professional quality Korn audio should score 85-90 (capped at 90)
+            XCTAssertTrue((85...90).contains(mixResponse.score), "Professional audio labeled as Mix should score 85-90 (got \(mixResponse.score))")
+            
+            // Masters: Same professional quality should score higher (85-100)
+            XCTAssertTrue((85...100).contains(streamingResponse.score), "Professional audio as Master(Streaming) should score 85-100 (got \(streamingResponse.score))")
+            XCTAssertTrue((85...100).contains(cdLoudResponse.score), "Professional audio as Master(CD/Loud) should score 85-100 (got \(cdLoudResponse.score))")
+            
+            // Verify mix cap is enforced (should not exceed 90)
+            XCTAssertLessThanOrEqual(mixResponse.score, 90, "Mix stage should be capped at 90")
         }
     }
     

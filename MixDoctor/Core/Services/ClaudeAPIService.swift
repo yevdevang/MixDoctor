@@ -16,6 +16,16 @@ class ClaudeAPIService {
     
     private init() {}
     
+    // MARK: - Testing Support
+    
+    /// Reset service state - primarily for testing purposes
+    /// Call this in test tearDown to ensure clean state between tests
+    /// Note: This service is stateless, but method provided for consistency
+    func reset() {
+        // ClaudeAPIService is stateless - no state to reset
+        // Method exists for test consistency and future-proofing
+    }
+    
     private func getClaudeAPIKey() -> String {
         if let key = Bundle.main.infoDictionary?["CLAUDE_API_KEY"] as? String,
            !key.isEmpty,
@@ -107,7 +117,7 @@ class ClaudeAPIService {
         
         // Get separated prompts for caching
         // CACHE VERSION: Update this number when scoring rules change to bust the cache
-        let cacheVersion = "v10.0-MASTER-OVERRIDE-FIX"  // Fixed unmixed override for user-selected master stages
+        let cacheVersion = "v11.0-MANDATORY-RECOMMENDATIONS"  // Force Claude to always generate recommendations when issues exist
         let systemPrompt = getSystemPrompt(isMastered: isMastered, isUnmixed: isUnmixed, genre: genre, mixStage: mixStage) + "\n\n[Scoring Rules Version: \(cacheVersion)]"
         let userMessage = getUserMessage(metrics: metrics, genre: genre, isMastered: isMastered)
         
@@ -465,6 +475,16 @@ class ClaudeAPIService {
         • High Mid (3-8kHz): \(highMid)% (POP GOOD: 15-25%, VOCAL PRESENCE)
         • High (8-20kHz): \(high)% (POP GOOD: 8-15%, SPARKLE/AIR)
         """
+        case "Acapella":
+            return """
+        • Low End (20-200Hz): \(lowEnd)% (ACAPELLA EXPECTED: 0-10%, MINIMAL BY DESIGN - NO PENALTY!)
+        • Low Mid (200-800Hz): \(lowMid)% (ACAPELLA GOOD: 15-35%, VOCAL WARMTH/BODY)
+        • Mid (800Hz-3kHz): \(mid)% (ACAPELLA GOOD: 35-60%, VOCAL CLARITY CRITICAL)
+        • High Mid (3-8kHz): \(highMid)% (ACAPELLA GOOD: 15-30%, VOCAL PRESENCE/ARTICULATION)
+        • High (8-20kHz): \(high)% (ACAPELLA GOOD: 5-20%, VOCAL AIR/BREATHINESS)
+        ⚠️ ACAPELLA: LIMITED/NO BASS IS INTENTIONAL - This is vocal-only content!
+        ⚠️ DO NOT penalize for low bass - this is correct for acapella
+        """
         default:
             return """
         • Low End (20-200Hz): \(lowEnd)% (GENERAL GOOD: 15-30%, ACCEPTABLE: 12-35%)
@@ -484,8 +504,8 @@ class ClaudeAPIService {
         if isUnmixed {
             return """
             ⚠️ CRITICAL RESPONSE STYLE REQUIREMENT:
-            
-            WRITE LIKE A TOP PROFESSIONAL MIXER (Dave Pensado, Michael Brauer, Manny Marroquin):
+
+            WRITE LIKE A TOP PROFESSIONAL MIX ENGINEER (Dave Pensado, Chris Lord-Alge, Tony Maserati, Manny Marroquin):
             
             - Use their direct, honest, but encouraging tone
             - Focus on what the RAW RECORDING needs to become a great mix
@@ -725,6 +745,14 @@ class ClaudeAPIService {
             • Mid 15-30%: Vocal presence (no penalty)
             • High-Mid 10-20%: Synth clarity (no penalty)
             • High 8-18%: Synthetic sparkle and FX (no penalty)
+            ⚠️ EDM/ELECTRONIC CHARACTERISTICS (ALL NORMAL):
+            • Dynamic range 4-14dB: WIDE RANGE depending on subgenre (no penalty)
+            • Brickwall EDM (4-6dB DR): INTENTIONAL for club play (no penalty)
+            • Streaming EDM (8-14dB DR): CORRECT for modern streaming (no penalty)
+            • Loudness -6 to -16 LUFS: Depends on target platform (no penalty)
+            • Club masters (-6 to -10 LUFS): INTENTIONAL competitive loudness (no penalty)
+            • Streaming masters (-12 to -16 LUFS): CORRECT for normalization (no penalty)
+            • Wide stereo (60-90%): NORMAL for stereo FX and synths (no penalty)
             
             JAZZ (includes Big Band, Vocal Jazz, Bebop, Swing):
             • Bass 15-30%: Controlled foundation (no penalty)
@@ -759,7 +787,27 @@ class ClaudeAPIService {
             • Mid 25-40%: Vocal clarity (no penalty)
             • High-Mid 10-20%: Presence (no penalty)
             • High 6-15%: Natural air (no penalty)
-            
+            ⚠️ ACOUSTIC/SINGER-SONGWRITER CHARACTERISTICS (ALL NORMAL):
+            • Higher dynamic range (10-22dB): EXPECTED for natural acoustic sound (no penalty)
+            • Quieter masters (-16 to -22 LUFS): INTENTIONAL for intimacy (no penalty)
+            • Higher crest factor (10-20dB): NATURAL acoustic transients (no penalty)
+            • Warmer/darker tone (low high frequencies): INTENTIONAL artistic choice (no penalty)
+            • Intimate stereo image (30-50%): NORMAL for solo performer (no penalty)
+
+            ACAPELLA (Vocal-Only):
+            • Bass 0-10%: MINIMAL BY DESIGN - NO PENALTY! Vocals have limited bass content
+            • Low-Mid 15-35%: Vocal warmth and body (no penalty)
+            • Mid 35-60%: VOCAL CLARITY IS CRITICAL - main content here (no penalty)
+            • High-Mid 15-30%: Vocal presence and articulation (no penalty)
+            • High 5-20%: Vocal air and breathiness (no penalty)
+            ⚠️ ACAPELLA CHARACTERISTICS (ALL NORMAL - DO NOT PENALIZE):
+            • NO/LIMITED BASS: CORRECT for vocal-only content! (0 penalty)
+            • High dynamic range (8-24dB): NATURAL vocal dynamics (no penalty)
+            • Quieter levels (-16 to -26 LUFS): Often for mixing use (no penalty)
+            • High crest factor (10-22dB): NATURAL vocal transients (no penalty)
+            • Mid-focused frequency balance: CORRECT for vocals (no penalty)
+            • Mono or narrow stereo: NORMAL for single vocal source (no penalty)
+
             LIVE:
             • Bass 15-30%: Natural balance, room dependent (no penalty)
             • Low-Mid 18-30%: Room acoustics (no penalty)
@@ -1188,9 +1236,30 @@ class ClaudeAPIService {
             """
         
         if isMastered {
+            // Count detected issues for mastered tracks
+            var issueCount = 0
+            var issuesList: [String] = []
+            if metrics.hasClipping { issueCount += 1; issuesList.append("Clipping") }
+            if metrics.hasPhaseIssues { issueCount += 1; issuesList.append("Phase Issues") }
+            if metrics.hasStereoIssues { issueCount += 1; issuesList.append("Stereo Issues") }
+            if metrics.hasFrequencyImbalance { issueCount += 1; issuesList.append("Frequency Imbalance") }
+            if metrics.hasDynamicRangeIssues { issueCount += 1; issuesList.append("Dynamic Range Issues") }
+
+            // Check for frequency extremes
+            if metrics.lowEnd > 50 { issueCount += 1; issuesList.append("Bass at \(Int(metrics.lowEnd))%") }
+            if metrics.high > 25 { issueCount += 1; issuesList.append("Highs at \(Int(metrics.high))%") }
+
+            let issuesInstruction = issueCount > 0 ? """
+
+            ⚠️⚠️⚠️ CRITICAL: \(issueCount) ISSUE(S) DETECTED: \(issuesList.joined(separator: ", "))
+            YOU MUST PROVIDE AT LEAST \(min(issueCount + 1, 4)) SPECIFIC RECOMMENDATIONS TO ADDRESS THESE ISSUES!
+            DO NOT SKIP THE RECOMMENDATIONS SECTION!
+            ⚠️⚠️⚠️
+            """ : ""
+
             return """
             Analyze this MASTERED TRACK.\(genreContext)
-            
+
             🎚️ STEREO WIDTH: \(String(format: "%.1f", metrics.stereoWidth))%
             🎭 PHASE CORRELATION: \(String(format: "%.1f", metrics.phaseCoherence * 100))%
             🔊 MONO COMPATIBILITY: \(String(format: "%.1f", metrics.monoCompatibility * 100))%
@@ -1198,42 +1267,66 @@ class ClaudeAPIService {
             📈 RMS/LOUDNESS: \(String(format: "%.1f", metrics.loudness)) LUFS
             🎚️ DYNAMIC RANGE: \(String(format: "%.1f", metrics.dynamicRange)) dB
             📉 CREST FACTOR: \(String(format: "%.1f", metrics.truePeakLevel - metrics.rmsLevel)) dB
-            
+
             🎵 FREQUENCY BALANCE:
             \(getGenreFrequencyGuidelines(genre: finalGenre, metrics: metrics))
-            
+
             🚨 DETECTED ISSUES:
-            • Clipping: \(metrics.hasClipping ? "❌ YES" : "✅ No")
-            • Phase Issues: \(metrics.hasPhaseIssues ? "❌ YES" : "✅ No")
-            • Stereo Issues: \(metrics.hasStereoIssues ? "❌ YES" : "✅ No")
-            • Frequency Imbalance: \(metrics.hasFrequencyImbalance ? "❌ YES" : "✅ No")
-            • Dynamic Range Issues: \(metrics.hasDynamicRangeIssues ? "❌ YES" : "✅ No")
+            • Clipping: \(metrics.hasClipping ? "❌ YES - MUST ADDRESS IN RECOMMENDATIONS" : "✅ No")
+            • Phase Issues: \(metrics.hasPhaseIssues ? "❌ YES - MUST ADDRESS IN RECOMMENDATIONS" : "✅ No")
+            • Stereo Issues: \(metrics.hasStereoIssues ? "❌ YES - MUST ADDRESS IN RECOMMENDATIONS" : "✅ No")
+            • Frequency Imbalance: \(metrics.hasFrequencyImbalance ? "❌ YES - MUST ADDRESS IN RECOMMENDATIONS" : "✅ No")
+            • Dynamic Range Issues: \(metrics.hasDynamicRangeIssues ? "❌ YES - MUST ADDRESS IN RECOMMENDATIONS" : "✅ No")
+            \(issuesInstruction)
             """
         } else {
+            // Count detected issues
+            var issueCount = 0
+            var issuesList: [String] = []
+            if metrics.hasClipping { issueCount += 1; issuesList.append("Clipping") }
+            if metrics.hasPhaseIssues { issueCount += 1; issuesList.append("Phase Issues") }
+            if metrics.hasStereoIssues { issueCount += 1; issuesList.append("Stereo Issues") }
+            if metrics.hasFrequencyImbalance { issueCount += 1; issuesList.append("Frequency Imbalance") }
+            if metrics.hasDynamicRangeIssues { issueCount += 1; issuesList.append("Dynamic Range Issues") }
+
+            // Check for frequency extremes
+            if metrics.lowEnd > 50 { issueCount += 1; issuesList.append("Bass at \(Int(metrics.lowEnd))%") }
+            if metrics.high > 25 { issueCount += 1; issuesList.append("Highs at \(Int(metrics.high))%") }
+            if metrics.lowMid > 40 { issueCount += 1; issuesList.append("Low-mids at \(Int(metrics.lowMid))%") }
+
+            let issuesInstruction = issueCount > 0 ? """
+
+            ⚠️⚠️⚠️ CRITICAL: \(issueCount) ISSUE(S) DETECTED: \(issuesList.joined(separator: ", "))
+            YOU MUST PROVIDE AT LEAST \(min(issueCount + 1, 4)) SPECIFIC RECOMMENDATIONS TO ADDRESS THESE ISSUES!
+            DO NOT SKIP THE RECOMMENDATIONS SECTION - THE USER NEEDS ACTIONABLE FEEDBACK!
+            ⚠️⚠️⚠️
+            """ : ""
+
             return """
             Analyze this PRE-MASTERED MIX.\(genreContext)
-            
+
             🎚️ PRE-MASTER LEVELS & DYNAMICS:
             • Peak Level: \(String(format: "%.1f", metrics.peakLevel)) dB
             • RMS Level: \(String(format: "%.1f", metrics.rmsLevel)) dB
             • Loudness: \(String(format: "%.1f", metrics.loudness)) LUFS
             • Dynamic Range: \(String(format: "%.1f", metrics.dynamicRange)) dB
             • True Peak: \(String(format: "%.1f", metrics.truePeakLevel)) dBFS
-            
+
             🎭 STEREO & PHASE:
             • Stereo Width: \(String(format: "%.1f", metrics.stereoWidth))%
             • Phase Coherence: \(String(format: "%.1f", metrics.phaseCoherence * 100))%
             • Mono Compatibility: \(String(format: "%.1f", metrics.monoCompatibility * 100))%
-            
+
             🎵 FREQUENCY BALANCE:
             \(getGenreFrequencyGuidelines(genre: finalGenre, metrics: metrics))
-            
+
             🚨 PRE-MASTER MIX ISSUES:
-            • Clipping: \(metrics.hasClipping ? "❌ YES" : "✅ No")
-            • Phase Issues: \(metrics.hasPhaseIssues ? "❌ YES" : "✅ No")
-            • Stereo Issues: \(metrics.hasStereoIssues ? "❌ YES" : "✅ No")
-            • Frequency Imbalance: \(metrics.hasFrequencyImbalance ? "❌ YES" : "✅ No")
-            • Dynamic Range Issues: \(metrics.hasDynamicRangeIssues ? "❌ YES" : "✅ No")
+            • Clipping: \(metrics.hasClipping ? "❌ YES - MUST ADDRESS IN RECOMMENDATIONS" : "✅ No")
+            • Phase Issues: \(metrics.hasPhaseIssues ? "❌ YES - MUST ADDRESS IN RECOMMENDATIONS" : "✅ No")
+            • Stereo Issues: \(metrics.hasStereoIssues ? "❌ YES - MUST ADDRESS IN RECOMMENDATIONS" : "✅ No")
+            • Frequency Imbalance: \(metrics.hasFrequencyImbalance ? "❌ YES - MUST ADDRESS IN RECOMMENDATIONS" : "✅ No")
+            • Dynamic Range Issues: \(metrics.hasDynamicRangeIssues ? "❌ YES - MUST ADDRESS IN RECOMMENDATIONS" : "✅ No")
+            \(issuesInstruction)
             """
         }
     }
@@ -1446,6 +1539,21 @@ class ClaudeAPIService {
         ⚠️⚠️⚠️ ABSOLUTE RULE: Pre-master mixes MUST be capped at 90 maximum! ⚠️⚠️⚠️
         ⚠️ If you calculate above 90, write 90 instead (masters score 95-100, mixes score lower!)
         
+        ⚠️ CRITICAL: MANDATORY RECOMMENDATIONS FOR ANY DETECTED ISSUE
+        If ANY of these flags are YES, you MUST provide specific recommendations:
+        • Clipping: "The mix is clipping - pull back the output gain and check your limiters"
+        • Phase Issues: "There's phase cancellation happening - check your stereo sources and any parallel processing"
+        • Stereo Issues: "The stereo image needs work - either too wide (collapsing in mono) or too narrow (needs more dimension)"
+        • Frequency Imbalance: "The frequency balance is off - [specify which range: low end is dominating / mids are recessed / highs are harsh]"
+        • Dynamic Range Issues: "The dynamics need attention - [too compressed/squashed OR too dynamic/uncontrolled]"
+
+        ⚠️ FREQUENCY-SPECIFIC RECOMMENDATIONS (MANDATORY if any band exceeds 50%):
+        • Low End >50%: "The low end is overpowering the mix - that bass needs to sit back and let the rest of the track breathe"
+        • Low-Mid >40%: "There's mud building up in the low-mids - clean that up around 200-400Hz to add clarity"
+        • Mid >50%: "The mids are dominating - this mix is honky and needs EQ work in the 800Hz-2kHz range"
+        • High-Mid >35%: "The upper-mids are harsh - tame that 3-6kHz range, it's fatiguing to listen to"
+        • High >30%: "Too much sizzle up top - the highs are brittle and need to be pulled back"
+
         Format response as (FOLLOW EXACTLY):
         SCORE: [FOLLOW THESE EXACT STEPS:
         1. Calculate your score based on the metrics
@@ -1453,18 +1561,41 @@ class ClaudeAPIService {
         3. If YES: Write 90 (NOT the calculated number - pre-master mixes max at 90!)
         4. If NO: Write the calculated number
         5. NEVER write a number higher than 90 for pre-master mixes!
-        
+
         ⚠️⚠️⚠️ MANDATORY: After calculating, if score > 90, you MUST write 90! ⚠️⚠️⚠️
-        
-        ANALYSIS: Write like a top pro mixer giving feedback. In 2-3 sentences, describe the VIBE and ENERGY of this \(genre) mix. Does it HIT? Does it have IMPACT? Does it PUNCH? Does it sit right? Is it GLUED together or falling apart? Be conversational and direct - talk like Dave Pensado or CLA would. DO NOT mention "Score includes:", points, penalties, or technical numbers. Just describe how it FEELS and SOUNDS.
-        
+
+        ANALYSIS: Write like a top pro mixer (Dave Pensado, Chris Lord-Alge, Tony Maserati, Manny Marroquin) giving honest feedback. In 2-3 sentences, describe the VIBE and ENERGY of this \(genre) mix. Does it HIT? Does it have IMPACT? Does it PUNCH? Does it sit right? Is it GLUED together or falling apart? Be conversational and direct. DO NOT mention "Score includes:", points, penalties, or technical numbers. Just describe how it FEELS and SOUNDS. Be HONEST about problems - if the bass is overpowering, say it. If it lacks punch, call it out.
+
         RECOMMENDATIONS:
-        - [For scores 90+: "This \(genre) mix hits hard and sounds pro - ship it!" or similar confident positive statement. NO technical recommendations]
-        - [For scores 85-89: "Solid professional \(genre) mix" with ONE brief suggestion using pro mixer language: "Could use more air up top" or "The low end needs to sit tighter"]
-        - [For scores 75-84: One brief suggestion for improvement]
-        - [For scores below 75: Direct, honest feedback like a pro would give: "The mix needs more punch" or "It's sitting in a box - needs to open up"]
-        - [Use dash (-) for bullet points, NOT numbers]
-        - [Keep it SHORT - maximum 2-3 recommendations]
+        ⚠️⚠️⚠️ MANDATORY SECTION - NEVER SKIP THIS! ⚠️⚠️⚠️
+
+        You MUST provide 2-5 specific, actionable recommendations. Think like Dave Pensado, CLA, Tony Maserati, or Manny Marroquin reviewing a mix.
+
+        IF ANY ISSUE WAS DETECTED (Clipping, Phase, Stereo, Frequency Imbalance, Dynamic Range):
+        - You MUST address EACH detected issue with a specific recommendation
+        - Be direct and honest: "The low end is running wild" / "Phase issues are killing your punch" / "It's over-compressed"
+        - Give actionable fixes: what to do, where to focus
+
+        IF FREQUENCY BALANCE IS OFF (check the percentages above):
+        - Low End >40%: "The bass is dominating - pull it back to let the mix breathe"
+        - Low-Mid >35%: "There's mud in the 200-400Hz range - clean it up"
+        - Mids recessed: "The mids are buried - bring them forward for clarity"
+        - High >25%: "Too bright and harsh up top - tame those highs"
+
+        SCORING GUIDE FOR RECOMMENDATIONS:
+        - Score 90 with NO issues: "This \(genre) mix is tight and ready - ship it!" (1 positive statement)
+        - Score 85-89: 1-2 suggestions like "Could use more air" or "Low end could sit tighter"
+        - Score 75-84: 2-3 specific improvements
+        - Score <75 OR any issues: 3-5 direct, honest fixes
+
+        FORMAT: Use dash (-) for bullet points. Be specific. Be helpful. Be like a mentor giving feedback.
+
+        Example recommendations:
+        - "The low end is eating up the mix - high-pass unnecessary elements and tighten up that bass"
+        - "Your phase coherence is suffering - check stereo sources and parallel buses"
+        - "This mix is compressed to death - back off the bus compressor and let it breathe"
+        - "The mids are recessed - push the vocal and main instruments forward"
+        - "Nice balance, but it could use more air and dimension up top"
         """
     }
     

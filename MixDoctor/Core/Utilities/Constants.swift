@@ -17,9 +17,8 @@ enum AppConstants {
         "Jazz",
         "Classical/Orchestral",
         "Metal",
-        "Acoustic/Singer-Songwriter",
-        "Live",
-        "Other"
+        "Acapella",
+        "Live"
     ]
 
     // UI settings

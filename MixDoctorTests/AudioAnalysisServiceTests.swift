@@ -16,10 +16,15 @@ final class AudioAnalysisServiceTests: XCTestCase {
         super.setUp()
         // Use shared singleton instance (initializer is private)
         analysisService = AudioAnalysisService.shared
+        // Ensure clean state for each test
+        analysisService.reset()
     }
     
     override func tearDown() {
-        analysisService = nil
+        // Reset singleton state
+        analysisService?.reset()
+        // Don't explicitly set to nil - @Observable objects can cause
+        // SIGABRT during deallocation. Swift will handle cleanup automatically.
         super.tearDown()
     }
     

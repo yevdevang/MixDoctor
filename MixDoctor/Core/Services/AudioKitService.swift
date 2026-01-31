@@ -293,7 +293,8 @@ public class AudioKitService: ObservableObject {
             let isJazzOrClassical = genreLower.contains("jazz") || genreLower.contains("classical") ||
                                     genreLower.contains("blues") || genreLower.contains("acoustic") ||
                                     genreLower.contains("orchestral") || genreLower.contains("live") ||
-                                    genreLower.contains("singer-songwriter")
+                                    genreLower.contains("singer-songwriter") || genreLower.contains("singer") ||
+                                    genreLower.contains("acapella") || genreLower.contains("a capella")
 
             // Genre-aware thresholds - Jazz/Classical/Live have naturally different characteristics
             let minPhaseForGenre: Double = isJazzOrClassical ? 0.15 : 0.40
@@ -305,9 +306,9 @@ public class AudioKitService: ObservableObject {
                 result.dynamicRange > maxDynamicRangeForGenre
             )
 
-            // Stage-aware: If user selected Master stage, be MORE lenient (mastered = processed)
-            let isMasterStage = mixStage?.lowercased().contains("master") == true
-            let claudeOverride = claudeResponse.score >= (isMasterStage ? 70 : 78)  // Lower threshold for masters
+            // Stage-aware: Both Mix and Master stages should use same threshold
+            // A score of 68+ indicates the track is processed (mixed), not raw/unmixed
+            let claudeOverride = claudeResponse.score >= 68  // Consistent threshold for all stages
 
             // Final decision: Claude score can override, OR no unmixed indicators
             result.isProfessionallyMixed = claudeOverride || !(isUnmixedByDetection || isUnmixedByScore || hasSevereTechnicalIssues)
@@ -335,7 +336,8 @@ public class AudioKitService: ObservableObject {
             let isJazzOrClassicalFallback = genreLowerFallback.contains("jazz") || genreLowerFallback.contains("classical") ||
                                             genreLowerFallback.contains("blues") || genreLowerFallback.contains("acoustic") ||
                                             genreLowerFallback.contains("orchestral") || genreLowerFallback.contains("live") ||
-                                            genreLowerFallback.contains("singer-songwriter")
+                                            genreLowerFallback.contains("singer-songwriter") || genreLowerFallback.contains("singer") ||
+                                            genreLowerFallback.contains("acapella") || genreLowerFallback.contains("a capella")
             let minPhaseFallback: Double = isJazzOrClassicalFallback ? 0.15 : 0.40
             let maxDRFallback: Double = isJazzOrClassicalFallback ? 35.0 : 22.0
 
@@ -1130,12 +1132,23 @@ public class AudioKitService: ObservableObject {
     
     private func checkFrequencyImbalance(_ lowEnd: Double, _ lowMid: Double, _ mid: Double, _ highMid: Double, _ high: Double, genre: String) -> Bool {
         // Genre-aware frequency balance assessment for professional mixes
-        
+
+        // ACAPELLA SPECIAL CASE: Skip frequency imbalance check entirely
+        // Acapellas have LIMITED BASS by design and mid-heavy frequency profile
+        let genreLower = genre.lowercased()
+        if genreLower.contains("acapella") || genreLower.contains("a capella") || genreLower.contains("vocal") {
+            // Only flag if there's absolutely no mid/high content (broken file)
+            if (mid + highMid + high) < 5.0 {
+                return true  // Something is wrong - vocals should have mid/high content
+            }
+            return false  // Normal acapella - no frequency imbalance
+        }
+
         // Define genre-specific thresholds
         let highFreqMinThreshold: Double
         let bassMaxThreshold: Double
         let combinedLowMaxThreshold: Double
-        
+
         switch genre {
         case "Alternative/Dark Pop", "Jazz", "Blues", "Classical":
             // Dark/warm genres can have very low high frequency content
@@ -3079,16 +3092,31 @@ enum AudioKitError: Error {
             )
             print("🎷 Using JAZZ/BLUES thresholds: DR≤26dB, LUFS≥-24, Crest≤24, Phase≥0.35")
 
-        } else if genreLower.contains("acoustic") || genreLower.contains("singer-songwriter") {
-            // ACOUSTIC/SINGER-SONGWRITER - Natural dynamics but not as extreme as Classical
+        } else if genreLower.contains("acoustic") || genreLower.contains("singer-songwriter") || genreLower.contains("singer") {
+            // ACOUSTIC/SINGER-SONGWRITER - Natural dynamics, can be intimate and quiet
+            // Pre-master mixes (like Cambridge MT) have lots of headroom and dynamics
+            // Similar to Jazz - prioritize natural sound over loudness
             genreThresholds = GenreThresholds(
-                maxDynamicRange: 20.0,        // Natural dynamics
-                minLoudness: -20.0,           // Can be quieter
-                maxCrestFactor: 18.0,         // Natural transients
-                minMonoCompatibility: 0.45,   // Moderate stereo
+                maxDynamicRange: 26.0,        // Pre-masters can have 20-26dB DR (similar to Jazz)
+                minLoudness: -28.0,           // Pre-masters can be very quiet (-20 to -28 LUFS)
+                maxCrestFactor: 24.0,         // Natural transients from acoustic instruments
+                minMonoCompatibility: 0.35,   // Room mics can create wider stereo image
                 description: "Acoustic/Singer-Songwriter"
             )
-            print("🎸 Using ACOUSTIC thresholds: DR≤20dB, LUFS≥-20, Crest≤18, Phase≥0.45")
+            print("🎸 Using ACOUSTIC thresholds: DR≤26dB, LUFS≥-28, Crest≤24, Phase≥0.35")
+
+        } else if genreLower.contains("acapella") || genreLower.contains("a capella") || genreLower.contains("vocal") {
+            // ACAPELLA/VOCAL-ONLY: Very different frequency profile, limited bass is INTENTIONAL
+            // Professional acapellas can be quiet, dynamic, and have minimal low-end
+            genreThresholds = GenreThresholds(
+                maxDynamicRange: 24.0,        // Vocal dynamics can be very wide
+                minLoudness: -26.0,           // Can be quiet - often used for mixing
+                maxCrestFactor: 22.0,         // Natural vocal transients
+                minMonoCompatibility: 0.50,   // Often mono or centered
+                description: "Acapella/Vocal-Only"
+            )
+            print("🎤 Using ACAPELLA thresholds: DR≤24dB, LUFS≥-26, Crest≤22, Phase≥0.50")
+            print("   ⚠️ ACAPELLA: Limited bass is INTENTIONAL - do not penalize for frequency imbalance!")
 
         } else if genreLower.contains("live") {
             // LIVE recordings: VERY high dynamic range, room ambience, natural sound
@@ -3125,15 +3153,17 @@ enum AudioKitError: Error {
 
         } else if genreLower.contains("electronic") || genreLower.contains("edm") || genreLower.contains("dance") ||
                   genreLower.contains("house") || genreLower.contains("techno") {
-            // Electronic/EDM: LOW dynamics, VERY loud, heavily compressed
+            // Electronic/EDM: Variable dynamics depending on subgenre
+            // Mainstream EDM is loud (-6 to -10 LUFS), but ambient/downtempo can be -12 to -16 LUFS
+            // DR ranges from 4-6dB (brickwalled) to 10-14dB (more musical/streaming-optimized)
             genreThresholds = GenreThresholds(
-                maxDynamicRange: 10.0,        // Heavy compression/limiting
-                minLoudness: -10.0,           // Extremely loud
-                maxCrestFactor: 10.0,         // Very controlled
-                minMonoCompatibility: 0.45,   // Wide stereo effects
+                maxDynamicRange: 14.0,        // Allow up to 14dB DR for streaming-optimized EDM
+                minLoudness: -16.0,           // Allow streaming-optimized loudness (-14 to -16 LUFS)
+                maxCrestFactor: 14.0,         // Allow more transient punch
+                minMonoCompatibility: 0.40,   // Wide stereo effects common in EDM
                 description: "Electronic/EDM"
             )
-            print("🎛️ Using ELECTRONIC/EDM thresholds: Low DR (\(genreThresholds.maxDynamicRange)dB), Very Loud (\(genreThresholds.minLoudness)LUFS)")
+            print("🎛️ Using ELECTRONIC/EDM thresholds: DR≤\(genreThresholds.maxDynamicRange)dB, LUFS≥\(genreThresholds.minLoudness)")
 
         } else if genreLower.contains("hip-hop") || genreLower.contains("hip hop") || genreLower.contains("rap") || genreLower.contains("trap") {
             // Hip-Hop: Low dynamics, very loud, bass-heavy
@@ -3436,19 +3466,35 @@ enum AudioKitError: Error {
         let unmixedPattern2 = loudness < -25.0 && stereoWidth < 0.3  // Changed: more extreme
         
         // Pattern 4: Extreme bass dominance (>75%) - even bass-heavy genres shouldn't exceed this
-        // Only flag if ALSO has low loudness (mastered bass-heavy tracks are loud)
-        let bassHeavyUnmixed = (spectralBalance.subBassEnergy + spectralBalance.bassEnergy + spectralBalance.lowMidEnergy) > 0.75 && loudness < -18.0
-        
+        // GENRE-AWARE: Use genre-specific loudness threshold instead of hardcoded -18.0
+        // Jazz/Acoustic/Classical can have lower loudness without being unmixed
+        let bassHeavyUnmixed = (spectralBalance.subBassEnergy + spectralBalance.bassEnergy + spectralBalance.lowMidEnergy) > 0.75 &&
+                               loudness < (genreThresholds.minLoudness - 6.0)  // Use genre threshold with margin
+
         // Pattern 5: Very high crest factor + very low loudness = completely unprocessed
-        let unprocessedPattern = crestFactor > 18.0 && loudness < -20.0  // Changed: more extreme
-        
+        // GENRE-AWARE: Jazz/Classical naturally have higher crest factors
+        let unprocessedCrestThreshold = genreThresholds.maxCrestFactor + 6.0  // Allow 6dB above genre max
+        let unprocessedPattern = crestFactor > unprocessedCrestThreshold &&
+                                 loudness < (genreThresholds.minLoudness - 5.0)
+
         // Pattern 6: Peak at 0dBFS but extremely low loudness = unmastered raw recording
-        let rawPeaksPattern = peakLevel > -0.5 && loudness < -18.0  // Changed: more extreme
-        
+        // GENRE-AWARE: Use genre-specific loudness threshold
+        let rawPeaksPattern = peakLevel > -0.5 && loudness < (genreThresholds.minLoudness - 5.0)
+
         // Pattern 7: Severe frequency imbalance + low loudness = unmixed
-        let severeFreqImbalance = ((spectralBalance.subBassEnergy + spectralBalance.bassEnergy) > 0.70 ||
-                                   (spectralBalance.highMidEnergy + spectralBalance.presenceEnergy + spectralBalance.airEnergy) < 0.03) &&
-                                   loudness < -15.0
+        // GENRE-AWARE: Some genres intentionally have different frequency profiles
+        // - Jazz, Acoustic, Alternative: warmer/darker sound (less highs)
+        // - Acapella: LIMITED BASS is INTENTIONAL (vocal-only content)
+        let isWarmGenre = genreLower.contains("jazz") || genreLower.contains("acoustic") ||
+                          genreLower.contains("blues") || genreLower.contains("classical") ||
+                          genreLower.contains("alternative") || genreLower.contains("singer")
+        let isAcapella = genreLower.contains("acapella") || genreLower.contains("a capella") || genreLower.contains("vocal")
+        let highFreqThreshold = isWarmGenre ? 0.01 : 0.03  // Warmer genres can have less air
+        // Acapella: Skip bass-heavy check entirely (they have minimal bass by design)
+        let bassHeavyCheck = isAcapella ? false : (spectralBalance.subBassEnergy + spectralBalance.bassEnergy) > 0.80
+        let severeFreqImbalance = (bassHeavyCheck ||
+                                   (spectralBalance.highMidEnergy + spectralBalance.presenceEnergy + spectralBalance.airEnergy) < highFreqThreshold) &&
+                                   loudness < (genreThresholds.minLoudness - 5.0)  // Use genre threshold
         
         // Pattern 8: Severe phase coherence issues = poorly recorded/unmixed
         // GENRE-AWARE: Jazz/Classical can have lower phase coherence (room mics, wide ensembles)
@@ -3501,40 +3547,38 @@ enum AudioKitError: Error {
         // TIER 4: AMATEUR/LEARNING MIXER DETECTION (GENRE-AWARE)
         // Good effort but needs improvement - score fairly but provide guidance
         let isAmateurMix = (
-            loudness >= genreThresholds.minLoudness - 8.0 && 
+            loudness >= genreThresholds.minLoudness - 8.0 &&
             loudness <= genreThresholds.minLoudness + 2.0 &&  // Reasonable attempt at genre loudness
-            dynamicRange >= genreThresholds.maxDynamicRange * 0.4 && 
+            dynamicRange >= genreThresholds.maxDynamicRange * 0.4 &&
             dynamicRange <= genreThresholds.maxDynamicRange + 6.0 &&  // Some compression applied
-            peakLevel > -12.0 &&  // Not severely under-leveled
+            peakLevel > -18.0 &&  // Allow lower peaks (pre-masters have headroom)
             failedTests < 10  // Not completely broken
         )
 
         // TIER 5: PRE-MASTER MIX DETECTION (GENRE-AWARE)
+        // Pre-masters intentionally have headroom (-6 to -18 dB peaks) for mastering
         let isPreMaster = (
-            loudness >= genreThresholds.minLoudness - 9.0 && 
+            loudness >= genreThresholds.minLoudness - 12.0 &&  // Pre-masters can be quieter
             loudness <= genreThresholds.minLoudness + 1.0 &&  // Pre-master range with headroom
-            dynamicRange >= genreThresholds.maxDynamicRange * 0.5 && 
-            dynamicRange <= genreThresholds.maxDynamicRange + 4.0 &&  // Proper mixing dynamics
-            peakLevel >= -10.0 && peakLevel <= -3.0 &&  // Good headroom for mastering
-            monoCompatibility > genreThresholds.minMonoCompatibility  // Mixed properly for genre
+            dynamicRange >= genreThresholds.maxDynamicRange * 0.4 &&
+            dynamicRange <= genreThresholds.maxDynamicRange + 6.0 &&  // Proper mixing dynamics
+            peakLevel >= -18.0 && peakLevel <= -1.0 &&  // Wide range for pre-masters (-18 to -1 dB)
+            monoCompatibility > genreThresholds.minMonoCompatibility - 0.10  // Slightly more lenient
         )
 
         // TIER 6: TRULY UNMIXED - Only flag if it doesn't match ANY professional pattern (GENRE-AWARE)
+        // Be VERY conservative - only flag obviously unmixed tracks
         let isTrulyUnmixed = (
             !isProfessionalDynamicMaster &&
             !isStreamingMaster &&
             !isAmateurMix &&
             !isPreMaster &&
             (
-                extremeDynamicRange ||  // Extreme DR way beyond genre norms
-                veryLowLoudness ||  // Much quieter than genre expects
+                extremeDynamicRange ||  // Extreme DR way beyond genre norms (+10dB)
+                veryLowLoudness ||  // Much quieter than genre expects (-7 LUFS below min)
                 criticallyUnprocessed ||  // Completely raw for this genre
-                severePhaseIssues ||  // Poor phase coherence < 40%
-                (loudness < genreThresholds.minLoudness - 5.0 && 
-                 dynamicRange > genreThresholds.maxDynamicRange + 2.0 && 
-                 crestFactor > genreThresholds.maxCrestFactor + 2.0) ||  // Unprocessed for genre
-                (failedTests >= 12) ||  // Many technical failures - increased threshold to reduce false positives
-                criticalMonoFailure  // Critical phase issues
+                (failedTests >= 15) ||  // Many technical failures - very lenient threshold
+                criticalMonoFailure  // Critical phase issues (<30% mono)
             )
         )
 

@@ -188,9 +188,10 @@ struct ResultsView: View {
                 modernAnalysisOnlySection(result: result)
             }
 
-            // Recommendations Section - ALWAYS show for unmixed tracks OR scores < 85
-            if !result.aiRecommendations.isEmpty && (!result.isProfessionallyMixed || result.overallScore < 85) {
-                modernRecommendationsOnlySection(result: result)
+            // Recommendations Section - Show when there are AI recommendations OR detected issues
+            let allRecommendations = generateAllRecommendations(result: result, detectedIssues: detectedIssues)
+            if !allRecommendations.isEmpty && (!result.isProfessionallyMixed || result.overallScore < 85 || !detectedIssues.isEmpty) {
+                modernRecommendationsOnlySectionWithIssues(result: result, recommendations: allRecommendations)
             }
 
             // Action Buttons
@@ -1017,6 +1018,196 @@ struct ResultsView: View {
             if !result.aiRecommendations.isEmpty {
                 LazyVStack(alignment: .leading, spacing: 8) {
                     ForEach(Array(result.aiRecommendations.enumerated()), id: \.offset) { index, recommendation in
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: "exclamationmark.circle.fill")
+                                .foregroundStyle(.orange)
+                                .font(.caption)
+                                .frame(width: 16, height: 16)
+
+                            Text(cleanMarkdownText(recommendation))
+                                .font(.subheadline)
+                                .foregroundStyle(.primary)
+                                .multilineTextAlignment(.leading)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+                .padding(16)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color.orange.opacity(0.05))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.orange.opacity(0.2), lineWidth: 1)
+                        )
+                )
+            }
+        }
+        .padding(20)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color.backgroundSecondary)
+                .shadow(color: Color.black.opacity(0.05), radius: 10, x: 0, y: 2)
+        )
+    }
+
+    // MARK: - Generate All Recommendations (AI + Issue-based)
+
+    private func generateAllRecommendations(result: AnalysisResult, detectedIssues: [String]) -> [String] {
+        var recommendations: [String] = []
+
+        // Start with AI recommendations - these are the primary source
+        recommendations.append(contentsOf: result.aiRecommendations)
+
+        // If AI generated recommendations, use them primarily
+        // Only add fallback recommendations for issues NOT covered by AI
+        let hasAIRecommendations = !result.aiRecommendations.isEmpty
+
+        // Helper to check if an issue is already addressed by AI
+        func isIssueCoveredByAI(_ keywords: [String]) -> Bool {
+            guard hasAIRecommendations else { return false }
+            return result.aiRecommendations.contains { rec in
+                let lower = rec.lowercased()
+                return keywords.contains { lower.contains($0) }
+            }
+        }
+
+        // Generate fallback recommendations for detected issues
+        // ONLY if AI didn't cover them
+        // Written like top mix engineers (Dave Pensado, CLA, Tony Maserati, Manny Marroquin)
+        for issue in detectedIssues {
+            let recommendation: String?
+            let keywords: [String]
+
+            switch issue {
+            case "Clipping detected":
+                keywords = ["clip", "red", "limit", "headroom", "peak"]
+                recommendation = isIssueCoveredByAI(keywords) ? nil :
+                    "You're hitting the reds - pull back that output gain and check your limiters. Leave some headroom for the mastering engineer to work with."
+
+            case "Poor phase coherence":
+                keywords = ["phase", "cancellation", "coherence", "flip"]
+                recommendation = isIssueCoveredByAI(keywords) ? nil :
+                    "There's phase cancellation going on here. Check your stereo sources, parallel processing, and any mic placements. Flip the phase on your bass or kick and see what tightens up."
+
+            case "Poor mono compatibility":
+                keywords = ["mono", "collapse", "compatibility", "narrow"]
+                recommendation = isIssueCoveredByAI(keywords) ? nil :
+                    "This mix is going to collapse on mono systems - club PAs, phones, portable speakers. Check your wide stereo elements and consider narrowing anything below 200Hz."
+
+            case "Mono or very narrow stereo":
+                keywords = ["stereo", "narrow", "width", "dimension", "panning"]
+                recommendation = isIssueCoveredByAI(keywords) ? nil :
+                    "This mix is living in a shoebox. Open it up - use panning, stereo delays, or subtle widening on your elements to create some dimension."
+
+            case "Excessive bass content":
+                keywords = ["bass", "low end", "low-end", "sub", "kick"]
+                recommendation = isIssueCoveredByAI(keywords) ? nil :
+                    "The low end is running the show here. Reign in that bass - high-pass some elements, tame the sub, and let the rest of the mix breathe. The kick and bass are fighting instead of working together."
+
+            case "Severe mid deficiency":
+                keywords = ["mid", "hollow", "scooped", "body", "500hz", "2khz"]
+                recommendation = isIssueCoveredByAI(keywords) ? nil :
+                    "Where did the mids go? This mix is scooped out and hollow. Bring back some body in the 500Hz-2kHz range - that's where the soul of the mix lives."
+
+            case "Severe high frequency loss":
+                keywords = ["high", "bright", "air", "sparkle", "presence", "dark"]
+                recommendation = isIssueCoveredByAI(keywords) ? nil :
+                    "This mix is dark and lifeless up top. Add some air and presence - open up those highs above 8kHz to give it some sparkle and life."
+
+            case "Severely over-compressed":
+                keywords = ["compress", "crush", "dynamic", "squash", "breath"]
+                recommendation = isIssueCoveredByAI(keywords) ? nil :
+                    "You've crushed the life out of this mix. Back off the compression and limiting - let it breathe and have some dynamics. Music needs movement."
+
+            case "Dangerously loud":
+                keywords = ["loud", "hot", "fatigue", "pull back"]
+                recommendation = isIssueCoveredByAI(keywords) ? nil :
+                    "This is way too hot. You're sacrificing dynamics and causing listener fatigue. Pull it back and let the mastering engineer handle the final loudness."
+
+            case "Very quiet mix":
+                keywords = ["quiet", "level", "gain"]
+                recommendation = isIssueCoveredByAI(keywords) ? nil :
+                    "This mix is too quiet to evaluate properly. Bring up the overall level while keeping your dynamics intact."
+
+            default:
+                recommendation = nil
+                keywords = []
+            }
+
+            if let rec = recommendation {
+                recommendations.append(rec)
+            }
+        }
+
+        // Also check frequency bands directly for issues not in detectedIssues
+        // Bass at 100% or close to it - only if not already covered
+        if result.lowEndBalance > 60 && !detectedIssues.contains("Excessive bass content") {
+            let bassKeywords = ["bass", "low end", "low-end", "sub"]
+            if !isIssueCoveredByAI(bassKeywords) && !recommendations.contains(where: { $0.lowercased().contains("bass") || $0.lowercased().contains("low end") }) {
+                let bassRec = "The bass is dominating at \(Int(result.lowEndBalance))% of the frequency spectrum. Let the other elements have some room - a mix is a team, not a solo act."
+                recommendations.append(bassRec)
+            }
+        }
+
+        // High frequencies too prominent
+        if result.highBalance > 25 {
+            let highRec = "The highs are sizzling at \(Int(result.highBalance))%. Tame that top end before it becomes fatiguing - think smooth and present, not harsh and brittle."
+            if !recommendations.contains(where: { $0.lowercased().contains("high") || $0.lowercased().contains("bright") || $0.lowercased().contains("sizzle") }) {
+                recommendations.append(highRec)
+            }
+        }
+
+        return recommendations
+    }
+
+    // MARK: - Modern Recommendations Section with Issues
+
+    private func modernRecommendationsOnlySectionWithIssues(result: AnalysisResult, recommendations: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Section Header
+            HStack {
+                Image(systemName: "lightbulb.fill")
+                    .foregroundStyle(
+                        LinearGradient(
+                            gradient: Gradient(colors: [.orange, .red]),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .font(.title2)
+
+                Text("Recommendations")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+
+                Spacer()
+
+                // Recommendations count badge
+                HStack(spacing: 4) {
+                    Text("\(recommendations.count)")
+                        .font(.caption)
+                        .fontWeight(.bold)
+                    Image(systemName: "list.bullet")
+                        .font(.caption2)
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule()
+                        .fill(LinearGradient(
+                            gradient: Gradient(colors: [.orange, .red]),
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        ))
+                )
+            }
+
+            // Recommendations Content
+            if !recommendations.isEmpty {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    ForEach(Array(recommendations.enumerated()), id: \.offset) { index, recommendation in
                         HStack(alignment: .top, spacing: 12) {
                             Image(systemName: "exclamationmark.circle.fill")
                                 .foregroundStyle(.orange)

@@ -15,10 +15,13 @@ final class AudioFeatureExtractorTests: XCTestCase {
     override func setUp() {
         super.setUp()
         extractor = AudioFeatureExtractor()
+        
+        // Verify initialization completed successfully
+        XCTAssertNotNil(extractor, "AudioFeatureExtractor should initialize")
     }
     
     override func tearDown() {
-        // Don't explicitly set to nil - can cause issues with some types
+        // Clean up extractor instance
         extractor = nil
         super.tearDown()
     }

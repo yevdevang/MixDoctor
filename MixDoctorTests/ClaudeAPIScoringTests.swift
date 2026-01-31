@@ -16,9 +16,13 @@ final class ClaudeAPIScoringTests: XCTestCase {
     override func setUp() {
         super.setUp()
         claudeService = ClaudeAPIService.shared
+        // Ensure clean state for each test
+        claudeService.reset()
     }
     
     override func tearDown() {
+        // Reset singleton state before releasing reference
+        claudeService?.reset()
         claudeService = nil
         super.tearDown()
     }
