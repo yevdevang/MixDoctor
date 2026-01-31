@@ -43,6 +43,9 @@ struct DashboardView: View {
     @State private var syncDebounceTask: Task<Void, Never>? // Debounce sync operations
     @State private var hasLoggedDashboardView = false // Track if dashboard view event has been logged
     @State private var showDeleteAllConfirmation = false // Confirmation for delete all
+    @State private var isDeleting = false // Track if deletion is in progress
+    @State private var deletingFile: AudioFile? // Track which file is being deleted
+    @State private var isDeletingAll = false // Track if deleting all files
     
     // Cached statistics to prevent blocking SwiftData access during rendering
     @State private var cachedAnalyzedCount: Int = 0
@@ -652,6 +655,11 @@ struct DashboardView: View {
 #else
                 AnimatedGradientLoader(fileName: file.fileName)
 #endif
+            }
+        }
+        .overlay {
+            if isDeleting {
+                deletionLoaderOverlay
             }
         }
     }
@@ -1688,89 +1696,118 @@ struct DashboardView: View {
     }
     
     private func deleteFiles(at offsets: IndexSet) {
-        for index in offsets {
-            let file = filteredFiles[index]
+        // Show loader for first file being deleted
+        if let firstIndex = offsets.first, firstIndex < filteredFiles.count {
+            let file = filteredFiles[firstIndex]
+            isDeleting = true
+            deletingFile = file
+        }
+        
+        Task { @MainActor in
+            // Capture files to delete before deletion starts (works on both iOS and MacCatalyst)
+            let filesToDelete = offsets.compactMap { index -> AudioFile? in
+                guard index < filteredFiles.count else { return nil }
+                return filteredFiles[index]
+            }
             
-            // Delete the actual audio file from storage (iCloud or local)
-            // Using iCloudStorageService ensures proper eviction and cross-device sync
-            let fileURL = file.fileURL
+            // Delete files
+            for file in filesToDelete {
+                // Delete the actual audio file from storage (iCloud or local)
+                // Using iCloudStorageService ensures proper eviction and cross-device sync
+                let fileURL = file.fileURL
+                do {
+                    try iCloudStorageService.shared.deleteAudioFile(at: fileURL)
+                } catch {
+                }
+                
+                // Delete the analysis result JSON from iCloud Drive
+                AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: file.fileName)
+                
+                // Delete the SwiftData record (CloudKit will sync this deletion)
+                modelContext.delete(file)
+            }
+            
             do {
-                try iCloudStorageService.shared.deleteAudioFile(at: fileURL)
+                try modelContext.save()
             } catch {
             }
             
-            // Delete the analysis result JSON from iCloud Drive
-            AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: file.fileName)
+            // Clear cached filtered files to force refresh
+            cachedFilteredFiles = []
+            lastFilterHash = 0
             
-            // Delete the SwiftData record (CloudKit will sync this deletion)
-            modelContext.delete(file)
-        }
-        
-        do {
-            try modelContext.save()
-        } catch {
-        }
-        
-        // Clear cached filtered files to force refresh
-        cachedFilteredFiles = []
-        lastFilterHash = 0
-        
-        // Update statistics after deletion
+            // Update statistics after deletion
 #if targetEnvironment(macCatalyst)
-        Task(priority: .utility) {
-            await loadAudioFiles()
-        }
+            Task(priority: .utility) {
+                await loadAudioFiles()
+            }
 #else
-        updateStatistics()
+            updateStatistics()
 #endif
-        
-        // CRITICAL: Notify other views AFTER deletion is complete
-        NotificationCenter.default.post(name: .audioFileDeleted, object: nil)
+            
+            // CRITICAL: Notify other views AFTER deletion is complete
+            NotificationCenter.default.post(name: .audioFileDeleted, object: nil)
+            
+            // Hide loader
+            isDeleting = false
+            deletingFile = nil
+        }
     }
     
     /// Delete all audio files from the app
     private func deleteAllFiles() {
-        let allFiles = audioFiles
+        // Show loader
+        isDeletingAll = true
+        isDeleting = true
         
-        // Delete all files
-        for file in allFiles {
-            // Delete the actual audio file from storage
-            let fileURL = file.fileURL
-            do {
-                try iCloudStorageService.shared.deleteAudioFile(at: fileURL)
-            } catch {
-                // Continue even if individual file deletion fails
+        Task { @MainActor in
+            // Capture all files before deletion starts (works on both iOS and MacCatalyst)
+            let allFiles = Array(audioFiles)
+            
+            // Delete all files
+            for file in allFiles {
+                // Delete the actual audio file from storage
+                let fileURL = file.fileURL
+                do {
+                    try iCloudStorageService.shared.deleteAudioFile(at: fileURL)
+                } catch {
+                    // Continue even if individual file deletion fails
+                }
+                
+                // Delete the analysis result JSON from iCloud Drive
+                AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: file.fileName)
+                
+                // Delete the SwiftData record
+                modelContext.delete(file)
             }
             
-            // Delete the analysis result JSON from iCloud Drive
-            AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: file.fileName)
+            // Save all deletions
+            do {
+                try modelContext.save()
+            } catch {
+                // Handle save error if needed
+            }
             
-            // Delete the SwiftData record
-            modelContext.delete(file)
-        }
-        
-        // Save all deletions
-        do {
-            try modelContext.save()
-        } catch {
-            // Handle save error if needed
-        }
-        
-        // Clear cached filtered files
-        cachedFilteredFiles = []
-        lastFilterHash = 0
-        
-        // Update statistics after deletion
+            // Clear cached filtered files
+            cachedFilteredFiles = []
+            lastFilterHash = 0
+            
+            // Update statistics after deletion
 #if targetEnvironment(macCatalyst)
-        Task(priority: .utility) {
-            await loadAudioFiles()
-        }
+            Task(priority: .utility) {
+                await loadAudioFiles()
+            }
 #else
-        updateStatistics()
+            updateStatistics()
 #endif
-        
-        // CRITICAL: Notify other views AFTER deletion is complete
-        NotificationCenter.default.post(name: .audioFileDeleted, object: nil)
+            
+            // CRITICAL: Notify other views AFTER deletion is complete
+            NotificationCenter.default.post(name: .audioFileDeleted, object: nil)
+            
+            // Hide loader
+            isDeleting = false
+            isDeletingAll = false
+        }
     }
     
     /// Verifies that an analysis result matches the audio file it claims to analyze
@@ -1853,6 +1890,37 @@ struct DashboardView: View {
         
         // Default to "mix" if no stage suffix found
         return "mix"
+    }
+    
+    // MARK: - Deletion Loader
+    
+    private var deletionLoaderOverlay: some View {
+        VStack(spacing: 16) {
+            ProgressView()
+                .tint(.primaryAccent)
+                .scaleEffect(1.5)
+                .progressViewStyle(CircularProgressViewStyle(tint: .primaryAccent))
+            
+            Text(isDeletingAll ? "Deleting all files..." : "Deleting file...")
+                .font(.headline)
+                .foregroundStyle(.primary)
+            
+            if let file = deletingFile, !isDeletingAll {
+                Text(file.fileName)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .padding(.horizontal)
+            }
+        }
+        .padding(24)
+        .background {
+            RoundedRectangle(cornerRadius: 16)
+                .fill(.regularMaterial)
+        }
+        .shadow(radius: 10)
+        .transition(.opacity)
+        .animation(.easeInOut(duration: 0.2), value: isDeleting)
     }
 
     

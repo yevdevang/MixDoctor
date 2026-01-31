@@ -18,6 +18,9 @@ final class ImportViewModel {
     var showInfo = false
     var selectedGenre: String?
     var selectedMixStage: String? = "mix"  // Default to "mix"
+    var isDeleting = false
+    var deletingFile: AudioFile?
+    var isDeletingAll = false
 
     init(modelContext: ModelContext, importService: AudioImportService = AudioImportService()) {
         self.modelContext = modelContext
@@ -193,6 +196,10 @@ final class ImportViewModel {
     }
 
     func removeImportedFile(_ file: AudioFile) {
+        // Show loader
+        isDeleting = true
+        deletingFile = file
+        
         // Capture needed values immediately to avoid accessing file on background thread
         let fileURL = file.fileURL
         let fileName = file.fileName
@@ -237,7 +244,59 @@ final class ImportViewModel {
                 
                 // CRITICAL: Notify other views AFTER deletion is complete
                 NotificationCenter.default.post(name: .audioFileDeleted, object: nil)
+                
+                // Hide loader
+                self.isDeleting = false
+                self.deletingFile = nil
             }
+        }
+    }
+    
+    func deleteAllFiles() {
+        // Show loader
+        isDeletingAll = true
+        isDeleting = true
+        
+        Task { @MainActor in
+            // Capture all files before deletion starts
+            let allFiles = Array(importedFiles)
+            
+            // Delete all files
+            for file in allFiles {
+                // Delete the actual audio file from storage
+                let fileURL = file.fileURL
+                do {
+                    try iCloudStorageService.shared.deleteAudioFile(at: fileURL)
+                } catch {
+                    // Continue even if individual file deletion fails
+                }
+                
+                // Delete the analysis result JSON from iCloud Drive
+                AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: file.fileName)
+                
+                // Delete the SwiftData record
+                modelContext.delete(file)
+            }
+            
+            // Save all deletions
+            do {
+                try modelContext.save()
+            } catch {
+                // Handle save error if needed
+            }
+            
+            // Clear the imported files array
+            importedFiles = []
+            
+            // Clear selected audio file if it was deleted
+            // Note: This will be handled by the view observing importedFiles
+            
+            // CRITICAL: Notify other views AFTER deletion is complete
+            NotificationCenter.default.post(name: .audioFileDeleted, object: nil)
+            
+            // Hide loader
+            isDeleting = false
+            isDeletingAll = false
         }
     }
     

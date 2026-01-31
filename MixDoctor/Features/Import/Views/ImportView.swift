@@ -14,6 +14,7 @@ struct ImportView: View {
     @Binding var selectedTab: Int
     @Binding var shouldAutoPlay: Bool
     @State private var showBatchImportInfo = false
+    @State private var showDeleteAllConfirmation = false
     #if targetEnvironment(macCatalyst)
     @State private var fileToDelete: AudioFile?
     @State private var showDeleteConfirmation = false
@@ -71,6 +72,20 @@ struct ImportView: View {
         } message: {
             Text("When importing multiple files, all files will receive the same Genre and Stage settings you've selected above.\n\nTo use different settings for different files, import them separately.")
         }
+        .alert("Delete All Files", isPresented: $showDeleteAllConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete All", role: .destructive) {
+                if let viewModel = viewModel {
+                    // Clear selected file before deletion
+                    selectedAudioFile = nil
+                    viewModel.deleteAllFiles()
+                }
+            }
+        } message: {
+            if let viewModel = viewModel {
+                Text("Are you sure you want to delete all \(viewModel.importedFiles.count) file\(viewModel.importedFiles.count == 1 ? "" : "s")? This action cannot be undone and will remove files from all your devices.")
+            }
+        }
         #if targetEnvironment(macCatalyst)
         .alert("Delete File", isPresented: $showDeleteConfirmation) {
             Button("Cancel", role: .cancel) {
@@ -94,6 +109,43 @@ struct ImportView: View {
         #else
         .background(Color.backgroundPrimary.ignoresSafeArea())
         #endif
+        .overlay {
+            deletionLoaderOverlay
+        }
+    }
+    
+    // MARK: - Deletion Loader
+    
+    @ViewBuilder
+    private var deletionLoaderOverlay: some View {
+        if let vm = viewModel, vm.isDeleting {
+            VStack(spacing: 16) {
+                ProgressView()
+                    .tint(.primaryAccent)
+                    .scaleEffect(1.5)
+                    .progressViewStyle(CircularProgressViewStyle(tint: .primaryAccent))
+                
+                Text(vm.isDeletingAll ? "Deleting all files..." : "Deleting file...")
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                
+                if let file = vm.deletingFile, !vm.isDeletingAll {
+                    Text(file.fileName)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .padding(.horizontal)
+                }
+            }
+            .padding(24)
+            .background {
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(.regularMaterial)
+            }
+            .shadow(radius: 10)
+            .transition(.opacity)
+            .animation(.easeInOut(duration: 0.2), value: vm.isDeleting)
+        }
     }
 
     // MARK: - Subviews
@@ -392,16 +444,6 @@ struct ImportView: View {
                 
                 Spacer()
                 
-                Button {
-                    Task {
-                        await viewModel.scanForOrphanedFiles()
-                    }
-                } label: {
-                    Label("Sync", systemImage: "arrow.clockwise.icloud")
-                }
-                .buttonStyle(.bordered)
-                .disabled(viewModel.isImporting)
-
                 // Info button for batch import
                 Button {
                     showBatchImportInfo = true
@@ -410,6 +452,22 @@ struct ImportView: View {
                         .foregroundStyle(Color.primaryAccent)
                 }
                 .buttonStyle(.bordered)
+                
+                // Delete All menu button (only show if there are files)
+                if !viewModel.importedFiles.isEmpty {
+                    Menu {
+                        Button(role: .destructive, action: {
+                            showDeleteAllConfirmation = true
+                        }) {
+                            Label("Delete All Files", systemImage: "trash")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .foregroundStyle(Color.primaryAccent)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(viewModel.isImporting || viewModel.isDeleting)
+                }
 
                 // Genre selection dropdown
                 Menu {
@@ -536,17 +594,22 @@ struct ImportView: View {
                             .foregroundStyle(Color.primaryAccent)
                     }
                     .font(.subheadline)
-
-                    // Scan for orphaned files button
-                    Button {
-                        Task {
-                            await viewModel.scanForOrphanedFiles()
+                    
+                    // Delete All menu button (only show if there are files)
+                    if !viewModel.importedFiles.isEmpty {
+                        Menu {
+                            Button(role: .destructive, action: {
+                                showDeleteAllConfirmation = true
+                            }) {
+                                Label("Delete All Files", systemImage: "trash")
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                                .foregroundStyle(Color.primaryAccent)
                         }
-                    } label: {
-                        Image(systemName: "arrow.clockwise.icloud")
+                        .font(.subheadline)
+                        .disabled(viewModel.isImporting || viewModel.isDeleting)
                     }
-                    .font(.subheadline)
-                    .disabled(viewModel.isImporting)
                 }
                 .padding(.vertical, 4)
                 
@@ -953,25 +1016,11 @@ private struct ImportedFileRow: View {
                 .font(.system(size: 10))
                 .foregroundStyle(Color.secondaryText)
 
-                // Row 2: Genre and Mix stage
-                HStack(spacing: 4) {
-                    if let genre = audioFile.genre {
-                        Text(genre)
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(.purple)
-                        
-                        if audioFile.mixStage != nil {
-                            Text("•")
-                                .font(.system(size: 10))
-                                .foregroundStyle(Color.secondaryText)
-                        }
-                    }
-                    
-                    if let mixStage = audioFile.mixStage {
-                        Text(formatMixStage(mixStage))
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(mixStageColor(mixStage))
-                    }
+                // Row 2: Mix stage only (genre removed)
+                if let mixStage = audioFile.mixStage {
+                    Text(formatMixStage(mixStage))
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(mixStageColor(mixStage))
                 }
             }
             
