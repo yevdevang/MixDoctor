@@ -8,9 +8,13 @@ struct ImportView: View {
     @State private var viewModel: ImportViewModel?
     @State private var isShowingDocumentPicker = false
     @State private var isDropTargeted = false
+    @State private var selectedGenre: String?
+    @State private var selectedMixStage: String? = "mix"  // Default to "mix"
     @Binding var selectedAudioFile: AudioFile?
     @Binding var selectedTab: Int
     @Binding var shouldAutoPlay: Bool
+    @State private var showBatchImportInfo = false
+    @State private var showDeleteAllConfirmation = false
     #if targetEnvironment(macCatalyst)
     @State private var fileToDelete: AudioFile?
     @State private var showDeleteConfirmation = false
@@ -63,6 +67,25 @@ struct ImportView: View {
         } message: {
             Text(viewModel?.infoMessage ?? "")
         }
+        .alert("Batch Import", isPresented: $showBatchImportInfo) {
+            Button("Got it", role: .cancel) { }
+        } message: {
+            Text("When importing multiple files, all files will receive the same Genre and Stage settings you've selected above.\n\nTo use different settings for different files, import them separately.")
+        }
+        .alert("Delete All Files", isPresented: $showDeleteAllConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete All", role: .destructive) {
+                if let viewModel = viewModel {
+                    // Clear selected file before deletion
+                    selectedAudioFile = nil
+                    viewModel.deleteAllFiles()
+                }
+            }
+        } message: {
+            if let viewModel = viewModel {
+                Text("Are you sure you want to delete all \(viewModel.importedFiles.count) file\(viewModel.importedFiles.count == 1 ? "" : "s")? This action cannot be undone and will remove files from all your devices.")
+            }
+        }
         #if targetEnvironment(macCatalyst)
         .alert("Delete File", isPresented: $showDeleteConfirmation) {
             Button("Cancel", role: .cancel) {
@@ -72,6 +95,7 @@ struct ImportView: View {
                 if let viewModel = viewModel,
                    let file = fileToDelete,
                    let index = viewModel.importedFiles.firstIndex(where: { $0.id == file.id }) {
+                    // Delete the file (this handles cleanup and notification)
                     deleteFiles(at: IndexSet(integer: index), viewModel: viewModel)
                 }
                 fileToDelete = nil
@@ -85,6 +109,43 @@ struct ImportView: View {
         #else
         .background(Color.backgroundPrimary.ignoresSafeArea())
         #endif
+        .overlay {
+            deletionLoaderOverlay
+        }
+    }
+    
+    // MARK: - Deletion Loader
+    
+    @ViewBuilder
+    private var deletionLoaderOverlay: some View {
+        if let vm = viewModel, vm.isDeleting {
+            VStack(spacing: 16) {
+                ProgressView()
+                    .tint(.primaryAccent)
+                    .scaleEffect(1.5)
+                    .progressViewStyle(CircularProgressViewStyle(tint: .primaryAccent))
+                
+                Text(vm.isDeletingAll ? "Deleting all files..." : "Deleting file...")
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                
+                if let file = vm.deletingFile, !vm.isDeletingAll {
+                    Text(file.fileName)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .padding(.horizontal)
+                }
+            }
+            .padding(24)
+            .background {
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(.regularMaterial)
+            }
+            .shadow(radius: 10)
+            .transition(.opacity)
+            .animation(.easeInOut(duration: 0.2), value: vm.isDeleting)
+        }
     }
 
     // MARK: - Subviews
@@ -107,35 +168,58 @@ struct ImportView: View {
         }
         .background(
             ZStack {
-                // Invisible full-coverage drop target - only active when dragging
+                // Invisible full-coverage drop target - only active when dragging and genre selected
                 Color.clear
                     .contentShape(Rectangle())
                     .onDrop(of: [.audio], isTargeted: $isDropTargeted) { providers in
+                        guard selectedGenre != nil else {
+                            return false
+                        }
                         handleDrop(providers: providers)
                         return true
                     }
                 
                 // Visual drop zone overlay when dragging
                 if isDropTargeted {
-                    RoundedRectangle(cornerRadius: 16)
-                        .strokeBorder(
-                            Color.primaryAccent,
-                            style: StrokeStyle(
-                                lineWidth: 3,
-                                dash: [10, 5]
+                    VStack {
+                        RoundedRectangle(cornerRadius: 16)
+                            .strokeBorder(
+                                Color.primaryAccent,
+                                style: StrokeStyle(
+                                    lineWidth: 3,
+                                    dash: [10, 5]
+                                )
                             )
-                        )
-                        .background(
-                            RoundedRectangle(cornerRadius: 16)
-                                .fill(Color.primaryAccent.opacity(0.1))
-                        )
-                        .padding(8)
-                        .allowsHitTesting(false)
-                        .transition(.opacity)
+                            .background(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(Color.primaryAccent.opacity(0.1))
+                            )
+                            .padding(8)
+                            .allowsHitTesting(false)
+                            .transition(.opacity)
+                        
+                        if selectedGenre == nil {
+                            Text("Please select a genre first")
+                                .font(.headline)
+                                .foregroundStyle(Color.primaryAccent)
+                                .padding()
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .fill(Color.backgroundSecondary)
+                                )
+                                .transition(.opacity)
+                        }
+                    }
                 }
             }
         )
         .animation(.easeInOut(duration: 0.2), value: isDropTargeted)
+        .onChange(of: selectedGenre) { oldValue, newValue in
+            viewModel.selectedGenre = newValue
+        }
+        .onChange(of: selectedMixStage) { oldValue, newValue in
+            viewModel.selectedMixStage = newValue
+        }
         .task {
             // Run loading operations on background thread to avoid blocking UI during tab switch
             await Task.detached(priority: .userInitiated) {
@@ -143,19 +227,18 @@ struct ImportView: View {
                     viewModel.loadImports()
                 }
                 
+                // Update metadata from filenames for legacy files
+                await viewModel.updateAllFilesMetadataFromFilenames()
+                
                 // Check for orphaned files (files deleted on other devices)
                 await viewModel.scanForOrphanedFiles()
             }.value
         }
         .onReceive(NotificationCenter.default.publisher(for: .audioFileDeleted)) { _ in
-            // Reload files when a file is deleted from Dashboard (non-blocking)
-            Task.detached(priority: .utility) {
-                await MainActor.run {
-                    viewModel.loadImports()
-                }
-            }
-            // Also check for orphans
-            Task {
+            // Don't reload here - removeImportedFile() already updates the array
+            // This notification is for OTHER views (ContentView, PlayerView)
+            // Only check for orphans if file was deleted from another view (Dashboard)
+            Task(priority: .utility) {
                 await viewModel.scanForOrphanedFiles()
             }
         }
@@ -187,31 +270,154 @@ struct ImportView: View {
                         .foregroundStyle(Color.secondaryText)
                 }
 
-                HStack(spacing: 16) {
+                VStack(spacing: 16) {
+                    // Genre selection dropdown - full width
+                    Menu {
+                        ForEach(AppConstants.availableGenres, id: \.self) { genre in
+                            Button {
+                                selectedGenre = genre
+                            } label: {
+                                HStack {
+                                    Text(genre)
+                                    if selectedGenre == genre {
+                                        Spacer()
+                                        Image(systemName: "checkmark")
+                                            .foregroundStyle(Color.primaryAccent)
+                                    }
+                                }
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Text("Genre:")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.primary)
+                            Text(selectedGenre ?? "Select a genre...")
+                                .font(.subheadline)
+                                .foregroundStyle(selectedGenre == nil ? Color.secondaryText : Color.primary)
+                            Spacer()
+                            Image(systemName: "chevron.down")
+                                .font(.caption)
+                                .foregroundStyle(Color.secondaryText)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(Color.backgroundSecondary)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .strokeBorder(
+                                            selectedGenre == nil ? Color.secondary.opacity(0.3) : Color.primaryAccent.opacity(0.5),
+                                            lineWidth: selectedGenre == nil ? 1 : 2
+                                        )
+                                )
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    
+                    // Mix Stage selection dropdown - full width
+                    Menu {
+                        Button {
+                            selectedMixStage = "mix"
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Mix (Pre-Master)")
+                                    Text("Raw mix, -16 to -20 LUFS")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                if selectedMixStage == "mix" {
+                                    Spacer()
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(Color.primaryAccent)
+                                }
+                            }
+                        }
+                        
+                        Button {
+                            selectedMixStage = "master_streaming"
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Master (Streaming)")
+                                    Text("Spotify/Apple, -14 LUFS")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                if selectedMixStage == "master_streaming" {
+                                    Spacer()
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(Color.primaryAccent)
+                                }
+                            }
+                        }
+                        
+                        Button {
+                            selectedMixStage = "master_cd"
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Master (CD/Loud)")
+                                    Text("CD/Physical, -9 to -11 LUFS")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                if selectedMixStage == "master_cd" {
+                                    Spacer()
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(Color.primaryAccent)
+                                }
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Text("Stage:")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.primary)
+                            Text(mixStageDisplayName(selectedMixStage))
+                                .font(.subheadline)
+                                .foregroundStyle(Color.primary)
+                            Spacer()
+                            Image(systemName: "chevron.down")
+                                .font(.caption)
+                                .foregroundStyle(Color.secondaryText)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(Color.backgroundSecondary)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .strokeBorder(Color.primaryAccent.opacity(0.3), lineWidth: 1)
+                                )
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    
+                    // Browse Files button - full width
                     Button {
                         isShowingDocumentPicker = true
                     } label: {
                         Label("Browse Files", systemImage: "folder")
-                            .frame(maxWidth: 200)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .fill(Color.primaryAccent)
+                            )
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    
-                    // Sync button to recover orphaned files
-//                if let viewModel {
-//                    Button {
-//                        Task {
-//                            await viewModel.scanForOrphanedFiles()
-//                        }
-//                    } label: {
-//                        Image(systemName: "arrow.clockwise.icloud")
-//                            .font(.title3)
-//                    }
-//                    .buttonStyle(.bordered)
-//                    .controlSize(.large)
-//                    .disabled(viewModel.isImporting)
-//                }
+                    .buttonStyle(.plain)
+                    .disabled(selectedGenre == nil)
+                    .opacity(selectedGenre == nil ? 0.5 : 1.0)
                 }
+                .frame(maxWidth: 500)
 
                 supportedFormatsView
                 
@@ -238,15 +444,128 @@ struct ImportView: View {
                 
                 Spacer()
                 
+                // Info button for batch import
                 Button {
-                    Task {
-                        await viewModel.scanForOrphanedFiles()
-                    }
+                    showBatchImportInfo = true
                 } label: {
-                    Label("Sync", systemImage: "arrow.clockwise.icloud")
+                    Image(systemName: "info.circle")
+                        .foregroundStyle(Color.primaryAccent)
                 }
                 .buttonStyle(.bordered)
-                .disabled(viewModel.isImporting)
+                
+                // Delete All menu button (only show if there are files)
+                if !viewModel.importedFiles.isEmpty {
+                    Menu {
+                        Button(role: .destructive, action: {
+                            showDeleteAllConfirmation = true
+                        }) {
+                            Label("Delete All Files", systemImage: "trash")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .foregroundStyle(Color.primaryAccent)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(viewModel.isImporting || viewModel.isDeleting)
+                }
+
+                // Genre selection dropdown
+                Menu {
+                    ForEach(AppConstants.availableGenres, id: \.self) { genre in
+                        Button {
+                            selectedGenre = genre
+                        } label: {
+                            HStack {
+                                Text(genre)
+                                if selectedGenre == genre {
+                                    Spacer()
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(Color.primaryAccent)
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text("Genre:")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Text(selectedGenre ?? "Select...")
+                            .font(.subheadline)
+                            .foregroundStyle(selectedGenre == nil ? Color.secondaryText : Color.primary)
+                        Image(systemName: "chevron.down")
+                            .font(.caption2)
+                            .foregroundStyle(Color.secondaryText)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color.backgroundSecondary)
+                    )
+                }
+                .buttonStyle(.plain)
+                
+                // Mix Stage selection dropdown
+                Menu {
+                    Button {
+                        selectedMixStage = "mix"
+                    } label: {
+                        HStack {
+                            Text("Mix (Pre-Master)")
+                            if selectedMixStage == "mix" {
+                                Spacer()
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(Color.primaryAccent)
+                            }
+                        }
+                    }
+                    
+                    Button {
+                        selectedMixStage = "master_streaming"
+                    } label: {
+                        HStack {
+                            Text("Master (Streaming)")
+                            if selectedMixStage == "master_streaming" {
+                                Spacer()
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(Color.primaryAccent)
+                            }
+                        }
+                    }
+                    
+                    Button {
+                        selectedMixStage = "master_cd"
+                    } label: {
+                        HStack {
+                            Text("Master (CD/Loud)")
+                            if selectedMixStage == "master_cd" {
+                                Spacer()
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(Color.primaryAccent)
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text("Stage:")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Text(mixStageDisplayName(selectedMixStage))
+                            .font(.subheadline)
+                            .foregroundStyle(Color.primary)
+                        Image(systemName: "chevron.down")
+                            .font(.caption2)
+                            .foregroundStyle(Color.secondaryText)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color.backgroundSecondary)
+                    )
+                }
+                .buttonStyle(.plain)
                 
                 Button {
                     isShowingDocumentPicker = true
@@ -254,11 +573,193 @@ struct ImportView: View {
                     Label("Import More", systemImage: "plus.circle.fill")
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(viewModel.isImporting)
+                .disabled(viewModel.isImporting || selectedGenre == nil)
             }
             .padding()
+            #else
+            // Fixed header on iOS - not scrollable
+            VStack(spacing: 12) {
+                HStack(alignment: .center) {
+                    Text("\(viewModel.importedFiles.count) \(viewModel.importedFiles.count == 1 ? "Song" : "Songs")")
+                        .textCase(.none)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    
+                    // Info button for batch import
+                    Button {
+                        showBatchImportInfo = true
+                    } label: {
+                        Image(systemName: "info.circle")
+                            .foregroundStyle(Color.primaryAccent)
+                    }
+                    .font(.subheadline)
+                    
+                    // Delete All menu button (only show if there are files)
+                    if !viewModel.importedFiles.isEmpty {
+                        Menu {
+                            Button(role: .destructive, action: {
+                                showDeleteAllConfirmation = true
+                            }) {
+                                Label("Delete All Files", systemImage: "trash")
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                                .foregroundStyle(Color.primaryAccent)
+                        }
+                        .font(.subheadline)
+                        .disabled(viewModel.isImporting || viewModel.isDeleting)
+                    }
+                }
+                .padding(.vertical, 4)
+                
+                // Genre selection dropdown - full width on iOS
+                Menu {
+                    ForEach(AppConstants.availableGenres, id: \.self) { genre in
+                        Button {
+                            selectedGenre = genre
+                        } label: {
+                            HStack {
+                                Text(genre)
+                                if selectedGenre == genre {
+                                    Spacer()
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(Color.primaryAccent)
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Text("Genre:")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.primary)
+                        Text(selectedGenre ?? "Select a genre...")
+                            .font(.subheadline)
+                            .foregroundStyle(selectedGenre == nil ? Color.secondaryText : Color.primary)
+                        Spacer()
+                        Image(systemName: "chevron.down")
+                            .font(.caption)
+                            .foregroundStyle(Color.secondaryText)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color.backgroundSecondary)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .strokeBorder(
+                                        selectedGenre == nil ? Color.secondary.opacity(0.3) : Color.primaryAccent.opacity(0.5),
+                                        lineWidth: selectedGenre == nil ? 1 : 2
+                                    )
+                            )
+                    )
+                }
+                .buttonStyle(.plain)
+                
+                // Mix Stage selection dropdown - full width on iOS
+                Menu {
+                    Button {
+                        selectedMixStage = "mix"
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Mix (Pre-Master)")
+                                Text("Raw mix, -16 to -20 LUFS")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if selectedMixStage == "mix" {
+                                Spacer()
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(Color.primaryAccent)
+                            }
+                        }
+                    }
+                    
+                    Button {
+                        selectedMixStage = "master_streaming"
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Master (Streaming)")
+                                Text("Spotify/Apple, -14 LUFS")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if selectedMixStage == "master_streaming" {
+                                Spacer()
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(Color.primaryAccent)
+                            }
+                        }
+                    }
+                    
+                    Button {
+                        selectedMixStage = "master_cd"
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Master (CD/Loud)")
+                                Text("CD/Physical, -9 to -11 LUFS")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if selectedMixStage == "master_cd" {
+                                Spacer()
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(Color.primaryAccent)
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Text("Stage:")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.primary)
+                        Text(mixStageDisplayName(selectedMixStage))
+                            .font(.subheadline)
+                            .foregroundStyle(Color.primary)
+                        Spacer()
+                        Image(systemName: "chevron.down")
+                            .font(.caption)
+                            .foregroundStyle(Color.secondaryText)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color.backgroundSecondary)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .strokeBorder(Color.primaryAccent.opacity(0.3), lineWidth: 1)
+                            )
+                    )
+                }
+                .buttonStyle(.plain)
+                
+                Button("Import More") {
+                    isShowingDocumentPicker = true
+                }
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.primaryAccent)
+                )
+                .disabled(viewModel.isImporting || selectedGenre == nil)
+                .opacity((viewModel.isImporting || selectedGenre == nil) ? 0.5 : 1.0)
+            }
+            .padding()
+            .background(Color.backgroundPrimary)
             #endif
             
+            // Scrollable list
             List {
                 Section {
                     ForEach(viewModel.importedFiles) { file in
@@ -293,34 +794,6 @@ struct ImportView: View {
                         .frame(maxWidth: .infinity, minHeight: 100)
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
-                } header: {
-                    #if !targetEnvironment(macCatalyst)
-                    HStack(alignment: .center) {
-                        Text("\(viewModel.importedFiles.count) \(viewModel.importedFiles.count == 1 ? "Song" : "Songs")")
-                            .textCase(.none)
-                            .font(.headline)
-                            .foregroundStyle(.primary)
-                        Spacer()
-                        
-                        // Scan for orphaned files button
-                        Button {
-                            Task {
-                                await viewModel.scanForOrphanedFiles()
-                            }
-                        } label: {
-                            Image(systemName: "arrow.clockwise.icloud")
-                        }
-                        .font(.subheadline)
-                        .disabled(viewModel.isImporting)
-                        
-                        Button("Import More") {
-                            isShowingDocumentPicker = true
-                        }
-                        .font(.subheadline)
-                        .disabled(viewModel.isImporting)
-                    }
-                    .padding(.vertical, 4)
-                    #endif
                 }
             }
             .listStyle(.insetGrouped)
@@ -424,7 +897,7 @@ struct ImportView: View {
             }
             
             if !urls.isEmpty {
-                await viewModel.importFiles(urls)
+                await viewModel.importFiles(urls, genre: selectedGenre, mixStage: selectedMixStage)
                 
                 // Select the first file if nothing is selected
                 if !viewModel.importedFiles.isEmpty && selectedAudioFile == nil {
@@ -448,7 +921,7 @@ struct ImportView: View {
             }
             
             Task {
-                await viewModel.importFiles(urls)
+                await viewModel.importFiles(urls, genre: selectedGenre, mixStage: selectedMixStage)
                 
                 // Just select the first file, don't auto-play or switch tabs
                 if !viewModel.importedFiles.isEmpty && selectedAudioFile == nil {
@@ -463,9 +936,27 @@ struct ImportView: View {
     }
 
     private func deleteFiles(at offsets: IndexSet, viewModel: ImportViewModel) {
+        // Check if the currently selected file is being deleted BEFORE deletion
+        let filesToDelete = offsets.map { viewModel.importedFiles[$0] }
+        let isSelectedFileBeingDeleted = filesToDelete.contains { $0.id == selectedAudioFile?.id }
+        
+        // Delete files (removeImportedFile does everything in background with delay)
         for index in offsets {
             let file = viewModel.importedFiles[index]
             viewModel.removeImportedFile(file)
+        }
+        
+        // Clear selection immediately if needed (array will update shortly)
+        if isSelectedFileBeingDeleted {
+            selectedAudioFile = nil
+            
+            // After a short delay, select first available file
+            Task {
+                try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+                if !viewModel.importedFiles.isEmpty {
+                    selectedAudioFile = viewModel.importedFiles.first
+                }
+            }
         }
     }
 
@@ -482,6 +973,15 @@ struct ImportView: View {
             set: { newValue in viewModel?.showInfo = newValue }
         )
     }
+    
+    private func mixStageDisplayName(_ stage: String?) -> String {
+        switch stage {
+        case "mix": return "Mix (Pre-Master)"
+        case "master_streaming": return "Master (Streaming)"
+        case "master_cd": return "Master (CD/Loud)"
+        default: return "Mix (Pre-Master)"
+        }
+    }
 }
 
 // MARK: - Supporting Views
@@ -496,17 +996,32 @@ private struct ImportedFileRow: View {
             // Status icon
             statusIcon
             
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(audioFile.fileName)
                     .font(.headline)
                     .lineLimit(1)
 
-                // Metadata - allow wrapping to multiple lines if needed
-                Text("\(secondsText(duration: audioFile.duration)) • \(sampleRateText(sampleRate: audioFile.sampleRate)) • \(audioFile.bitDepth)-bit • \(channelLabel(for: audioFile.numberOfChannels)) • \(FileManager.default.formatFileSize(audioFile.fileSize))")
-                    .font(.caption)
-                    .foregroundStyle(Color.secondaryText)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
+                // Row 1: Audio specs
+                HStack(spacing: 3) {
+                    Text(secondsText(duration: audioFile.duration))
+                    Text("•")
+                    Text(sampleRateText(sampleRate: audioFile.sampleRate))
+                    Text("•")
+                    Text("\(audioFile.bitDepth)-bit")
+                    Text("•")
+                    Text(channelLabel(for: audioFile.numberOfChannels))
+                    Text("•")
+                    Text(FileManager.default.formatFileSize(audioFile.fileSize))
+                }
+                .font(.system(size: 10))
+                .foregroundStyle(Color.secondaryText)
+
+                // Row 2: Mix stage only (genre removed)
+                if let mixStage = audioFile.mixStage {
+                    Text(formatMixStage(mixStage))
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(mixStageColor(mixStage))
+                }
             }
             
             Spacer(minLength: 8)
@@ -634,6 +1149,32 @@ private struct ImportedFileRow: View {
             return "Stereo"
         default:
             return "\(count) ch"
+        }
+    }
+
+    private func formatMixStage(_ stage: String) -> String {
+        switch stage.lowercased() {
+        case "mix":
+            return "Mix"
+        case "master_streaming":
+            return "Master (Streaming)"
+        case "master_cd":
+            return "Master (CD)"
+        default:
+            return stage.capitalized
+        }
+    }
+
+    private func mixStageColor(_ stage: String) -> Color {
+        switch stage.lowercased() {
+        case "mix":
+            return .blue
+        case "master_streaming":
+            return .green
+        case "master_cd":
+            return .orange
+        default:
+            return Color.secondaryText
         }
     }
 }

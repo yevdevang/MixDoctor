@@ -10,14 +10,18 @@ import XCTest
 
 final class AudioFeatureExtractorTests: XCTestCase {
     
-    var extractor: AudioFeatureExtractor!
+    var extractor: AudioFeatureExtractor?
     
     override func setUp() {
         super.setUp()
         extractor = AudioFeatureExtractor()
+        
+        // Verify initialization completed successfully
+        XCTAssertNotNil(extractor, "AudioFeatureExtractor should initialize")
     }
     
     override func tearDown() {
+        // Clean up extractor instance
         extractor = nil
         super.tearDown()
     }
@@ -25,6 +29,11 @@ final class AudioFeatureExtractorTests: XCTestCase {
     // MARK: - Stereo Features Tests
     
     func testStereoFeatureExtraction_MonoSignal() {
+        guard let extractor = extractor else {
+            XCTFail("Extractor not initialized")
+            return
+        }
+        
         // Given: Identical left and right channels (mono)
         let left = [Float](repeating: 1.0, count: 1000)
         let right = [Float](repeating: 1.0, count: 1000)
@@ -33,13 +42,19 @@ final class AudioFeatureExtractorTests: XCTestCase {
         let features = extractor.extractStereoFeatures(left: left, right: right)
         
         // Then
-        XCTAssertGreaterThan(features.stereoWidth, 0)
-        XCTAssertLessThanOrEqual(features.stereoWidth, 1)
+        // Mono signal should have stereo width of 0 (or very close to 0)
+        XCTAssertGreaterThanOrEqual(features.stereoWidth, 0, "Mono signal should have 0 stereo width")
+        XCTAssertLessThanOrEqual(features.stereoWidth, 0.1, "Mono signal should have near-zero stereo width")
         XCTAssertGreaterThan(features.correlation, 0.9, "Mono signal should have high correlation")
         XCTAssertEqual(features.leftRightBalance, 0, accuracy: 0.01, "Balanced signal should have 0 balance")
     }
     
     func testStereoFeatureExtraction_WideSignal() {
+        guard let extractor = extractor else {
+            XCTFail("Extractor not initialized")
+            return
+        }
+        
         // Given: Different left and right channels (wide)
         let left = [Float](repeating: 1.0, count: 1000)
         let right = [Float](repeating: -1.0, count: 1000)
@@ -54,6 +69,11 @@ final class AudioFeatureExtractorTests: XCTestCase {
     }
     
     func testStereoFeatureExtraction_ImbalancedSignal() {
+        guard let extractor = extractor else {
+            XCTFail("Extractor not initialized")
+            return
+        }
+        
         // Given: Left louder than right
         let left = [Float](repeating: 1.0, count: 1000)
         let right = [Float](repeating: 0.5, count: 1000)
@@ -68,6 +88,11 @@ final class AudioFeatureExtractorTests: XCTestCase {
     // MARK: - Loudness Features Tests
     
     func testLoudnessFeatureExtraction() {
+        guard let extractor = extractor else {
+            XCTFail("Extractor not initialized")
+            return
+        }
+        
         // Given: Test signal with known properties
         let left = [Float](repeating: 0.5, count: 1000)
         let right = [Float](repeating: 0.5, count: 1000)
@@ -83,6 +108,11 @@ final class AudioFeatureExtractorTests: XCTestCase {
     }
     
     func testLoudnessFeatureExtraction_SilentSignal() {
+        guard let extractor = extractor else {
+            XCTFail("Extractor not initialized")
+            return
+        }
+        
         // Given: Silent signal
         let left = [Float](repeating: 0, count: 1000)
         let right = [Float](repeating: 0, count: 1000)
@@ -98,6 +128,11 @@ final class AudioFeatureExtractorTests: XCTestCase {
     // MARK: - Frequency Features Tests
     
     func testFrequencyFeatureExtraction() throws {
+        guard let extractor = extractor else {
+            XCTFail("Extractor not initialized")
+            return
+        }
+        
         // Given: Test signal at 440 Hz (A4)
         let sampleRate: Double = 44100
         let frequency: Float = 440

@@ -16,6 +16,11 @@ final class ImportViewModel {
     var showError = false
     var infoMessage: String?
     var showInfo = false
+    var selectedGenre: String?
+    var selectedMixStage: String? = "mix"  // Default to "mix"
+    var isDeleting = false
+    var deletingFile: AudioFile?
+    var isDeletingAll = false
 
     init(modelContext: ModelContext, importService: AudioImportService = AudioImportService()) {
         self.modelContext = modelContext
@@ -33,7 +38,7 @@ final class ImportViewModel {
         }
     }
 
-    func importFiles(_ urls: [URL]) async {
+    func importFiles(_ urls: [URL], genre: String? = nil, mixStage: String? = nil) async {
         guard !urls.isEmpty else { return }
 
         for (index, url) in urls.enumerated() {
@@ -48,8 +53,21 @@ final class ImportViewModel {
         defer { isImporting = false }
 
         do {
-            // Pass modelContext to importService so it can check for duplicates BEFORE copying to iCloud
-            let files = try await importService.importMultipleFiles(urls, modelContext: modelContext)
+            // Get the final genre and mixStage that will be used
+            let finalGenre = genre ?? selectedGenre
+            let finalMixStage = mixStage ?? selectedMixStage
+            
+            print("📋 ImportViewModel.importFiles - Final params:")
+            print("   Genre: \(finalGenre ?? "nil")")
+            print("   Mix Stage: \(finalMixStage ?? "nil")")
+            
+            // Pass modelContext, genre, and mixStage to importService
+            let files = try await importService.importMultipleFiles(
+                urls,
+                modelContext: modelContext,
+                genre: finalGenre,
+                mixStage: finalMixStage
+            )
             
             
             // Check for duplicates before inserting
@@ -58,6 +76,10 @@ final class ImportViewModel {
             
             for file in files {
                 if !isDuplicate(file) {
+                    print("📝 Inserting file into database:")
+                    print("   Filename: \(file.fileName)")
+                    print("   Genre: \(file.genre ?? "nil")")
+                    print("   MixStage: \(file.mixStage ?? "nil")")
                     modelContext.insert(file)
                     insertedCount += 1
                 } else {
@@ -73,12 +95,15 @@ final class ImportViewModel {
             }
 
             try modelContext.save()
+            print("✅ ModelContext saved successfully")
             
             // Force refresh the query
             try? await Task.sleep(for: .milliseconds(100))
             
             loadImports()
+            print("📋 After loadImports(), checking first few files:")
             for file in importedFiles.prefix(10) {
+                print("   \(file.fileName): genre=\(file.genre ?? "nil"), stage=\(file.mixStage ?? "nil")")
             }
             
             importProgress = 1.0
@@ -125,8 +150,9 @@ final class ImportViewModel {
     }
     // MARK: - Duplicate Detection
     
-    /// Check if a file is a duplicate based on fileName, fileSize, and duration
+    /// Check if a file is a duplicate based on fileName, fileSize, duration, genre, and mixStage
     /// Also verifies that the existing file physically exists before treating as duplicate
+    /// Allows same file with different genre/stage combinations
     private func isDuplicate(_ file: AudioFile) -> Bool {
         let descriptor = FetchDescriptor<AudioFile>()
         guard let allFiles = try? modelContext.fetch(descriptor) else {
@@ -134,7 +160,7 @@ final class ImportViewModel {
         }
         
         
-        // Check for exact match on fileName and fileSize
+        // Check for exact match on fileName, fileSize, duration, genre, AND mixStage
         // Duration check within 1 second tolerance (for encoding variations)
         for existingFile in allFiles {
             // Skip comparing the file to itself (same object ID)
@@ -145,11 +171,11 @@ final class ImportViewModel {
             let sameFileName = existingFile.fileName == file.fileName
             let sameFileSize = existingFile.fileSize == file.fileSize
             let similarDuration = abs(existingFile.duration - file.duration) < 1.0
+            let sameGenre = (existingFile.genre ?? "") == (file.genre ?? "")
+            let sameStage = (existingFile.mixStage ?? "") == (file.mixStage ?? "")
             
-            if sameFileName {
-            }
-            
-            if sameFileName && sameFileSize && similarDuration {
+            // Only consider duplicate if ALL match: file, genre, AND stage
+            if sameFileName && sameFileSize && similarDuration && sameGenre && sameStage {
                 // Before treating as duplicate, verify the existing file actually exists
                 let existingFileURL = existingFile.fileURL
                 let fileExists = FileManager.default.fileExists(atPath: existingFileURL.path)
@@ -162,7 +188,7 @@ final class ImportViewModel {
                     return false // Not a duplicate since existing file is gone
                 }
                 
-                return true // It's a real duplicate
+                return true // It's a real duplicate (same file, genre, AND stage)
             }
         }
         
@@ -170,31 +196,108 @@ final class ImportViewModel {
     }
 
     func removeImportedFile(_ file: AudioFile) {
+        // Show loader
+        isDeleting = true
+        deletingFile = file
         
-        // Delete the actual audio file from storage (iCloud or local)
-        // Using iCloudStorageService ensures proper eviction and cross-device sync
+        // Capture needed values immediately to avoid accessing file on background thread
         let fileURL = file.fileURL
-        do {
-            try iCloudStorageService.shared.deleteAudioFile(at: fileURL)
-        } catch {
+        let fileName = file.fileName
+        let fileID = file.id
+        
+        // Do ALL operations in background to prevent any UI blocking
+        Task.detached(priority: .userInitiated) {
+            // Small delay to let current UI operation finish
+            try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
+            
+            // Update UI array on main thread
+            await MainActor.run {
+                if let index = self.importedFiles.firstIndex(where: { $0.id == fileID }) {
+                    self.importedFiles.remove(at: index)
+                }
+            }
+            
+            // Delete the actual audio file from storage (iCloud or local)
+            do {
+                try await iCloudStorageService.shared.deleteAudioFile(at: fileURL)
+            } catch {
+            }
+            
+            // Delete the analysis result JSON from iCloud Drive
+            await AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: fileName)
+            
+            // Delete from SwiftData on main thread
+            await MainActor.run {
+                // Re-fetch the file to ensure we have the right context
+                let descriptor = FetchDescriptor<AudioFile>(
+                    predicate: #Predicate<AudioFile> { $0.id == fileID }
+                )
+                
+                if let fileToDelete = try? self.modelContext.fetch(descriptor).first {
+                    self.modelContext.delete(fileToDelete)
+                    
+                    do {
+                        try self.modelContext.save()
+                    } catch {
+                    }
+                }
+                
+                // CRITICAL: Notify other views AFTER deletion is complete
+                NotificationCenter.default.post(name: .audioFileDeleted, object: nil)
+                
+                // Hide loader
+                self.isDeleting = false
+                self.deletingFile = nil
+            }
         }
+    }
+    
+    func deleteAllFiles() {
+        // Show loader
+        isDeletingAll = true
+        isDeleting = true
         
-        // Delete the analysis result JSON from iCloud Drive
-        AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: file.fileName)
-        
-        // Delete the SwiftData record (CloudKit will sync this deletion)
-        modelContext.delete(file)
-        
-        do {
-            try modelContext.save()
-        } catch {
+        Task { @MainActor in
+            // Capture all files before deletion starts
+            let allFiles = Array(importedFiles)
+            
+            // Delete all files
+            for file in allFiles {
+                // Delete the actual audio file from storage
+                let fileURL = file.fileURL
+                do {
+                    try iCloudStorageService.shared.deleteAudioFile(at: fileURL)
+                } catch {
+                    // Continue even if individual file deletion fails
+                }
+                
+                // Delete the analysis result JSON from iCloud Drive
+                AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: file.fileName)
+                
+                // Delete the SwiftData record
+                modelContext.delete(file)
+            }
+            
+            // Save all deletions
+            do {
+                try modelContext.save()
+            } catch {
+                // Handle save error if needed
+            }
+            
+            // Clear the imported files array
+            importedFiles = []
+            
+            // Clear selected audio file if it was deleted
+            // Note: This will be handled by the view observing importedFiles
+            
+            // CRITICAL: Notify other views AFTER deletion is complete
+            NotificationCenter.default.post(name: .audioFileDeleted, object: nil)
+            
+            // Hide loader
+            isDeleting = false
+            isDeletingAll = false
         }
-        
-        // Reload imports to ensure UI is in sync with database
-        loadImports()
-        
-        // Notify other views that files were deleted
-        NotificationCenter.default.post(name: .audioFileDeleted, object: nil)
     }
     
     // MARK: - Orphaned File Recovery
@@ -265,10 +368,34 @@ final class ImportViewModel {
             }
             
             if !orphanedURLs.isEmpty {
+                print("📁 Found \(orphanedURLs.count) orphaned file(s) - checking if they need import")
+                
+                // Get all existing files from database
+                let descriptor = FetchDescriptor<AudioFile>()
+                let existingFiles = (try? modelContext.fetch(descriptor)) ?? []
+                let existingFileNames = Set(existingFiles.map { $0.fileName })
+                
+                // Only import files that DON'T already have a database record
+                let filesToImport = orphanedURLs.filter { url in
+                    let fileName = url.lastPathComponent
+                    let alreadyExists = existingFileNames.contains(fileName)
+                    if alreadyExists {
+                        print("   ⏭️ Skipping \(fileName) - already in database")
+                    }
+                    return !alreadyExists
+                }
+                
+                if filesToImport.isEmpty {
+                    print("   ✅ All orphaned files already have database records")
+                    return
+                }
+                
+                print("   📥 Importing \(filesToImport.count) truly orphaned file(s)")
+                
                 // Re-import orphaned files (silently - don't show errors for background scanning)
                 // Use a separate method that doesn't trigger error dialogs
                 do {
-                    let importedFiles = try await importService.importMultipleFiles(orphanedURLs, modelContext: modelContext)
+                    let importedFiles = try await importService.importMultipleFiles(filesToImport, modelContext: modelContext)
                     
                     // Insert imported files into database
                     for file in importedFiles {
@@ -298,6 +425,117 @@ final class ImportViewModel {
             
         } catch {
             // Silently ignore errors during background scanning
+        }
+    }
+    
+    /// Extract genre and stage from filename for legacy files
+    /// Expected filename patterns:
+    /// - "Song Name - Pop - Mix.wav"
+    /// - "Song Name - Rock/Indie - Master(Streaming).wav"
+    func updateMetadataFromFilename(_ file: AudioFile) -> Bool {
+        var updated = false
+        let fileNameWithoutExtension = (file.fileName as NSString).deletingPathExtension
+        let components = fileNameWithoutExtension.components(separatedBy: " - ")
+        
+        // Pattern: "Song Name - Genre - Stage"
+        if components.count >= 3 {
+            let potentialGenre = components[components.count - 2].trimmingCharacters(in: .whitespaces)
+            let potentialStage = components[components.count - 1].trimmingCharacters(in: .whitespaces)
+            
+            // Extract and set genre if missing
+            if file.genre == nil, AppConstants.availableGenres.contains(potentialGenre) {
+                file.genre = potentialGenre
+                print("📝 Updated genre from filename: \(potentialGenre) for \(file.fileName)")
+                updated = true
+            }
+            
+            // Extract and set stage if missing
+            if file.mixStage == nil {
+                let extractedStage = extractMixStageFromString(potentialStage)
+                if extractedStage != "mix" || potentialStage.lowercased().contains("mix") {
+                    file.mixStage = extractedStage
+                    print("📝 Updated stage from filename: \(extractedStage) for \(file.fileName)")
+                    updated = true
+                }
+            }
+        }
+        // Pattern: "Song Name - Stage" (no genre in filename)
+        else if components.count == 2 {
+            let potentialStage = components[1].trimmingCharacters(in: .whitespaces)
+            
+            // Extract and set stage if missing
+            if file.mixStage == nil {
+                let extractedStage = extractMixStageFromString(potentialStage)
+                if extractedStage != "mix" || potentialStage.lowercased().contains("mix") {
+                    file.mixStage = extractedStage
+                    print("📝 Updated stage from filename: \(extractedStage) for \(file.fileName)")
+                    updated = true
+                }
+            }
+        }
+        
+        return updated
+    }
+    
+    /// Extract mix stage from string (suffix of filename component)
+    private func extractMixStageFromString(_ string: String) -> String {
+        let lower = string.lowercased()
+        
+        // Check for exact matches first
+        if lower == "mix" {
+            return "mix"
+        }
+        if lower == "master(streaming)" || lower == "master (streaming)" {
+            return "master_streaming"
+        }
+        if lower == "master(cd-loud)" || lower == "master (cd-loud)" || lower == "master(cd)" || lower == "master (cd)" {
+            return "master_cd"
+        }
+        
+        // Check for partial matches
+        if lower.contains("streaming") {
+            return "master_streaming"
+        }
+        if lower.contains("cd") || lower.contains("loud") {
+            return "master_cd"
+        }
+        if lower.contains("master") {
+            return "master_streaming"  // Default master type
+        }
+        
+        // Default to mix
+        return "mix"
+    }
+    
+    /// Update metadata from filenames for all files missing genre or stage
+    func updateAllFilesMetadataFromFilenames() async {
+        let descriptor = FetchDescriptor<AudioFile>()
+        guard let allFiles = try? modelContext.fetch(descriptor) else {
+            return
+        }
+        
+        var updatedCount = 0
+        for file in allFiles {
+            // Only update files that are missing genre or stage
+            if file.genre == nil || file.mixStage == nil {
+                if updateMetadataFromFilename(file) {
+                    updatedCount += 1
+                }
+            }
+        }
+        
+        if updatedCount > 0 {
+            do {
+                try modelContext.save()
+                print("✅ Updated metadata for \(updatedCount) file(s) from filenames")
+                
+                // Refresh the list
+                await MainActor.run {
+                    loadImports()
+                }
+            } catch {
+                print("❌ Failed to save metadata updates: \(error)")
+            }
         }
     }
     

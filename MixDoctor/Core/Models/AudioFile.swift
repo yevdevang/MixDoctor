@@ -22,6 +22,8 @@ public final class AudioFile {
     var dateAnalyzed: Date?
     var tags: [String]
     var notes: String?
+    var genre: String?
+    var mixStage: String?  // "mix", "master_streaming", "master_cd"
 
     @Relationship(deleteRule: .cascade)
     var analysisResult: AnalysisResult?
@@ -49,7 +51,9 @@ public final class AudioFile {
         sampleRate: Double,
         bitDepth: Int,
         numberOfChannels: Int,
-        fileSize: Int64
+        fileSize: Int64,
+        genre: String? = nil,
+        mixStage: String? = "mix"  // Default to "mix" for new imports
     ) {
         self.id = UUID()
         self.fileName = fileName
@@ -63,6 +67,8 @@ public final class AudioFile {
         self.tags = []
         self.notes = ""
         self.analysisHistory = []
+        self.genre = genre
+        self.mixStage = mixStage
     }
     
     // MARK: - Simplified Mix Quality Computed Properties

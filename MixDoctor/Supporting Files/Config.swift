@@ -8,6 +8,12 @@
 import Foundation
 
 public enum Config {
+    /// Returns true if running under XCTest
+    private static var isRunningTests: Bool {
+        NSClassFromString("XCTestCase") != nil ||
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    }
+
     /// OpenAI API Key loaded from build configuration
     public static var openAIAPIKey: String {
         // Try to get from Info.plist first
@@ -17,11 +23,16 @@ public enum Config {
            key != "$(OPENAI_API_KEY)" {
             return key
         }
-        
+
+        // Return dummy key during tests to prevent fatalError
+        if isRunningTests {
+            return "test-api-key-not-configured"
+        }
+
         // Fallback error message
         fatalError("""
             ⚠️ OpenAI API Key not configured!
-            
+
             Please follow these steps:
             1. Copy Config.xcconfig.template to Config.xcconfig
             2. Add your OpenAI API key to Config.xcconfig
@@ -39,11 +50,16 @@ public enum Config {
            key != "$(CLAUDE_API_KEY)" {
             return key
         }
-        
+
+        // Return dummy key during tests to prevent fatalError
+        if isRunningTests {
+            return "test-api-key-not-configured"
+        }
+
         // Fallback error message
         fatalError("""
             ⚠️ Claude API Key not configured!
-            
+
             Please follow these steps:
             1. Copy Config.xcconfig.template to Config.xcconfig
             2. Add your Claude API key to Config.xcconfig

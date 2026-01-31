@@ -43,11 +43,15 @@ struct DashboardView: View {
     @State private var syncDebounceTask: Task<Void, Never>? // Debounce sync operations
     @State private var hasLoggedDashboardView = false // Track if dashboard view event has been logged
     @State private var showDeleteAllConfirmation = false // Confirmation for delete all
+    @State private var isDeleting = false // Track if deletion is in progress
+    @State private var deletingFile: AudioFile? // Track which file is being deleted
+    @State private var isDeletingAll = false // Track if deleting all files
     
     // Cached statistics to prevent blocking SwiftData access during rendering
     @State private var cachedAnalyzedCount: Int = 0
     @State private var cachedIssuesCount: Int = 0
     @State private var cachedAverageScore: Double = 0.0
+    @State private var isInitialLoad = true // Track if we're still loading files initially
 #if targetEnvironment(macCatalyst)
     @State private var fileToDelete: AudioFile?
     @State private var showDeleteConfirmation = false
@@ -138,6 +142,14 @@ struct DashboardView: View {
                 performInitialSync()
                 updateStatistics()
                 
+                // Mark initial load complete after a short delay to allow files to load
+                Task {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+                    await MainActor.run {
+                        isInitialLoad = false
+                    }
+                }
+                
                 // Load missing analysis results from JSON files on app startup
                 Task(priority: .userInitiated) {
                     // Wait for SwiftData to finish loading files
@@ -153,6 +165,10 @@ struct DashboardView: View {
             }
             .onChange(of: audioFiles.count) { old, new in
                 updateStatistics()
+                // Mark initial load complete once files appear
+                if new > 0 && isInitialLoad {
+                    isInitialLoad = false
+                }
             }
 #endif
             .onChange(of: iCloudMonitor.isSyncing) { old, new in
@@ -236,6 +252,12 @@ struct DashboardView: View {
         performInitialSync()
         // Statistics will be updated by loadAudioFiles() in performInitialSync
         
+        // Mark initial load complete after a short delay to allow files to load
+        try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+        await MainActor.run {
+            isInitialLoad = false
+        }
+        
         // Log Firebase Analytics event
         if !hasLoggedDashboardView {
             Analytics.logEvent("dashboard_viewed", parameters: nil)
@@ -316,47 +338,10 @@ struct DashboardView: View {
     
     private var dashboardContent: some View {
         VStack(spacing: 0) {
-            // iCloud sync status banner
-            if iCloudMonitor.isSyncing {
-                HStack(spacing: 12) {
-                    // Animated sync icon
-                    ProgressView()
-                        .tint(.primaryAccent)
-                    
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Syncing with iCloud")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                            .foregroundStyle(.primary)
-                        
-                        Text("Checking for new files and updates...")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    
-                    Spacer()
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .background(
-                    LinearGradient(
-                        colors: [
-                            Color.primaryAccent.opacity(0.08),
-                            Color.primaryAccent.opacity(0.04)
-                        ],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
-                .overlay(
-                    Rectangle()
-                        .frame(height: 1)
-                        .foregroundStyle(Color.primaryAccent.opacity(0.2)),
-                    alignment: .bottom
-                )
-            }
-            
-            if audioFiles.isEmpty {
+            if isInitialLoad && (audioFiles.isEmpty || iCloudMonitor.isSyncing) {
+                // Show loading state during initial load
+                loadingStateView
+            } else if audioFiles.isEmpty {
                 emptyStateView
             } else {
                 // Statistics cards
@@ -402,8 +387,26 @@ struct DashboardView: View {
                     }
                 } label: {
                     if iCloudMonitor.isSyncing {
-                        ProgressView()
-                            .tint(.primaryAccent)
+                        ZStack {
+                            // Circular progress indicator (always show background circle when syncing)
+                            Circle()
+                                .stroke(Color.primaryAccent.opacity(0.2), lineWidth: 2)
+                            
+                            // Progress ring if progress is available
+                            if iCloudMonitor.syncProgress > 0 && iCloudMonitor.syncProgress < 1.0 {
+                                Circle()
+                                    .trim(from: 0, to: iCloudMonitor.syncProgress)
+                                    .stroke(Color.primaryAccent, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                                    .rotationEffect(.degrees(-90))
+                                    .animation(.linear, value: iCloudMonitor.syncProgress)
+                            }
+                            
+                            // Spinning indicator in center (always show when syncing)
+                            ProgressView()
+                                .tint(.primaryAccent)
+                                .scaleEffect(0.7)
+                        }
+                        .frame(width: 20, height: 20)
                     } else {
                         Label("Sync iCloud", systemImage: "icloud.and.arrow.down")
                     }
@@ -654,9 +657,77 @@ struct DashboardView: View {
 #endif
             }
         }
+        .overlay {
+            if isDeleting {
+                deletionLoaderOverlay
+            }
+        }
     }
     
     // MARK: - Empty State
+    
+    private var loadingStateView: some View {
+        GeometryReader { geometry in
+            ScrollView {
+                HStack {
+                    Spacer()
+                    
+                    VStack(spacing: 20) {
+                        Spacer()
+                        
+                        // Show loader when loading files
+                        VStack(spacing: 16) {
+                            ZStack {
+                                // Circular progress indicator
+                                if iCloudMonitor.syncProgress > 0 && iCloudMonitor.syncProgress < 1.0 {
+                                    Circle()
+                                        .stroke(Color.primaryAccent.opacity(0.2), lineWidth: 4)
+                                        .frame(width: 60, height: 60)
+                                    Circle()
+                                        .trim(from: 0, to: iCloudMonitor.syncProgress)
+                                        .stroke(Color.primaryAccent, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                                        .rotationEffect(.degrees(-90))
+                                        .animation(.linear, value: iCloudMonitor.syncProgress)
+                                        .frame(width: 60, height: 60)
+                                }
+                                // Spinning indicator in center
+                                ProgressView()
+                                    .tint(.primaryAccent)
+                                    .scaleEffect(1.2)
+                            }
+                            
+                            VStack(spacing: 8) {
+                                Text("Loading files...")
+                                    .font(.headline)
+                                    .foregroundStyle(.primary)
+                                
+                                if iCloudMonitor.syncProgress > 0 && iCloudMonitor.syncProgress < 1.0 {
+                                    Text("\(Int(iCloudMonitor.syncProgress * 100))% complete")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    Text("Syncing from iCloud")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        
+                        Spacer()
+                    }
+                    .frame(maxWidth: 500, minHeight: geometry.size.height)
+                    
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, minHeight: geometry.size.height)
+            }
+            .refreshable {
+                await iCloudMonitor.syncNow()
+                await scanAndImportFromiCloud()
+                await loadMissingAnalysisResults()
+            }
+        }
+    }
     
     private var emptyStateView: some View {
         GeometryReader { geometry in
@@ -664,13 +735,56 @@ struct DashboardView: View {
                 HStack {
                     Spacer()
                     
-                    VStack {
+                    VStack(spacing: 20) {
                         Spacer()
-                        ContentUnavailableView(
-                            "No Audio Files",
-                            systemImage: "music.note",
-                            description: Text("Import audio files to get started.\n\nPull down to sync from iCloud.")
-                        )
+                        
+                        if iCloudMonitor.isSyncing {
+                            // Show loader when syncing/downloading files
+                            VStack(spacing: 16) {
+                                ZStack {
+                                    // Circular progress indicator
+                                    if iCloudMonitor.syncProgress > 0 && iCloudMonitor.syncProgress < 1.0 {
+                                        Circle()
+                                            .stroke(Color.primaryAccent.opacity(0.2), lineWidth: 4)
+                                            .frame(width: 60, height: 60)
+                                        Circle()
+                                            .trim(from: 0, to: iCloudMonitor.syncProgress)
+                                            .stroke(Color.primaryAccent, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                                            .rotationEffect(.degrees(-90))
+                                            .animation(.linear, value: iCloudMonitor.syncProgress)
+                                            .frame(width: 60, height: 60)
+                                    }
+                                    // Spinning indicator in center
+                                    ProgressView()
+                                        .tint(.primaryAccent)
+                                        .scaleEffect(1.2)
+                                }
+                                
+                                VStack(spacing: 8) {
+                                    Text("Downloading files...")
+                                        .font(.headline)
+                                        .foregroundStyle(.primary)
+                                    
+                                    if iCloudMonitor.syncProgress > 0 && iCloudMonitor.syncProgress < 1.0 {
+                                        Text("\(Int(iCloudMonitor.syncProgress * 100))% complete")
+                                            .font(.subheadline)
+                                            .foregroundStyle(.secondary)
+                                    } else {
+                                        Text("Syncing from iCloud")
+                                            .font(.subheadline)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                        } else {
+                            // Show normal empty state when not syncing
+                            ContentUnavailableView(
+                                "No Audio Files",
+                                systemImage: "music.note",
+                                description: Text("Import audio files to get started.\n\nPull down to sync from iCloud.")
+                            )
+                        }
+                        
                         Spacer()
                     }
                     .frame(maxWidth: 500, minHeight: geometry.size.height)
@@ -758,6 +872,11 @@ struct DashboardView: View {
             cachedFilteredFiles = files
             isLoadingFiles = false
             
+            // Mark initial load complete once files are loaded
+            if !files.isEmpty {
+                isInitialLoad = false
+            }
+            
             // Update statistics
             updateStatistics()
         }
@@ -825,6 +944,8 @@ struct DashboardView: View {
             
             // Get filename for analysis
             let fileName = audioFile.fileName
+            let genre = audioFile.genre
+            let mixStage = audioFile.mixStage
 
             do {
                 // Run analysis on low-priority background thread to keep UI responsive
@@ -832,7 +953,7 @@ struct DashboardView: View {
                     // Construct fileURL inside background task to avoid blocking main thread
                     let audioDir = iCloudStorageService.shared.getAudioFilesDirectory()
                     let fileURL = audioDir.appendingPathComponent(fileName)
-                    return try await AudioKitService.analyzeAudioFileIsolated(url: fileURL)
+                    return try await AudioKitService.analyzeAudioFileIsolated(url: fileURL, genre: genre, mixStage: mixStage)
                 }.value
 
                 // Now update UI and SwiftData on main actor
@@ -945,6 +1066,8 @@ struct DashboardView: View {
             
             // Get filename for analysis
             let fileName = audioFile.fileName
+            let genre = audioFile.genre
+            let mixStage = audioFile.mixStage
             
             do {
                 // Construct fileURL inside background task to avoid blocking main thread
@@ -952,7 +1075,7 @@ struct DashboardView: View {
                 let fileURL = audioDir.appendingPathComponent(fileName)
                 
                 // This runs completely off main thread
-                let result = try await AudioKitService.analyzeAudioFileIsolated(url: fileURL)
+                let result = try await AudioKitService.analyzeAudioFileIsolated(url: fileURL, genre: genre, mixStage: mixStage)
 
                 // Now update UI and SwiftData on main actor
                 await MainActor.run {
@@ -1237,24 +1360,51 @@ struct DashboardView: View {
                 return
             }
             
+            // Check for files that need downloading
+            var filesToDownload: [URL] = []
+            for fileURL in audioFiles {
+                if let values = try? fileURL.resourceValues(forKeys: [URLResourceKey.ubiquitousItemDownloadingStatusKey]),
+                   values.ubiquitousItemDownloadingStatus == .notDownloaded {
+                    filesToDownload.append(fileURL)
+                }
+            }
+            
+            // Set syncing state if we have files to download
+            if !filesToDownload.isEmpty {
+                await MainActor.run {
+                    iCloudMonitor.isSyncing = true
+                    iCloudMonitor.syncProgress = 0.0
+                }
+            }
+            
             var imported = 0
             
-            for fileURL in audioFiles {
+            for (index, fileURL) in audioFiles.enumerated() {
                 // Check if already imported by comparing stored filename
                 let fileName = fileURL.lastPathComponent
                 
                 // Download if needed first (with shorter timeout on Mac Catalyst)
+                var needsDownload = false
                 do {
                     let values = try fileURL.resourceValues(forKeys: [URLResourceKey.ubiquitousItemDownloadingStatusKey])
                     if values.ubiquitousItemDownloadingStatus == .notDownloaded {
+                        needsDownload = true
                         try FileManager.default.startDownloadingUbiquitousItem(at: fileURL)
-#if targetEnvironment(macCatalyst)
-                        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s on Mac
-#else
-                        try? await Task.sleep(nanoseconds: 2_000_000_000) // 2s on iOS
-#endif
+                        
+                        // Wait for download with progress updates
+                        if let downloadIndex = filesToDownload.firstIndex(of: fileURL) {
+                            await waitForFileDownload(fileURL: fileURL, totalFiles: filesToDownload.count, currentIndex: downloadIndex)
+                        }
                     }
                 } catch {
+                }
+                
+                // Update progress
+                if !filesToDownload.isEmpty {
+                    let progress = Double(index + 1) / Double(audioFiles.count)
+                    await MainActor.run {
+                        iCloudMonitor.syncProgress = progress
+                    }
                 }
                 
                 // Get file metadata BEFORE checking duplicates (needed for better duplicate detection)
@@ -1336,6 +1486,9 @@ struct DashboardView: View {
                     let sampleRate = basicDescription?.pointee.mSampleRate ?? 44100.0
                     let channels = Int(basicDescription?.pointee.mChannelsPerFrame ?? 2)
                     
+                    // Extract mix stage from filename if present
+                    let mixStage = extractMixStageFromFileName(fileName)
+                    
                     let audioFile = AudioFile(
                         fileName: fileName,
                         fileURL: fileURL,
@@ -1343,7 +1496,9 @@ struct DashboardView: View {
                         sampleRate: sampleRate,
                         bitDepth: 16,
                         numberOfChannels: channels,
-                        fileSize: fileSize
+                        fileSize: fileSize,
+                        genre: nil,  // Genre must be set manually by user
+                        mixStage: mixStage
                     )
                     
                     modelContext.insert(audioFile)
@@ -1383,6 +1538,17 @@ struct DashboardView: View {
                 }
             }
             
+            // Clear syncing state
+            await MainActor.run {
+                iCloudMonitor.isSyncing = false
+                iCloudMonitor.syncProgress = filesToDownload.isEmpty ? 0.0 : 1.0
+                
+                // Mark initial load complete
+                if imported > 0 || !audioFiles.isEmpty {
+                    isInitialLoad = false
+                }
+            }
+            
             if imported > 0 {
                 // Clear cached filtered files to force refresh with new imports
                 await MainActor.run {
@@ -1398,6 +1564,49 @@ struct DashboardView: View {
 #endif
             }
         } catch {
+            // Clear syncing state on error
+            await MainActor.run {
+                iCloudMonitor.isSyncing = false
+                iCloudMonitor.syncProgress = 0.0
+            }
+        }
+    }
+    
+    /// Wait for an iCloud file to finish downloading with progress updates
+    private func waitForFileDownload(fileURL: URL, totalFiles: Int, currentIndex: Int, maxAttempts: Int = 30) async {
+        #if targetEnvironment(macCatalyst)
+        let pollInterval: UInt64 = 200_000_000 // 0.2 seconds
+        let attempts = 15 // 3 seconds max
+        #else
+        let pollInterval: UInt64 = 1_000_000_000 // 1 second
+        let attempts = maxAttempts
+        #endif
+        
+        for attempt in 0..<attempts {
+            do {
+                let values = try fileURL.resourceValues(forKeys: [.ubiquitousItemDownloadingStatusKey])
+                let status = values.ubiquitousItemDownloadingStatus
+                
+                if status == .current {
+                    // File is downloaded, update progress
+                    let progress = Double(currentIndex + 1) / Double(totalFiles)
+                    await MainActor.run {
+                        iCloudMonitor.syncProgress = progress
+                    }
+                    return
+                }
+            } catch {
+            }
+            
+            // Update progress while waiting
+            let baseProgress = Double(currentIndex) / Double(totalFiles)
+            let attemptProgress = Double(attempt) / Double(attempts) / Double(totalFiles)
+            await MainActor.run {
+                iCloudMonitor.syncProgress = min(baseProgress + attemptProgress, 1.0)
+            }
+            
+            // Wait before checking again
+            try? await Task.sleep(nanoseconds: pollInterval)
         }
     }
     
@@ -1487,90 +1696,118 @@ struct DashboardView: View {
     }
     
     private func deleteFiles(at offsets: IndexSet) {
+        // Show loader for first file being deleted
+        if let firstIndex = offsets.first, firstIndex < filteredFiles.count {
+            let file = filteredFiles[firstIndex]
+            isDeleting = true
+            deletingFile = file
+        }
         
-        for index in offsets {
-            let file = filteredFiles[index]
+        Task { @MainActor in
+            // Capture files to delete before deletion starts (works on both iOS and MacCatalyst)
+            let filesToDelete = offsets.compactMap { index -> AudioFile? in
+                guard index < filteredFiles.count else { return nil }
+                return filteredFiles[index]
+            }
             
-            // Delete the actual audio file from storage (iCloud or local)
-            // Using iCloudStorageService ensures proper eviction and cross-device sync
-            let fileURL = file.fileURL
+            // Delete files
+            for file in filesToDelete {
+                // Delete the actual audio file from storage (iCloud or local)
+                // Using iCloudStorageService ensures proper eviction and cross-device sync
+                let fileURL = file.fileURL
+                do {
+                    try iCloudStorageService.shared.deleteAudioFile(at: fileURL)
+                } catch {
+                }
+                
+                // Delete the analysis result JSON from iCloud Drive
+                AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: file.fileName)
+                
+                // Delete the SwiftData record (CloudKit will sync this deletion)
+                modelContext.delete(file)
+            }
+            
             do {
-                try iCloudStorageService.shared.deleteAudioFile(at: fileURL)
+                try modelContext.save()
             } catch {
             }
             
-            // Delete the analysis result JSON from iCloud Drive
-            AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: file.fileName)
+            // Clear cached filtered files to force refresh
+            cachedFilteredFiles = []
+            lastFilterHash = 0
             
-            // Delete the SwiftData record (CloudKit will sync this deletion)
-            modelContext.delete(file)
-        }
-        
-        do {
-            try modelContext.save()
-        } catch {
-        }
-        
-        // Clear cached filtered files to force refresh
-        cachedFilteredFiles = []
-        lastFilterHash = 0
-        
-        // Update statistics after deletion
+            // Update statistics after deletion
 #if targetEnvironment(macCatalyst)
-        Task(priority: .utility) {
-            await loadAudioFiles()
-        }
+            Task(priority: .utility) {
+                await loadAudioFiles()
+            }
 #else
-        updateStatistics()
+            updateStatistics()
 #endif
-        
-        // Notify other views that files were deleted
-        NotificationCenter.default.post(name: .audioFileDeleted, object: nil)
+            
+            // CRITICAL: Notify other views AFTER deletion is complete
+            NotificationCenter.default.post(name: .audioFileDeleted, object: nil)
+            
+            // Hide loader
+            isDeleting = false
+            deletingFile = nil
+        }
     }
     
     /// Delete all audio files from the app
     private func deleteAllFiles() {
-        let allFiles = audioFiles
+        // Show loader
+        isDeletingAll = true
+        isDeleting = true
         
-        // Delete all files
-        for file in allFiles {
-            // Delete the actual audio file from storage
-            let fileURL = file.fileURL
-            do {
-                try iCloudStorageService.shared.deleteAudioFile(at: fileURL)
-            } catch {
-                // Continue even if individual file deletion fails
+        Task { @MainActor in
+            // Capture all files before deletion starts (works on both iOS and MacCatalyst)
+            let allFiles = Array(audioFiles)
+            
+            // Delete all files
+            for file in allFiles {
+                // Delete the actual audio file from storage
+                let fileURL = file.fileURL
+                do {
+                    try iCloudStorageService.shared.deleteAudioFile(at: fileURL)
+                } catch {
+                    // Continue even if individual file deletion fails
+                }
+                
+                // Delete the analysis result JSON from iCloud Drive
+                AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: file.fileName)
+                
+                // Delete the SwiftData record
+                modelContext.delete(file)
             }
             
-            // Delete the analysis result JSON from iCloud Drive
-            AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: file.fileName)
+            // Save all deletions
+            do {
+                try modelContext.save()
+            } catch {
+                // Handle save error if needed
+            }
             
-            // Delete the SwiftData record
-            modelContext.delete(file)
-        }
-        
-        // Save all deletions
-        do {
-            try modelContext.save()
-        } catch {
-            // Handle save error if needed
-        }
-        
-        // Clear cached filtered files
-        cachedFilteredFiles = []
-        lastFilterHash = 0
-        
-        // Update statistics after deletion
+            // Clear cached filtered files
+            cachedFilteredFiles = []
+            lastFilterHash = 0
+            
+            // Update statistics after deletion
 #if targetEnvironment(macCatalyst)
-        Task(priority: .utility) {
-            await loadAudioFiles()
-        }
+            Task(priority: .utility) {
+                await loadAudioFiles()
+            }
 #else
-        updateStatistics()
+            updateStatistics()
 #endif
-        
-        // Notify other views that files were deleted
-        NotificationCenter.default.post(name: .audioFileDeleted, object: nil)
+            
+            // CRITICAL: Notify other views AFTER deletion is complete
+            NotificationCenter.default.post(name: .audioFileDeleted, object: nil)
+            
+            // Hide loader
+            isDeleting = false
+            isDeletingAll = false
+        }
     }
     
     /// Verifies that an analysis result matches the audio file it claims to analyze
@@ -1625,6 +1862,65 @@ struct DashboardView: View {
         
         print("   ✅ Verification passed: File exists, size matches, dates are reasonable")
         return true
+    }
+    
+    /// Extract mix stage from filename
+    /// Examples:
+    /// - "filename - Mix.mp3" → "mix"
+    /// - "filename - Master(Streaming).mp3" → "master_streaming"
+    /// - "filename - Master(CD-Loud).mp3" → "master_cd"
+    /// - "filename.mp3" → "mix" (default)
+    private func extractMixStageFromFileName(_ fileName: String) -> String {
+        let fileNameWithoutExtension = (fileName as NSString).deletingPathExtension
+        
+        // Check for " - Mix" suffix
+        if fileNameWithoutExtension.hasSuffix(" - Mix") {
+            return "mix"
+        }
+        
+        // Check for " - Master(Streaming)" suffix
+        if fileNameWithoutExtension.hasSuffix(" - Master(Streaming)") {
+            return "master_streaming"
+        }
+        
+        // Check for " - Master(CD-Loud)" suffix
+        if fileNameWithoutExtension.hasSuffix(" - Master(CD-Loud)") {
+            return "master_cd"
+        }
+        
+        // Default to "mix" if no stage suffix found
+        return "mix"
+    }
+    
+    // MARK: - Deletion Loader
+    
+    private var deletionLoaderOverlay: some View {
+        VStack(spacing: 16) {
+            ProgressView()
+                .tint(.primaryAccent)
+                .scaleEffect(1.5)
+                .progressViewStyle(CircularProgressViewStyle(tint: .primaryAccent))
+            
+            Text(isDeletingAll ? "Deleting all files..." : "Deleting file...")
+                .font(.headline)
+                .foregroundStyle(.primary)
+            
+            if let file = deletingFile, !isDeletingAll {
+                Text(file.fileName)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .padding(.horizontal)
+            }
+        }
+        .padding(24)
+        .background {
+            RoundedRectangle(cornerRadius: 16)
+                .fill(.regularMaterial)
+        }
+        .shadow(radius: 10)
+        .transition(.opacity)
+        .animation(.easeInOut(duration: 0.2), value: isDeleting)
     }
 
     

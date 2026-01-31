@@ -66,9 +66,32 @@ final class PlayerViewModel {
     }
     
     deinit {
+        cleanup()
+    }
+    
+    /// Clean up all audio resources and stop playback
+    func cleanup() {
+        // Stop timer first
         timer?.invalidate()
-        audioEngine?.stop()
+        timer = nil
+        
+        // Stop playback
         audioPlayerNode?.stop()
+        isPlaying = false
+        
+        // Stop and reset audio engine
+        audioEngine?.stop()
+        audioEngine = nil
+        audioPlayerNode = nil
+        
+        // Release audio file reference
+        audioFile_av = nil
+        
+        // Reset state
+        currentTime = 0
+        pausedTime = 0
+        progress = 0
+        playbackStartTime = nil
     }
     
     // MARK: - Setup
@@ -172,6 +195,9 @@ final class PlayerViewModel {
               let audioFile = audioFile_av else {
             return
         }
+        
+        // Note: File existence check removed from here to avoid blocking main thread
+        // The audio engine will handle file access errors gracefully
         
         do {
             // Start engine if not running
@@ -297,6 +323,9 @@ final class PlayerViewModel {
     func seek(to progress: Double) {
         guard let playerNode = audioPlayerNode,
               let audioFile = audioFile_av else { return }
+        
+        // Note: File existence check removed to avoid blocking main thread
+        // The audio engine will handle file access errors gracefully
         
         let wasPlaying = isPlaying
         

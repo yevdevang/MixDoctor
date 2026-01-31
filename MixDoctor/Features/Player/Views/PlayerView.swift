@@ -92,20 +92,11 @@ struct PlayerView: View {
             onPlaybackStateChange(newValue ?? false)
         }
         .onReceive(NotificationCenter.default.publisher(for: .audioFileDeleted)) { _ in
-            // Check if current file still exists in allAudioFiles
-            if let currentFile = audioFile {
-                if !allAudioFiles.contains(where: { $0.id == currentFile.id }) {
-                    // Current file was deleted, clear it and load first available
-                    viewModel?.stop()
-                    viewModel = nil
-                    if let firstFile = allAudioFiles.first {
-                        onSelectAudioFile(firstFile)
-                    } else {
-                        // No files left, clear selection
-                        onSelectAudioFile(nil)
-                    }
-                }
-            }
+            // Just cleanup player - don't access allAudioFiles (triggers blocking fetch!)
+            // @Query will auto-update when SwiftData changes
+            viewModel?.cleanup()
+            viewModel = nil
+            onSelectAudioFile(nil)
         }
         #if targetEnvironment(macCatalyst)
         .background(Color.backgroundPrimary.ignoresSafeArea(edges: [.top, .horizontal]))

@@ -8,6 +8,19 @@ enum AppConstants {
     static let minSampleRate: Double = 44_100.0
     static let fftSize = 8192  // FFT size for frequency analysis
 
+    // Genre options
+    static let availableGenres = [
+        "Pop",
+        "Rock/Indie",
+        "Hip-Hop/R&B",
+        "EDM/Electronic",
+        "Jazz",
+        "Classical/Orchestral",
+        "Metal",
+        "Acapella",
+        "Live"
+    ]
+
     // UI settings
     static let cornerRadius: CGFloat = 12
     static let defaultPadding: CGFloat = 16

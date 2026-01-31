@@ -36,6 +36,15 @@ final class AudioAnalysisService {
     // Make init private for singleton pattern
     private init() {}
     
+    // MARK: - Testing Support
+    
+    /// Reset service state - primarily for testing purposes
+    /// Call this in test tearDown to ensure clean state between tests
+    func reset() {
+        isAnalyzing = false
+        analysisProgress = 0
+    }
+    
     // MARK: - Main Analysis
     
     // URL-based analysis method for compatibility - Temporarily disabled

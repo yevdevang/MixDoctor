@@ -70,21 +70,38 @@ final class iCloudSyncMonitor: ObservableObject {
         
         print("✅ iCloudSyncMonitor: Query started")
         
-        // On MacCatalyst, immediately trigger a manual check as NSMetadataQuery can be slower
-        #if targetEnvironment(macCatalyst)
-        Task {
-            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
-            await checkDirectoryForFiles()
+        // Defer initial sync check to avoid blocking app launch
+        // Wait a few seconds after launch before checking for files to download
+        Task.detached(priority: .utility) { [weak self] in
+            // Wait 3 seconds after launch to let UI render first
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            
+            // Only check if monitoring is still active - access on main actor
+            let isMonitoringActive = await MainActor.run { [weak self] in
+                self?.metadataQuery != nil
+            }
+            
+            guard isMonitoringActive, let self = self else { return }
+            
+            #if targetEnvironment(macCatalyst)
+            await self.checkDirectoryForFiles()
             
             // Also schedule periodic checks for Mac Catalyst since NSMetadataQuery is less reliable
-            Task.detached { [weak self] in
+            Task.detached(priority: .utility) { [weak self] in
                 while true {
                     try? await Task.sleep(nanoseconds: 10_000_000_000) // Check every 10 seconds
-                    await self?.checkDirectoryForFiles()
+                    
+                    // Check if monitoring is still active - access on main actor
+                    let isStillActive = await MainActor.run { [weak self] in
+                        self?.metadataQuery != nil
+                    }
+                    
+                    guard isStillActive, let self = self else { break }
+                    await self.checkDirectoryForFiles()
                 }
             }
+            #endif
         }
-        #endif
     }
     
     func stopMonitoring() {
@@ -104,9 +121,9 @@ final class iCloudSyncMonitor: ObservableObject {
         print("📊 NSMetadataQuery finished gathering")
         print("📊 Found \(query.resultCount) items")
         
-        // Download any files that aren't downloaded yet
-        Task {
-            await downloadPendingFiles(from: query)
+        // Download any files that aren't downloaded yet - run in background to avoid blocking
+        Task.detached(priority: .utility) { [weak self] in
+            await self?.downloadPendingFiles(from: query)
         }
         
         query.enableUpdates()
@@ -122,9 +139,9 @@ final class iCloudSyncMonitor: ObservableObject {
         // Post notification that iCloud changed so views can cleanup orphaned records
         NotificationCenter.default.post(name: .iCloudFilesChanged, object: nil)
         
-        // Check for new files that need downloading
-        Task {
-            await downloadPendingFiles(from: query)
+        // Check for new files that need downloading - run in background to avoid blocking
+        Task.detached(priority: .utility) { [weak self] in
+            await self?.downloadPendingFiles(from: query)
         }
         
         query.enableUpdates()
@@ -170,29 +187,46 @@ final class iCloudSyncMonitor: ObservableObject {
         print("📥 Total files to download: \(filesToDownload.count)")
         
         guard !filesToDownload.isEmpty else {
-            isSyncing = false
+            await MainActor.run {
+                isSyncing = false
+            }
             return
         }
         
-        isSyncing = true
-        syncProgress = 0.0
-        
-        
-        for (index, url) in filesToDownload.enumerated() {
-            do {
-                try FileManager.default.startDownloadingUbiquitousItem(at: url)
-                
-                // Wait for download to complete
-                await waitForDownload(url: url)
-                
-                syncProgress = Double(index + 1) / Double(filesToDownload.count)
-            } catch {
-            }
+        await MainActor.run {
+            isSyncing = true
+            syncProgress = 0.0
         }
         
-        isSyncing = false
-        syncProgress = 1.0
+        // Start downloads in parallel without waiting for each to complete
+        // This prevents blocking the app while files download
+        await withTaskGroup(of: Void.self) { group in
+            for (index, url) in filesToDownload.enumerated() {
+                group.addTask { [weak self] in
+                    do {
+                        try FileManager.default.startDownloadingUbiquitousItem(at: url)
+                        
+                        // Don't wait for download - let it happen in background
+                        // Just update progress when we start the download
+                        await MainActor.run {
+                            self?.syncProgress = Double(index + 1) / Double(filesToDownload.count)
+                        }
+                    } catch {
+                        print("❌ Failed to start download for \(url.lastPathComponent): \(error)")
+                    }
+                }
+            }
+            
+            // Wait for all download starts to complete (not the actual downloads)
+            await group.waitForAll()
+        }
         
+        // Mark as not syncing after starting all downloads
+        // Downloads will continue in background
+        await MainActor.run {
+            isSyncing = false
+            syncProgress = 1.0
+        }
     }
     
     private func waitForDownload(url: URL, maxAttempts: Int = 30) async {
@@ -273,12 +307,9 @@ final class iCloudSyncMonitor: ObservableObject {
                 return
             }
             
-            await MainActor.run {
-                shared.isSyncing = true
-                shared.syncProgress = 0.0
-            }
-            
-            for (index, fileURL) in files.enumerated() {
+            // Collect files that need downloading first (non-blocking)
+            var filesToDownload: [URL] = []
+            for fileURL in files {
                 let fileName = fileURL.lastPathComponent
                 
                 // Check if file needs downloading
@@ -296,25 +327,53 @@ final class iCloudSyncMonitor: ObservableObject {
                     print("   └─ Download status: \(status?.rawValue ?? "unknown")")
                     
                     if status == .notDownloaded || !fileExists {
-                        print("⬇️ Downloading: \(fileName)")
-                        do {
-                            try FileManager.default.startDownloadingUbiquitousItem(at: fileURL)
-                            await waitForDownloadBackground(url: fileURL)
-                            print("✅ Downloaded: \(fileName)")
-                        } catch {
-                            print("❌ Failed to download \(fileName): \(error.localizedDescription)")
-                        }
+                        print("⬇️ Needs download: \(fileName)")
+                        filesToDownload.append(fileURL)
                     } else {
                         print("✅ Already available: \(fileName)")
                     }
                 }
-                
-                let progress = Double(index + 1) / Double(files.count)
-                await MainActor.run {
-                    shared.syncProgress = progress
-                }
             }
             
+            guard !filesToDownload.isEmpty else {
+                print("📂 No files need downloading")
+                await MainActor.run {
+                    shared.isSyncing = false
+                    shared.syncProgress = 0.0
+                }
+                return
+            }
+            
+            await MainActor.run {
+                shared.isSyncing = true
+                shared.syncProgress = 0.0
+            }
+            
+            // Start downloads in parallel without waiting for completion
+            // This prevents blocking the UI while files download in background
+            await withTaskGroup(of: Void.self) { group in
+                for (index, fileURL) in filesToDownload.enumerated() {
+                    group.addTask {
+                        do {
+                            try FileManager.default.startDownloadingUbiquitousItem(at: fileURL)
+                            print("⬇️ Started download: \(fileURL.lastPathComponent)")
+                            
+                            // Update progress when download starts (not when it completes)
+                            await MainActor.run {
+                                shared.syncProgress = Double(index + 1) / Double(filesToDownload.count)
+                            }
+                        } catch {
+                            print("❌ Failed to start download for \(fileURL.lastPathComponent): \(error.localizedDescription)")
+                        }
+                    }
+                }
+                
+                // Wait for all download starts to complete (not the actual downloads)
+                await group.waitForAll()
+            }
+            
+            // Mark as not syncing after starting all downloads
+            // Downloads will continue in background
             await MainActor.run {
                 shared.isSyncing = false
                 shared.syncProgress = 1.0
