@@ -16,6 +16,94 @@ class ClaudeAPIService {
     
     private init() {}
     
+    // MARK: - Helper Functions
+    
+    /// Fixes contradictory analysis text for high scores (85+)
+    /// If score is 85+ but analysis contains negative phrases, returns positive fallback
+    static func fixContradictoryAnalysis(analysis: String?, score: Double) -> String? {
+        guard let analysis = analysis, !analysis.isEmpty else { return analysis }
+        guard score >= 85 else { return analysis }
+        
+        let lowercasedAnalysis = analysis.lowercased()
+        
+        // Comprehensive negative phrase detection
+        let hasNegativePhrase: Bool = {
+            // Check simple string patterns - catch ANY improvement suggestions
+            let stringPatterns = [
+                "needs some mixing",
+                "needs mixing improvements",
+                "needs improvements to reach",
+                "needs work to reach",
+                "to reach professional standards",
+                "needs more work",
+                "could use improvements",
+                "needs improvement",
+                "requires improvement",
+                "needs mixing",
+                "needs work",
+                "could use",
+                "should consider",
+                "might benefit from",
+                "would benefit from",
+                "could benefit from",
+                "could be",
+                "might want to",
+                "consider",
+                "try",
+                "could hit",
+                "needs more",
+                "needs slightly",
+                "could use more"
+            ]
+            
+            if stringPatterns.contains(where: { lowercasedAnalysis.contains($0) }) {
+                return true
+            }
+            
+            // Check complex patterns - "needs" + "improvements" or "mixing" anywhere in text
+            if lowercasedAnalysis.contains("needs") && (lowercasedAnalysis.contains("improvements") || lowercasedAnalysis.contains("mixing")) {
+                return true
+            }
+            
+            // Pattern: "to reach professional" (implies needs work)
+            if lowercasedAnalysis.contains("to reach professional") {
+                return true
+            }
+            
+            // Pattern: "needs" + "professional" (implies not professional yet)
+            if lowercasedAnalysis.contains("needs") && lowercasedAnalysis.contains("professional") {
+                return true
+            }
+            
+            // Pattern: "could" + improvement words (suggestions)
+            if lowercasedAnalysis.contains("could") && (lowercasedAnalysis.contains("more") || lowercasedAnalysis.contains("be") || lowercasedAnalysis.contains("hit")) {
+                return true
+            }
+            
+            // Pattern: "might" + improvement words (suggestions)
+            if lowercasedAnalysis.contains("might") && (lowercasedAnalysis.contains("want") || lowercasedAnalysis.contains("benefit")) {
+                return true
+            }
+            
+            // Pattern: "should" + improvement words (suggestions)
+            if lowercasedAnalysis.contains("should") && (lowercasedAnalysis.contains("consider") || lowercasedAnalysis.contains("try")) {
+                return true
+            }
+            
+            return false
+        }()
+        
+        if hasNegativePhrase {
+            print("⚠️ CONTRADICTION DETECTED: Score is \(score) but analysis contains negative phrases")
+            print("⚠️ Original analysis: '\(analysis)'")
+            let positiveFallback = "Professional quality track ready for distribution."
+            print("⚠️ Using positive fallback instead: '\(positiveFallback)'")
+            return positiveFallback
+        }
+        
+        return analysis
+    }
+    
     // MARK: - Testing Support
     
     /// Reset service state - primarily for testing purposes
@@ -1055,16 +1143,29 @@ class ClaudeAPIService {
             - Otherwise write the calculated score (allow 85-100 variation)
             - Korn masters should score 96-100, good masters 88-94, amateur 80-87!
             
-            ANALYSIS: Write like a top mastering engineer (Bob Ludwig, Randy Merrill, Chris Lord-Alge) giving feedback. In 1-2 sentences, describe how this \(genre) master FEELS. Does it SLAM? Does it have WEIGHT and PRESENCE? Does it TRANSLATE across systems? Be direct and confident. 
+            ANALYSIS: Write like a top mastering engineer (Bob Ludwig, Randy Merrill, Chris Lord-Alge) giving feedback.
+            
+            ⚠️ CRITICAL ANALYSIS TONE RULES FOR MASTERS:
+            - If score is 85+: Write PURELY CELEBRATORY analysis (1-2 sentences). This is PROFESSIONAL QUALITY - celebrate it ONLY, NO improvements or suggestions!
+              ✅ REQUIRED for 85+: Describe how it FEELS - "This \(genre) master slams hard", "Has weight and presence", "Translates beautifully", "Professional quality", "Ready to go", "Crushing it"
+              ✅ Tone: Pure celebration. Like: "This \(genre) master slams hard with weight and presence. Professional quality that translates beautifully across systems."
+              ❌ ABSOLUTELY FORBIDDEN for 85+: 
+                - NO improvements in analysis: "could hit harder", "needs more air", "could use", "should consider"
+                - NO suggestions: "might want to", "consider", "try", "could be"
+                - NO critiques: "needs", "lacks", "missing"
+                - NO recommendations in analysis section - save those for RECOMMENDATIONS section only
+              ⚠️ REMEMBER: Score 85+ = PROFESSIONAL QUALITY. Analysis should be PURE PRAISE ONLY. Zero improvements, zero suggestions, zero critiques in the ANALYSIS section.
+            - If score is 70-84: Brief (2 sentences) - describe the vibe and mention ONE area that could be polished
+            - If score is below 70: More detailed feedback about what needs work
             
             ⚠️ NEVER mention "score capped at 85" - professional dynamic masters (-14 to -18 LUFS) are INTENTIONAL and should be praised, not presented as capped!
             ⚠️ DO NOT mention "Score includes:", points, or technical breakdowns.
             ⚠️ Talk about the VIBE and IMPACT like a pro would.
             
             RECOMMENDATIONS:
-            - [For scores 90+: "This \(genre) master is crushing it - ready to go!" or "Professional \(genre) master - ship it!" ONLY. NO other text]
-            - [For scores 85-89: "Solid professional \(genre) master" with ONE brief pro-style suggestion if needed: "Could hit a bit harder" or "Needs slightly more air"]
-            - [For scores below 85: Direct feedback using pro language: "Needs more glue" or "The low end isn't sitting right"]
+            - [For scores 85+: "This \(genre) master is crushing it - ready to go!" or "Professional \(genre) master - ship it!" ONLY. NO improvements, NO suggestions, NO critiques. Pure celebration only.]
+            - [For scores 70-84: ONE brief pro-style suggestion if needed: "Could hit a bit harder" or "Needs slightly more air"]
+            - [For scores below 70: Direct feedback using pro language: "Needs more glue" or "The low end isn't sitting right"]
             - [Use dash (-) for bullet points, NOT numbers or bullet symbols (•)]
             - [Maximum 2 recommendations total]
             
@@ -1082,7 +1183,15 @@ class ClaudeAPIService {
             - Use professional mixer language: "punchy", "sits well", "has weight", "glued together", "needs air", "boxed in", "smeared", "tight", "open"
             - NEVER write "Score includes:" or mention point breakdowns (e.g., "-1 (stereo width)", "-3 (highs)", etc.)
             - DO NOT mention specific numbers, dB values, percentages, frequencies, LUFS, points, penalties, or bonuses
-            - For EXCELLENT mixes (scores 85+): Keep analysis SHORT (1-2 sentences) - just acknowledge it's great and move on
+            - For EXCELLENT mixes (scores 85+): Keep analysis SHORT (1-2 sentences) - PURE CELEBRATION ONLY, NO improvements or suggestions!
+              ⚠️ CRITICAL: For scores 85+, you MUST write PURELY CELEBRATORY analysis. This is PROFESSIONAL QUALITY - celebrate it ONLY!
+              ✅ REQUIRED for 85+: "Professional quality mix ready for mastering" / "Excellent work - this mix hits hard" / "Solid professional mix that translates well" / "Great mix - ready for mastering"
+              ✅ Tone: Pure celebration and praise, like acknowledging a colleague's excellent professional work
+              ❌ ABSOLUTELY FORBIDDEN for 85+ in ANALYSIS section: 
+                - NO improvements: "needs improvements", "needs mixing", "needs work", "to reach professional standards"
+                - NO suggestions: "could use", "should consider", "might benefit from", "could be", "might want to", "consider", "try"
+                - NO critiques or recommendations in ANALYSIS - save those for RECOMMENDATIONS section only
+              ⚠️ REMEMBER: Score 85+ = PROFESSIONAL QUALITY. ANALYSIS section = PURE PRAISE ONLY. Zero improvements, zero suggestions, zero critiques. Just celebrate the achievement.
             - For GOOD mixes (70-84): Brief (2 sentences) with ONE key suggestion if needed
             - For PROBLEM mixes (below 70): More detailed but still conversational
             - The scoring details below are for YOUR calculation only - do NOT expose them to the user
@@ -1217,8 +1326,26 @@ class ClaudeAPIService {
             
             ⚠️ ONLY ONE CAP: If score > 90, write 90. Otherwise write the calculated score.
             ⚠️ NO FLOOR - Scores can go below 75 if quality is genuinely poor!
-            ANALYSIS: [2-3 sentences explaining the mix quality and readiness for mastering]
-            RECOMMENDATIONS: [Specific mixing improvements, or "Ready for mastering" if excellent]
+            
+            ANALYSIS: [Write analysis based on score]
+            ⚠️ CRITICAL ANALYSIS TONE RULES:
+            - If score is 85+: Write PURELY CELEBRATORY analysis (1-2 sentences). This is PROFESSIONAL QUALITY - celebrate it ONLY, NO improvements or suggestions!
+              ✅ REQUIRED phrases for 85+: "Professional quality mix", "Ready for mastering", "Excellent work", "Solid professional mix", "This mix hits hard", "Well-balanced and professional", "Great mix that translates well"
+              ✅ Tone: Pure celebration and acknowledgment. Like: "This is a professional quality mix ready for mastering. Excellent work - it hits hard and translates well across systems."
+              ❌ ABSOLUTELY FORBIDDEN for 85+: 
+                - NO improvements: "could use", "should consider", "might benefit from", "would benefit from"
+                - NO suggestions: "could be", "might want to", "consider", "try"
+                - NO negative phrases: "needs improvements", "needs mixing", "needs work", "to reach professional standards"
+                - NO recommendations in analysis section - save those for RECOMMENDATIONS section only
+              ⚠️ REMEMBER: Score 85+ = PROFESSIONAL QUALITY. Analysis should be PURE PRAISE ONLY. Zero improvements, zero suggestions, zero critiques. Just celebrate the professional achievement.
+            - If score is 70-84: Brief (2 sentences) with balanced tone - acknowledge strengths and mention ONE key area for polish
+            - If score is below 70: More detailed, direct feedback about what needs work
+            
+            RECOMMENDATIONS: [Write recommendations based on score]
+            ⚠️ CRITICAL RECOMMENDATIONS RULES:
+            - If score is 85+: Write ONLY celebration - "Ready for mastering" or "This mix is ready - ship it!" NO improvements, NO suggestions, NO critiques. Pure celebration only.
+            - If score is 70-84: 1-2 specific improvements if needed
+            - If score is below 70: 3-5 direct, honest fixes
             """
         }
     }
@@ -1583,10 +1710,9 @@ class ClaudeAPIService {
         - High >25%: "Too bright and harsh up top - tame those highs"
 
         SCORING GUIDE FOR RECOMMENDATIONS:
-        - Score 90 with NO issues: "This \(genre) mix is tight and ready - ship it!" (1 positive statement)
-        - Score 85-89: 1-2 suggestions like "Could use more air" or "Low end could sit tighter"
-        - Score 75-84: 2-3 specific improvements
-        - Score <75 OR any issues: 3-5 direct, honest fixes
+        - Score 85+ (EXCELLENT): "This \(genre) mix is tight and ready - ship it!" or "Ready for mastering" ONLY. NO improvements, NO suggestions, NO critiques. Pure celebration only.
+        - Score 70-84: 1-2 specific improvements if needed (only if there are actual issues)
+        - Score <70 OR any issues: 3-5 direct, honest fixes
 
         FORMAT: Use dash (-) for bullet points. Be specific. Be helpful. Be like a mentor giving feedback.
 
@@ -1843,9 +1969,15 @@ class ClaudeAPIService {
             }
         }
         
+        // Check for contradictory analysis: if score is 85+ but analysis contains negative phrases, use fallback
+        var finalAnalysisText = finalAnalysis.isEmpty ? fallbackSummary : finalAnalysis
+        if let fixedAnalysis = Self.fixContradictoryAnalysis(analysis: finalAnalysisText, score: Double(finalScore)) {
+            finalAnalysisText = fixedAnalysis
+        }
+        
         return ClaudeAnalysisResponse(
             score: finalScore,
-            summary: finalAnalysis.isEmpty ? fallbackSummary : finalAnalysis,
+            summary: finalAnalysisText,
             recommendations: recommendations,
             isReadyForMastering: isReadyForMastering
         )
