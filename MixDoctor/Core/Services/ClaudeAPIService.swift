@@ -708,6 +708,38 @@ class ClaudeAPIService {
             - Keep recommendations simple and actionable without technical jargon
             - The scoring details below are for YOUR calculation only - do NOT expose them to the user
             
+            ⚠️⚠️⚠️ CRITICAL CONSISTENCY REQUIREMENT ⚠️⚠️⚠️
+            THE SAME TRACK MUST SCORE CONSISTENTLY REGARDLESS OF GENRE SELECTION!
+            
+            CONSISTENCY RULES:
+            1. **Same Track = Same Score**: If the user changes genre from Rock to Pop to Rock again, 
+               the SAME track should receive the SAME score (±2 points maximum variation).
+            2. **Master Stage Priority**: When user selects Master stage (Streaming/CD), ALWAYS treat as professional master.
+               Genre should NOT cause dramatic score changes for Master stage tracks.
+            3. **Technical Metrics First**: Base scoring on TECHNICAL METRICS (loudness, dynamic range, phase, clipping) 
+               which are OBJECTIVE and don't change with genre.
+            4. **Genre Context Only**: Genre provides CONTEXT for analysis (e.g., "Rock is typically bass-heavy") 
+               but should NOT cause 20+ point score swings for the same track.
+            5. **Consistent Penalties**: Apply penalties for TECHNICAL ISSUES consistently:
+               - Clipping: Always -6 to -10 points (same regardless of genre)
+               - Phase issues: Always -4 to -8 points (same regardless of genre)
+               - Poor mono: Always -5 to -8 points (same regardless of genre)
+               - Frequency imbalance: Only penalize SEVERE issues (>85% in one band) consistently
+            6. **Genre Characteristics**: Genre-specific frequency balance (Rock bass-heavy, Pop balanced) 
+               should be ACKNOWLEDGED but NOT cause penalties - these are INTENTIONAL artistic choices.
+            
+            SCORING CONSISTENCY EXAMPLE:
+            • Track with -14 LUFS, 8dB DR, no clipping, good phase → Score: 88-92
+            • Same track analyzed as Rock → Score: 88-92
+            • Same track analyzed as Pop → Score: 88-92 (NOT 89, NOT 100 - CONSISTENT!)
+            • Same track analyzed as Rock again → Score: 88-92 (SAME as first Rock analysis!)
+            
+            ⚠️ IF YOU FIND YOURSELF SCORING THE SAME TRACK DIFFERENTLY BASED ON GENRE:
+            - STOP and reconsider: Are you penalizing genre characteristics instead of technical issues?
+            - Remember: Genre provides CONTEXT, not different scoring thresholds
+            - Base score on OBJECTIVE technical metrics that don't change with genre
+            - Maximum variation for same track across genres: ±2 points (accounting for minor analysis differences)
+            
             You are analyzing a MASTERED TRACK using industry-standard professional mastering metrics.
             
             🎯 CORE ANALYSIS METRICS (Industry Standards):
@@ -803,8 +835,14 @@ class ClaudeAPIService {
             
             GENRE-SPECIFIC FREQUENCY EXPECTATIONS (DO NOT PENALIZE):
             
+            ⚠️ CONSISTENCY REMINDER: Genre provides CONTEXT, not different scoring thresholds!
+            - Same track analyzed as Rock vs Pop should score within ±2 points
+            - Genre-specific frequency balance is INTENTIONAL - acknowledge it but don't penalize
+            - Only penalize SEVERE technical issues (>85% in one band) consistently across all genres
+            
             ⚠️ CURRENT TRACK GENRE: **\(genre)**
-            Apply the following genre-specific expectations for \(genre). These characteristics are INTENTIONAL and CORRECT for this genre:
+            Apply the following genre-specific expectations for \(genre). These characteristics are INTENTIONAL and CORRECT for this genre.
+            REMEMBER: These are EXPECTATIONS for context, not PENALTIES. The same track should score similarly regardless of genre selection.
             
             POP:
             • Bass 20-35%: Balanced foundation (no penalty)
@@ -1109,15 +1147,21 @@ class ClaudeAPIService {
             
             ⚠️⚠️⚠️ MANDATORY: ALL MASTERED TRACKS START AT 120 POINTS (100 base + 20 mastered bonus) ⚠️⚠️⚠️
             
+            ⚠️ CONSISTENCY REMINDER: Same track = Same score (±2 points max variation across genres)
+            - Base scoring on TECHNICAL METRICS (loudness, DR, phase, clipping) which are OBJECTIVE
+            - Genre provides CONTEXT for analysis but should NOT cause dramatic score changes
+            - If same track scores differently as Rock vs Pop, you're penalizing genre characteristics incorrectly
+            
             SCORE CALCULATION STEPS (FOLLOW EXACTLY):
             1. Start with 120 points (100 base + 20 mastered bonus)
-            2. Calculate penalties realistically based on actual issues
-            3. Calculate bonuses realistically based on actual strengths
+            2. Calculate penalties realistically based on ACTUAL TECHNICAL ISSUES (clipping, phase, mono, severe imbalance)
+            3. Calculate bonuses realistically based on ACTUAL STRENGTHS (perfect peaks, excellent loudness, etc.)
             4. Calculate: 120 - penalties + bonuses
             5. Cap final score at 100 (if > 100, write 100)
             6. Allow natural variation - better masters score higher (96-100), good masters score 90-95
+            7. REMEMBER: Same track analyzed as different genres should score within ±2 points
             
-            ⚠️ SCORING GUIDANCE - DIFFERENTIATE MASTERS:
+            ⚠️ SCORING GUIDANCE - DIFFERENTIATE MASTERS (CONSISTENTLY):
             - Exceptional masters (Korn, Metallica, Abbey Road): 96-100
             - Excellent commercial masters: 92-95
             - Very good professional masters: 88-91
@@ -1125,6 +1169,7 @@ class ClaudeAPIService {
             - Amateur/flawed masters: 75-84
             - Allow differentiation - Korn should score higher than amateur masters!
             - NO MINIMUM FLOOR - let scores vary naturally based on quality!
+            - CONSISTENCY: Same track = Same score regardless of genre selection!
             
             EXAMPLES - REALISTIC DIFFERENTIATION:
             • Exceptional (Korn): 120 - 5 (minimal issues) + 10 (excellent) = 125 → 100 (capped)
