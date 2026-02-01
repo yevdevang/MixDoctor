@@ -3048,6 +3048,33 @@ enum AudioKitError: Error {
         }
 
         // ========================================
+        // CRITICAL: USER-SELECTED MASTER STAGE OVERRIDE
+        // If user explicitly selected Master stage, NEVER treat as unmixed
+        // This ensures consistent scoring regardless of genre or metrics
+        // ========================================
+        let stageLower = mixStage?.lowercased() ?? ""
+        let isMasteredByStage = stageLower.contains("master")
+        
+        if isMasteredByStage {
+            print("🎯 USER-SELECTED MASTER STAGE - Skipping unmixed detection entirely")
+            print("   User selected: '\(mixStage ?? "unknown")' - treating as professional master")
+            return UnmixedDetectionResult(
+                isLikelyUnmixed: false,
+                confidenceScore: 0.0,
+                detectionCriteria: ["User Selected Master Stage": true],
+                mixingQualityScore: 95.0,
+                recommendations: ["User-selected Master stage - professional master assumed"],
+                dynamicRangeTest: false,
+                peakToLoudnessRatioTest: false,
+                transientAnalysis: false,
+                rmsVsPeakTest: false,
+                frequencyMaskingTest: false,
+                loudnessTest: false,
+                crestFactorTest: false
+            )
+        }
+
+        // ========================================
         // GENRE-AWARE THRESHOLD CONFIGURATION
         // Different genres have different professional standards
         // Jazz/Classical/Live naturally have high DR, low phase coherence - NOT unmixed!

@@ -246,7 +246,8 @@ final class AnalysisResultPersistence {
             result.recommendations = data["recommendations"] as? [String] ?? []
             
             // Load Claude AI fields
-            result.aiSummary = data["aiSummary"] as? String
+            let rawSummary = data["aiSummary"] as? String
+            result.aiSummary = ClaudeAPIService.fixContradictoryAnalysis(analysis: rawSummary, score: result.overallScore)
             result.aiRecommendations = data["aiRecommendations"] as? [String] ?? []
             result.claudeScore = data["claudeScore"] as? Int
             result.isReadyForMastering = data["isReadyForMastering"] as? Bool ?? false
