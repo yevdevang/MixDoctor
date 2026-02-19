@@ -70,12 +70,12 @@ struct OnboardingWelcomeScreen: View {
                         .bold()
                         .foregroundStyle(.primary)
                     
-                    Text("To upload your audio file, tap the **Browse** button in the Import tab.")
+                    Text("Select a **Genre** and **Stage** — Mix, Master (Streaming), or Master (CD) — then tap the **Import More** button to upload your audio file.")
                         .font(.body)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
-                    
+
                     HStack(spacing: 8) {
                         Image(systemName: "square.and.arrow.down")
                             .foregroundStyle(Color.primaryAccent)

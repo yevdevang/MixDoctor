@@ -179,8 +179,8 @@ struct AudioFileRow: View {
                     }
                 }
                 
-                // Download indicator for missing files
-                if !fileExists || isDownloading {
+                // Download indicator for missing files (skip for demo files — they're bundled locally)
+                if (!fileExists || isDownloading) && !audioFile.isDemoFile {
                     VStack {
                         if isDownloading {
                             ProgressView()
@@ -230,8 +230,8 @@ struct AudioFileRow: View {
                     Text("•")
                     Text("\(Int(audioFile.sampleRate / 1000))kHz")
 
-                    // Show download status
-                    if !fileExists {
+                    // Show download status (skip for demo files)
+                    if !fileExists && !audioFile.isDemoFile {
                         Text("•")
                         Text("Downloading...")
                             .foregroundStyle(.orange)
@@ -240,11 +240,21 @@ struct AudioFileRow: View {
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
 
-                // Row 2: Mix stage only (genre removed)
-                if let mixStage = audioFile.mixStage {
-                    Text(formatMixStage(mixStage))
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(mixStageColor(mixStage))
+                // Row 2: Mix stage + DEMO badge
+                HStack(spacing: 6) {
+                    if let mixStage = audioFile.mixStage {
+                        Text(formatMixStage(mixStage))
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(mixStageColor(mixStage))
+                    }
+                    if audioFile.isDemoFile {
+                        Text("DEMO")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Color.primaryAccent))
+                    }
                 }
             }
 
@@ -287,8 +297,8 @@ struct AudioFileRow: View {
             }
             
             #if targetEnvironment(macCatalyst)
-            // Trash button on Mac
-            if let onDelete = onDelete {
+            // Trash button on Mac (hidden for demo files)
+            if let onDelete = onDelete, !audioFile.isDemoFile {
                 Button {
                     onDelete()
                 } label: {

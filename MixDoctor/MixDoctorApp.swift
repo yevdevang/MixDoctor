@@ -227,6 +227,23 @@ struct MixDoctorApp: App {
                     }
                 }
             }
+            .onChange(of: hasCompletedOnboarding) { oldValue, newValue in
+                if newValue && !oldValue {
+                    Task {
+                        await DemoFileService.shared.loadDemoFilesIfNeeded(
+                            modelContext: modelContainer.mainContext
+                        )
+                    }
+                }
+            }
+            .task {
+                // Handle app update path (user already onboarded, feature newly added)
+                if hasCompletedOnboarding {
+                    await DemoFileService.shared.loadDemoFilesIfNeeded(
+                        modelContext: modelContainer.mainContext
+                    )
+                }
+            }
             .onAppear {
                 // Hide launch screen after animation
                 // Hide launch screen after animation (matched to audio length: 3 bars @ 120bpm = 6s + delay)

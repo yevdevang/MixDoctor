@@ -453,8 +453,8 @@ struct ImportView: View {
                 }
                 .buttonStyle(.bordered)
                 
-                // Delete All menu button (only show if there are files)
-                if !viewModel.importedFiles.isEmpty {
+                // Delete All menu button (only show if there are non-demo files)
+                if viewModel.importedFiles.contains(where: { !$0.isDemoFile }) {
                     Menu {
                         Button(role: .destructive, action: {
                             showDeleteAllConfirmation = true
@@ -595,8 +595,8 @@ struct ImportView: View {
                     }
                     .font(.subheadline)
                     
-                    // Delete All menu button (only show if there are files)
-                    if !viewModel.importedFiles.isEmpty {
+                    // Delete All menu button (only show if there are non-demo files)
+                    if viewModel.importedFiles.contains(where: { !$0.isDemoFile }) {
                         Menu {
                             Button(role: .destructive, action: {
                                 showDeleteAllConfirmation = true
@@ -770,7 +770,7 @@ struct ImportView: View {
                                 shouldAutoPlay = true
                                 selectedTab = 2 // Navigate to Player tab
                             },
-                            onDelete: {
+                            onDelete: file.isDemoFile ? nil : {
                                 #if targetEnvironment(macCatalyst)
                                 fileToDelete = file
                                 showDeleteConfirmation = true
@@ -781,6 +781,7 @@ struct ImportView: View {
                                 #endif
                             }
                         )
+                        .deleteDisabled(file.isDemoFile)
                         #if targetEnvironment(macCatalyst)
                         .listRowBackground(Color.clear)
                         #endif
@@ -1016,19 +1017,29 @@ private struct ImportedFileRow: View {
                 .font(.system(size: 10))
                 .foregroundStyle(Color.secondaryText)
 
-                // Row 2: Mix stage only (genre removed)
-                if let mixStage = audioFile.mixStage {
-                    Text(formatMixStage(mixStage))
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(mixStageColor(mixStage))
+                // Row 2: Mix stage + DEMO badge
+                HStack(spacing: 6) {
+                    if let mixStage = audioFile.mixStage {
+                        Text(formatMixStage(mixStage))
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(mixStageColor(mixStage))
+                    }
+                    if audioFile.isDemoFile {
+                        Text("DEMO")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Color.primaryAccent))
+                    }
                 }
             }
             
             Spacer(minLength: 8)
             
             #if targetEnvironment(macCatalyst)
-            // Trash button on Mac
-            if let onDelete = onDelete {
+            // Trash button on Mac (hidden for demo files)
+            if let onDelete = onDelete, !audioFile.isDemoFile {
                 Button {
                     onDelete()
                 } label: {

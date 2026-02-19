@@ -190,7 +190,7 @@ struct ContentView: View {
             // Only navigate to Import tab immediately after onboarding completes
             // Wait a moment for SwiftData to finish loading files
             Task {
-                try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+                try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second (allow demo files to load)
                 await MainActor.run {
                     // Only navigate if there are truly no files
                     if allAudioFiles.isEmpty {
