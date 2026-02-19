@@ -196,6 +196,9 @@ final class ImportViewModel {
     }
 
     func removeImportedFile(_ file: AudioFile) {
+        // Demo files cannot be deleted
+        guard !file.isDemoFile else { return }
+
         // Show loader
         isDeleting = true
         deletingFile = file
@@ -204,27 +207,28 @@ final class ImportViewModel {
         let fileURL = file.fileURL
         let fileName = file.fileName
         let fileID = file.id
-        
+        let isDemo = file.isDemoFile
+
         // Do ALL operations in background to prevent any UI blocking
         Task.detached(priority: .userInitiated) {
             // Small delay to let current UI operation finish
             try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
-            
+
             // Update UI array on main thread
             await MainActor.run {
                 if let index = self.importedFiles.firstIndex(where: { $0.id == fileID }) {
                     self.importedFiles.remove(at: index)
                 }
             }
-            
+
             // Delete the actual audio file from storage (iCloud or local)
             do {
                 try await iCloudStorageService.shared.deleteAudioFile(at: fileURL)
             } catch {
             }
-            
+
             // Delete the analysis result JSON from iCloud Drive
-            await AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: fileName)
+            await AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: fileName, isDemo: isDemo)
             
             // Delete from SwiftData on main thread
             await MainActor.run {
@@ -256,10 +260,10 @@ final class ImportViewModel {
         // Show loader
         isDeletingAll = true
         isDeleting = true
-        
+
         Task { @MainActor in
-            // Capture all files before deletion starts
-            let allFiles = Array(importedFiles)
+            // Capture only user files — demo files are preserved
+            let allFiles = Array(importedFiles.filter { !$0.isDemoFile })
             
             // Delete all files
             for file in allFiles {
@@ -272,7 +276,7 @@ final class ImportViewModel {
                 }
                 
                 // Delete the analysis result JSON from iCloud Drive
-                AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: file.fileName)
+                AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: file.fileName, isDemo: file.isDemoFile)
                 
                 // Delete the SwiftData record
                 modelContext.delete(file)
@@ -325,16 +329,21 @@ final class ImportViewModel {
             )
             
             // Get all files currently in database
+            // Use fileURL.lastPathComponent (stored filename with extension) for matching against disk files
             let descriptor = FetchDescriptor<AudioFile>()
             let databaseFiles = (try? modelContext.fetch(descriptor)) ?? []
-            let databaseFileNames = Set(databaseFiles.map { $0.fileName })
-            
+            let databaseFileNames = Set(databaseFiles.flatMap { file in
+                // Include both fileName and on-disk filename to handle demo files
+                // (demo files store displayName without extension in fileName)
+                [file.fileName, file.fileURL.lastPathComponent]
+            })
+
             // Find files that exist physically but not in database
             // Filter out files that aren't downloaded from iCloud
             let orphanedURLs = fileURLs.filter { url in
                 let fileName = url.lastPathComponent
                 let isAudioFile = AppConstants.supportedAudioFormats.contains(url.pathExtension.lowercased())
-                
+
                 // Skip if not an audio file or already in database
                 guard isAudioFile && !databaseFileNames.contains(fileName) else {
                     return false
@@ -371,10 +380,13 @@ final class ImportViewModel {
                 print("📁 Found \(orphanedURLs.count) orphaned file(s) - checking if they need import")
                 
                 // Get all existing files from database
+                // Use both fileName and on-disk filename to match demo files correctly
                 let descriptor = FetchDescriptor<AudioFile>()
                 let existingFiles = (try? modelContext.fetch(descriptor)) ?? []
-                let existingFileNames = Set(existingFiles.map { $0.fileName })
-                
+                let existingFileNames = Set(existingFiles.flatMap { file in
+                    [file.fileName, file.fileURL.lastPathComponent]
+                })
+
                 // Only import files that DON'T already have a database record
                 let filesToImport = orphanedURLs.filter { url in
                     let fileName = url.lastPathComponent
@@ -575,9 +587,11 @@ final class ImportViewModel {
             }
         }
         
-        if !orphanedRecords.isEmpty {
-            for record in orphanedRecords {
-                AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: record.fileName)
+        // Never delete demo file records — their physical files are re-created from bundle
+        let deletableOrphans = orphanedRecords.filter { !$0.isDemoFile }
+        if !deletableOrphans.isEmpty {
+            for record in deletableOrphans {
+                AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: record.fileName, isDemo: record.isDemoFile)
                 modelContext.delete(record)
                 importedFiles.removeAll { $0.id == record.id }
             }

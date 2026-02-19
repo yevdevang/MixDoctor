@@ -120,6 +120,11 @@ struct DashboardView: View {
             }
         }
 
+        // Sort demo files to the bottom
+        let userFiles = files.filter { !$0.isDemoFile }
+        let demoFiles = files.filter { $0.isDemoFile }
+        files = userFiles + demoFiles
+
         // Cache the result (non-blocking)
         cachedFilteredFiles = files
         lastFilterHash = currentHash
@@ -371,7 +376,7 @@ struct DashboardView: View {
                 deleteAllFiles()
             }
         } message: {
-            Text("Are you sure you want to delete all \(audioFiles.count) file\(audioFiles.count == 1 ? "" : "s")? This action cannot be undone and will remove files from all your devices.")
+            Text("Are you sure you want to delete all \(audioFiles.filter { !$0.isDemoFile }.count) file\(audioFiles.filter { !$0.isDemoFile }.count == 1 ? "" : "s")? Demo files will be kept. This action cannot be undone and will remove files from all your devices.")
         }
         .toolbar {
             // iCloud sync button
@@ -436,9 +441,9 @@ struct DashboardView: View {
                         }
                     }
                     
-                    if !audioFiles.isEmpty {
+                    if audioFiles.contains(where: { !$0.isDemoFile }) {
                         Divider()
-                        
+
                         Button(role: .destructive, action: {
                             showDeleteAllConfirmation = true
                         }) {
@@ -612,7 +617,7 @@ struct DashboardView: View {
                 } label: {
                     AudioFileRow(
                         audioFile: file,
-                        onDelete: {
+                        onDelete: file.isDemoFile ? nil : {
 #if targetEnvironment(macCatalyst)
                             fileToDelete = file
                             showDeleteConfirmation = true
@@ -627,6 +632,7 @@ struct DashboardView: View {
                 }
                 .buttonStyle(PlainButtonStyle())
                 .disabled(isAnalyzing && analyzingFile?.id == file.id)
+                .deleteDisabled(file.isDemoFile)
 #if targetEnvironment(macCatalyst)
                 .listRowBackground(Color.clear)
 #endif
@@ -946,6 +952,7 @@ struct DashboardView: View {
             let fileName = audioFile.fileName
             let genre = audioFile.genre
             let mixStage = audioFile.mixStage
+            let isDemo = audioFile.isDemoFile
 
             do {
                 // Run analysis on low-priority background thread to keep UI responsive
@@ -960,7 +967,7 @@ struct DashboardView: View {
                 await MainActor.run {
                     // Increment usage count
                     subscriptionSvc.incrementAnalysisCount()
-                    
+
                     // Log free analysis count event
                     let remainingFree = subscriptionSvc.remainingFreeAnalyses
                     Analytics.logEvent("free_analysis_count", parameters: [
@@ -977,11 +984,11 @@ struct DashboardView: View {
                     } catch {
                         print("❌ Failed to save analysis result to SwiftData: \(error.localizedDescription)")
                     }
-                    
+
                     // Save to iCloud Drive as JSON (background, but ensure it happens)
                     Task.detached(priority: .background) {
                         do {
-                            try AnalysisResultPersistence.shared.saveAnalysisResult(result, forAudioFile: fileName)
+                            try AnalysisResultPersistence.shared.saveAnalysisResult(result, forAudioFile: fileName, isDemo: isDemo)
                             print("✅ Successfully saved analysis result to JSON for \(fileName)")
                         } catch {
                             print("❌ Failed to save analysis result to JSON for \(fileName): \(error.localizedDescription)")
@@ -1068,12 +1075,13 @@ struct DashboardView: View {
             let fileName = audioFile.fileName
             let genre = audioFile.genre
             let mixStage = audioFile.mixStage
-            
+            let isDemo = audioFile.isDemoFile
+
             do {
                 // Construct fileURL inside background task to avoid blocking main thread
                 let audioDir = iCloudStorageService.shared.getAudioFilesDirectory()
                 let fileURL = audioDir.appendingPathComponent(fileName)
-                
+
                 // This runs completely off main thread
                 let result = try await AudioKitService.analyzeAudioFileIsolated(url: fileURL, genre: genre, mixStage: mixStage)
 
@@ -1081,7 +1089,7 @@ struct DashboardView: View {
                 await MainActor.run {
                     // Increment usage count
                     subscriptionSvc.incrementAnalysisCount()
-                    
+
                     // Log free analysis count event
                     let remainingFree = subscriptionSvc.remainingFreeAnalyses
                     Analytics.logEvent("free_analysis_count", parameters: [
@@ -1098,11 +1106,11 @@ struct DashboardView: View {
                     } catch {
                         print("❌ Failed to save analysis result to SwiftData: \(error.localizedDescription)")
                     }
-                    
+
                     // Save to iCloud Drive as JSON (background, but ensure it happens)
                     Task.detached(priority: .background) {
                         do {
-                            try AnalysisResultPersistence.shared.saveAnalysisResult(result, forAudioFile: fileName)
+                            try AnalysisResultPersistence.shared.saveAnalysisResult(result, forAudioFile: fileName, isDemo: isDemo)
                             print("✅ Successfully saved analysis result to JSON for \(fileName)")
                         } catch {
                             print("❌ Failed to save analysis result to JSON for \(fileName): \(error.localizedDescription)")
@@ -1186,10 +1194,12 @@ struct DashboardView: View {
         }
         
         // Clean up orphaned records (files deleted on another device)
-        if !orphanedRecords.isEmpty {
-            for record in orphanedRecords {
+        // Never delete demo file records — their physical files are re-created from bundle
+        let deletableOrphans = orphanedRecords.filter { !$0.isDemoFile }
+        if !deletableOrphans.isEmpty {
+            for record in deletableOrphans {
                 // Also delete the analysis result
-                AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: record.fileName)
+                AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: record.fileName, isDemo: record.isDemoFile)
                 modelContext.delete(record)
             }
             do {
@@ -1296,7 +1306,8 @@ struct DashboardView: View {
             checkedFiles.insert(file)
         }
         
-        // Delete all identified duplicates
+        // Delete all identified duplicates (never delete demo files)
+        duplicatesToDelete = duplicatesToDelete.filter { !$0.isDemoFile }
         if !duplicatesToDelete.isEmpty {
             for duplicate in duplicatesToDelete {
                 modelContext.delete(duplicate)
@@ -1379,10 +1390,21 @@ struct DashboardView: View {
             
             var imported = 0
             
+            // Build a set of demo file names on disk to skip during scanning
+            let demoFileDescriptor = FetchDescriptor<AudioFile>(
+                predicate: #Predicate<AudioFile> { $0.isDemoFile == true }
+            )
+            let demoFileNames = Set((try? modelContext.fetch(demoFileDescriptor))?.map { $0.fileURL.lastPathComponent } ?? [])
+
             for (index, fileURL) in audioFiles.enumerated() {
                 // Check if already imported by comparing stored filename
                 let fileName = fileURL.lastPathComponent
-                
+
+                // Skip demo files — they are managed by DemoFileService
+                if demoFileNames.contains(fileName) {
+                    continue
+                }
+
                 // Download if needed first (with shorter timeout on Mac Catalyst)
                 var needsDownload = false
                 do {
@@ -1519,17 +1541,20 @@ struct DashboardView: View {
                     
                     // Try to load analysis result from iCloud Drive
                     // IMPORTANT: Verify the analysis result matches this file to prevent loading stale results
-                    if let analysisResult = AnalysisResultPersistence.shared.loadAnalysisResult(forAudioFile: fileName) {
-                        // Verify the analysis result matches the current file by checking file size and duration
-                        // This prevents loading analysis from a previously deleted file with the same name
-                        if verifyAnalysisResultMatchesFile(analysisResult: analysisResult, audioFile: audioFile) {
+                    if let analysisResult = AnalysisResultPersistence.shared.loadAnalysisResult(forAudioFile: fileName, isDemo: audioFile.isDemoFile) {
+                        // Skip results that were cleared by the user (iCloud may re-sync the JSON)
+                        if AnalysisResultPersistence.shared.isResultStale(analysisResult) {
+                            AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: fileName, isDemo: audioFile.isDemoFile)
+                        } else if verifyAnalysisResultMatchesFile(analysisResult: analysisResult, audioFile: audioFile) {
+                            // Verify the analysis result matches the current file by checking file size and duration
+                            // This prevents loading analysis from a previously deleted file with the same name
                             analysisResult.audioFile = audioFile
                             audioFile.analysisResult = analysisResult
                             audioFile.dateAnalyzed = analysisResult.dateAnalyzed
                             try? modelContext.save()
                         } else {
                             // Analysis result doesn't match - delete the stale JSON file
-                            AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: fileName)
+                            AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: fileName, isDemo: audioFile.isDemoFile)
                         }
                     }
                     
@@ -1624,17 +1649,32 @@ struct DashboardView: View {
         // Check all files that don't have analysis results in SwiftData
         for audioFile in allFiles where audioFile.analysisResult == nil {
             print("   🔍 Checking file without analysis: \(audioFile.fileName)")
-            
-            // Try to load from iCloud Drive JSON
-            if let analysisResult = AnalysisResultPersistence.shared.loadAnalysisResult(forAudioFile: audioFile.fileName) {
+
+            // Try to load from iCloud Drive JSON using multiple naming patterns:
+            // 1. Primary: audioFile.fileName with isDemo flag (e.g. "MIX-demo-Song 4 UNMIXED.analysis.json")
+            // 2. Fallback: audioFile.fileName without isDemo (e.g. "Song 4 UNMIXED.analysis.json")
+            // 3. Fallback: fileURL.lastPathComponent without isDemo (e.g. "Song 4 UNMIXED.wav.analysis.json")
+            let storedName = audioFile.fileURL.lastPathComponent
+            let analysisResult: AnalysisResult? =
+                AnalysisResultPersistence.shared.loadAnalysisResult(forAudioFile: audioFile.fileName, isDemo: audioFile.isDemoFile)
+                ?? AnalysisResultPersistence.shared.loadAnalysisResult(forAudioFile: audioFile.fileName, isDemo: false)
+                ?? AnalysisResultPersistence.shared.loadAnalysisResult(forAudioFile: storedName, isDemo: false)
+
+            if let analysisResult {
                 print("   ✅ Found JSON file for: \(audioFile.fileName)")
-                
-                // Check version compatibility
-                if analysisResult.analysisVersion == currentVersion {
+
+                // Skip results that were cleared by the user (iCloud may re-sync the JSON)
+                if AnalysisResultPersistence.shared.isResultStale(analysisResult) {
+                    print("   ⚠️ Stale result (created before last clear) - deleting JSON for: \(audioFile.fileName)")
+                    AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: audioFile.fileName, isDemo: audioFile.isDemoFile)
+                    clearedCount += 1
+                } else if analysisResult.analysisVersion == currentVersion {
+                    // Check version compatibility
                     print("   ✅ Version matches: \(analysisResult.analysisVersion)")
-                    
+
                     // IMPORTANT: Verify the analysis result matches this file to prevent loading stale results
-                    let matches = verifyAnalysisResultMatchesFile(analysisResult: analysisResult, audioFile: audioFile)
+                    // Skip verification for demo files — they're bundled and never change
+                    let matches = audioFile.isDemoFile || verifyAnalysisResultMatchesFile(analysisResult: analysisResult, audioFile: audioFile)
                     if matches {
                         print("   ✅ Analysis result matches file - loading into SwiftData")
                         analysisResult.audioFile = audioFile
@@ -1648,13 +1688,10 @@ struct DashboardView: View {
                         print("      Analysis date: \(analysisResult.dateAnalyzed)")
                         print("      File import date: \(audioFile.dateImported)")
                         print("      ⚠️ Skipping load (keeping JSON file for now)")
-                        // Don't delete - might be valid but verification is too strict
-                        // AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: audioFile.fileName)
-                        // clearedCount += 1
                     }
                 } else {
                     print("   ⚠️ Version mismatch: \(analysisResult.analysisVersion) != \(currentVersion) - deleting old JSON")
-                    AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: audioFile.fileName)
+                    AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: audioFile.fileName, isDemo: audioFile.isDemoFile)
                     clearedCount += 1
                 }
             } else {
@@ -1668,7 +1705,7 @@ struct DashboardView: View {
                 print("   ⚠️ File has outdated analysis version - clearing: \(audioFile.fileName)")
                 audioFile.analysisResult = nil
                 audioFile.dateAnalyzed = nil
-                AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: audioFile.fileName)
+                AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: audioFile.fileName, isDemo: audioFile.isDemoFile)
                 clearedCount += 1
             }
         }
@@ -1696,16 +1733,23 @@ struct DashboardView: View {
     }
     
     private func deleteFiles(at offsets: IndexSet) {
+        // Filter out demo files — they cannot be deleted
+        let deletableOffsets = offsets.filter { index in
+            guard index < filteredFiles.count else { return false }
+            return !filteredFiles[index].isDemoFile
+        }
+        guard !deletableOffsets.isEmpty else { return }
+
         // Show loader for first file being deleted
-        if let firstIndex = offsets.first, firstIndex < filteredFiles.count {
+        if let firstIndex = deletableOffsets.first, firstIndex < filteredFiles.count {
             let file = filteredFiles[firstIndex]
             isDeleting = true
             deletingFile = file
         }
-        
+
         Task { @MainActor in
             // Capture files to delete before deletion starts (works on both iOS and MacCatalyst)
-            let filesToDelete = offsets.compactMap { index -> AudioFile? in
+            let filesToDelete = deletableOffsets.compactMap { index -> AudioFile? in
                 guard index < filteredFiles.count else { return nil }
                 return filteredFiles[index]
             }
@@ -1721,7 +1765,7 @@ struct DashboardView: View {
                 }
                 
                 // Delete the analysis result JSON from iCloud Drive
-                AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: file.fileName)
+                AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: file.fileName, isDemo: file.isDemoFile)
                 
                 // Delete the SwiftData record (CloudKit will sync this deletion)
                 modelContext.delete(file)
@@ -1754,17 +1798,17 @@ struct DashboardView: View {
         }
     }
     
-    /// Delete all audio files from the app
+    /// Delete all audio files from the app (preserves demo files)
     private func deleteAllFiles() {
         // Show loader
         isDeletingAll = true
         isDeleting = true
-        
+
         Task { @MainActor in
-            // Capture all files before deletion starts (works on both iOS and MacCatalyst)
-            let allFiles = Array(audioFiles)
-            
-            // Delete all files
+            // Capture only user files — demo files are preserved
+            let allFiles = Array(audioFiles.filter { !$0.isDemoFile })
+
+            // Delete all user files
             for file in allFiles {
                 // Delete the actual audio file from storage
                 let fileURL = file.fileURL
@@ -1775,7 +1819,7 @@ struct DashboardView: View {
                 }
                 
                 // Delete the analysis result JSON from iCloud Drive
-                AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: file.fileName)
+                AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: file.fileName, isDemo: file.isDemoFile)
                 
                 // Delete the SwiftData record
                 modelContext.delete(file)

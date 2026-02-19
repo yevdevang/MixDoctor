@@ -21,7 +21,20 @@ struct iCloudDebugView: View {
     @State private var signedInToiCloud = false
     @State private var showDeleteConfirmation = false
     @State private var deleteMessage = ""
-    
+
+    private var hasNonDemoFilesInICloud: Bool {
+        let demoNames = DemoFileService.demoFiles.map { $0.displayName }
+        return filesInContainer.contains { fileName in
+            // Skip hidden files
+            guard !fileName.hasPrefix(".") else { return false }
+            // Check if file belongs to a demo file (audio or analysis JSON)
+            let isDemoFile = demoNames.contains { demoName in
+                fileName.hasPrefix(demoName) || fileName.hasPrefix("MIX-demo-\(demoName)")
+            }
+            return !isDemoFile
+        }
+    }
+
     var body: some View {
         List {
             Section("SwiftData Records") {
@@ -144,7 +157,7 @@ struct iCloudDebugView: View {
                         await scanAndImportFromiCloud()
                     }
                 }
-                .disabled(isRefreshing)
+                .disabled(isRefreshing || !hasNonDemoFilesInICloud)
                 
                 Button(role: .destructive) {
                     Task {
@@ -153,14 +166,14 @@ struct iCloudDebugView: View {
                 } label: {
                     Label("Clear All Database Records", systemImage: "externaldrive.badge.xmark")
                 }
-                .disabled(isRefreshing || audioFiles.isEmpty)
-                
+                .disabled(isRefreshing || audioFiles.isEmpty || !audioFiles.contains(where: { !$0.isDemoFile }))
+
                 Button(role: .destructive) {
                     showDeleteConfirmation = true
                 } label: {
                     Label("Delete All Files from iCloud", systemImage: "trash.fill")
                 }
-                .disabled(isRefreshing || (audioFiles.isEmpty && filesInContainer.isEmpty))
+                .disabled(isRefreshing || !hasNonDemoFilesInICloud)
             }
         }
         .navigationTitle("iCloud Debug")
@@ -442,8 +455,8 @@ struct iCloudDebugView: View {
                 print("   Path: \(fileURL.path)")
                 
                 // Delete analysis result too
-                AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: file.fileName)
-                
+                AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: file.fileName, isDemo: file.isDemoFile)
+
                 modelContext.delete(file)
                 orphanedCount += 1
             }
@@ -590,20 +603,21 @@ struct iCloudDebugView: View {
         
         print("🗑️ Clearing ALL database records...")
         
-        let recordCount = audioFiles.count
-        
-        for file in audioFiles {
+        let nonDemoFiles = audioFiles.filter { !$0.isDemoFile }
+        let recordCount = nonDemoFiles.count
+
+        for file in nonDemoFiles {
             print("🗑️ Removing database record: \(file.fileName)")
-            
+
             // Also delete analysis results
-            AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: file.fileName)
-            
+            AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: file.fileName, isDemo: file.isDemoFile)
+
             modelContext.delete(file)
         }
-        
+
         do {
             try modelContext.save()
-            print("✅ Successfully cleared \(recordCount) database record(s)")
+            print("✅ Successfully cleared \(recordCount) database record(s) (demo files preserved)")
             
             await MainActor.run {
                 deleteMessage = "Cleared \(recordCount) database record(s).\n\nYou can now import files fresh.\n\nNote: Physical files in iCloud were NOT deleted."
@@ -645,7 +659,17 @@ struct iCloudDebugView: View {
                 // List files
                 let audioDir = service.getAudioFilesDirectory()
                 if let files = try? FileManager.default.contentsOfDirectory(atPath: audioDir.path) {
-                    filesInContainer = files
+                    // Hide demo analysis JSON files from the list
+                    let demoNames = DemoFileService.demoFiles.map { $0.displayName }
+                    filesInContainer = files.filter { name in
+                        guard name.hasSuffix(".analysis.json") else { return true }
+                        // Hide all demo analysis JSON naming patterns:
+                        // "Song 1 MIX.analysis.json", "MIX-demo-Song 1 MIX.analysis.json",
+                        // "Song 1 MIX.wav.analysis.json" (created by getDetailedAnalysis)
+                        return !demoNames.contains(where: { demoName in
+                            name.hasPrefix(demoName) || name.hasPrefix("MIX-demo-\(demoName)")
+                        })
+                    }
                 } else {
                     filesInContainer = ["Error reading directory"]
                 }
@@ -682,19 +706,31 @@ struct iCloudDebugView: View {
         var deletedRecordsCount = 0
         var errors: [String] = []
         
-        // Step 1: Delete all physical files from iCloud Drive
+        // Collect demo file identifiers to protect them from physical deletion
+        let demoFiles = audioFiles.filter { $0.isDemoFile }
+        // Actual filenames on disk (e.g. "Song 1 MIX.wav") from fileURL
+        let demoStoredFileNames = Set(demoFiles.map { $0.fileURL.lastPathComponent })
+        // Display names (e.g. "Song 1 MIX") used for analysis JSON naming
+        let demoDisplayNames = Set(demoFiles.map { $0.fileName })
+
+        // Step 1: Delete non-demo physical files from iCloud Drive
         let service = iCloudStorageService.shared
         let audioDir = service.getAudioFilesDirectory()
-        
+
         do {
             let files = try FileManager.default.contentsOfDirectory(
                 at: audioDir,
                 includingPropertiesForKeys: nil,
                 options: []
             )
-            
-            
+
             for fileURL in files {
+                // Skip files belonging to demo entries (audio files + analysis JSONs)
+                let name = fileURL.lastPathComponent
+                if demoStoredFileNames.contains(name) { continue }
+                // Protect both old naming ("Song 1 MIX.analysis.json") and new ("MIX-demo-Song 1 MIX.analysis.json")
+                if demoDisplayNames.contains(where: { name == "\($0).analysis.json" || name == "MIX-demo-\($0).analysis.json" }) { continue }
+
                 do {
                     try FileManager.default.removeItem(at: fileURL)
                     deletedFilesCount += 1
@@ -707,12 +743,12 @@ struct iCloudDebugView: View {
             let errorMsg = "Failed to read directory: \(error.localizedDescription)"
             errors.append(errorMsg)
         }
-        
-        // Step 2: Delete all AudioFile records from SwiftData
+
+        // Step 2: Delete non-demo AudioFile records from SwiftData
         let descriptor = FetchDescriptor<AudioFile>()
         if let allFiles = try? modelContext.fetch(descriptor) {
-            
-            for file in allFiles {
+
+            for file in allFiles where !file.isDemoFile {
                 modelContext.delete(file)
                 deletedRecordsCount += 1
             }

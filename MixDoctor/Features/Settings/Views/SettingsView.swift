@@ -15,7 +15,13 @@ struct SettingsView: View {
     @State private var isClearingAnalysis = false
     @AppStorage("muteLaunchSound") private var muteLaunchSound = false
     @Environment(\.modelContext) private var modelContext
-    
+    @Query private var audioFiles: [AudioFile]
+
+    /// Whether any non-demo file has an analysis result that can be cleared
+    private var hasNonDemoAnalysis: Bool {
+        audioFiles.contains { !$0.isDemoFile && $0.analysisResult != nil }
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -246,7 +252,7 @@ struct SettingsView: View {
                         }
                     }
                     .foregroundStyle(.orange)
-                    .disabled(isClearingAnalysis)
+                    .disabled(isClearingAnalysis || !hasNonDemoAnalysis)
                 }
                 #endif
             }
@@ -338,22 +344,25 @@ struct SettingsView: View {
                 let audioFiles = try modelContext.fetch(audioFilesDescriptor)
                 
                 print("🧹 Clearing analysis for \(audioFiles.count) files...")
-                
-                // Step 1: Delete JSON files from iCloud (prevent re-loading)
+
+                // Record the clear date so iCloud-restored JSONs won't be re-loaded
+                AnalysisResultPersistence.shared.recordAnalysisClearDate()
+
+                // Step 1: Delete JSON files from iCloud (prevent re-loading), skip demo files
                 var jsonDeletedCount = 0
-                for audioFile in audioFiles {
+                for audioFile in audioFiles where !audioFile.isDemoFile {
                     if audioFile.analysisResult != nil {
                         // Delete the JSON file for this audio file
-                        AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: audioFile.fileName)
+                        AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: audioFile.fileName, isDemo: audioFile.isDemoFile)
                         jsonDeletedCount += 1
                         print("🗑️ Deleted JSON for: \(audioFile.fileName)")
                     }
                 }
                 print("💾 Deleted \(jsonDeletedCount) JSON files from iCloud")
-                
-                // Step 2: Clear the relationship from SwiftData (don't delete yet)
+
+                // Step 2: Clear the relationship from SwiftData (don't delete yet), skip demo files
                 var clearedCount = 0
-                for audioFile in audioFiles {
+                for audioFile in audioFiles where !audioFile.isDemoFile {
                     if audioFile.analysisResult != nil {
                         audioFile.analysisResult = nil
                         audioFile.dateAnalyzed = nil

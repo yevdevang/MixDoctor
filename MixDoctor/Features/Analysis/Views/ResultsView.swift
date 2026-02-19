@@ -36,46 +36,28 @@ struct ResultsView: View {
                 }
             }
             
-            // Show loading overlay during analysis
-            if isAnalyzing {
-                Color.black.opacity(0.5)
-                    .ignoresSafeArea()
-                
-                VStack(spacing: 20) {
-                    ProgressView()
-                        .scaleEffect(2.0)
-                        .tint(.white)
-                    
-                    Text("Re-analyzing...")
-                        .font(.headline)
-                        .foregroundColor(.white)
-                    
-                    Text("This may take a few moments")
-                        .font(.subheadline)
-                        .foregroundColor(.white.opacity(0.8))
-                }
-                .padding(32)
-                .background(
-                    RoundedRectangle(cornerRadius: 16)
-                        .fill(Color.primaryAccent)
-                )
-            }
         }
         .navigationTitle("Analysis Results")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
 
         }
+        .fullScreenCover(isPresented: $isAnalyzing) {
+            AnimatedGradientLoader(fileName: audioFile.fileName)
+        }
         .sheet(isPresented: $showPaywall, onDismiss: {
             // If paywall was dismissed without purchase, return to dashboard
             if !subscriptionService.isProUser {
                 dismiss()
+            } else {
+                // Auto-analyze after successful purchase
+                Task {
+                    await performAnalysis()
+                }
             }
         }) {
             PaywallView(
                 onPurchaseComplete: {
-                    // Don't auto-analyze after subscription
-                    // Just dismiss the paywall
                     showPaywall = false
                 },
                 onDismiss: {
@@ -1899,7 +1881,7 @@ struct ResultsView: View {
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
-            .disabled(isAnalyzing)
+            .disabled(isAnalyzing || audioFile.isDemoFile)
         }
     }
 
@@ -2073,18 +2055,19 @@ struct ResultsView: View {
             
             // Save to SwiftData and iCloud Drive on background thread to avoid freezing
             let fileName = audioFile.fileName
-            
+            let isDemo = audioFile.isDemoFile
+
             // Save to SwiftData first (synchronously on main actor)
             do {
                 try modelContext.save()
             } catch {
                 print("❌ Failed to save analysis result to SwiftData: \(error.localizedDescription)")
             }
-            
+
             // Save to iCloud Drive as JSON for cross-device sync (background)
             Task.detached(priority: .utility) {
                 do {
-                    try AnalysisResultPersistence.shared.saveAnalysisResult(result, forAudioFile: fileName)
+                    try AnalysisResultPersistence.shared.saveAnalysisResult(result, forAudioFile: fileName, isDemo: isDemo)
                     print("✅ Successfully saved analysis result to JSON for \(fileName)")
                 } catch {
                     print("❌ Failed to save analysis result to JSON for \(fileName): \(error.localizedDescription)")
@@ -2103,7 +2086,8 @@ struct ResultsView: View {
         // Using iCloudStorageService ensures proper eviction and cross-device sync
         let fileURL = audioFile.fileURL
         let fileName = audioFile.fileName
-        
+        let isDemo = audioFile.isDemoFile
+
         // Perform file deletion on background thread to avoid UI freezing
         Task.detached(priority: .utility) {
             do {
@@ -2112,9 +2096,9 @@ struct ResultsView: View {
             } catch {
                 print("❌ Failed to delete file \(fileName): \(error.localizedDescription)")
             }
-            
+
             // Delete the analysis result JSON from iCloud Drive
-            AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: fileName)
+            AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: fileName, isDemo: isDemo)
         }
         
         // Delete the SwiftData record immediately (CloudKit will sync this deletion)

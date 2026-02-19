@@ -40,32 +40,35 @@ public class AudioKitService: ObservableObject {
     
     /// Analyze audio file and return comprehensive analysis for display
     /// Must be nonisolated to avoid blocking main thread on MacCatalyst
-    nonisolated public func getDetailedAnalysis(for url: URL, genre: String? = nil, mixStage: String? = nil) async throws -> AnalysisResult {
-        
+    nonisolated public func getDetailedAnalysis(for url: URL, genre: String? = nil, mixStage: String? = nil, isDemo: Bool = false) async throws -> AnalysisResult {
+
         // Check if analysis already exists in iCloud Drive to avoid re-analyzing
         let fileName = url.lastPathComponent
         let currentVersion = "AudioKit-\(AppConstants.analysisVersion)"
-        
-        if let existingResult = AnalysisResultPersistence.shared.loadAnalysisResult(forAudioFile: fileName) {
-            // Check if cached version matches current version
-            if existingResult.analysisVersion == currentVersion {
+
+        if let existingResult = AnalysisResultPersistence.shared.loadAnalysisResult(forAudioFile: fileName, isDemo: isDemo) {
+            // Skip results that were cleared by the user (iCloud may re-sync the JSON)
+            if AnalysisResultPersistence.shared.isResultStale(existingResult) {
+                AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: fileName, isDemo: isDemo)
+            } else if existingResult.analysisVersion == currentVersion {
+                // Check if cached version matches current version
                 return existingResult
             } else {
                 // Delete old cached result to avoid confusion
-                AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: fileName)
+                AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: fileName, isDemo: isDemo)
             }
         }
-        
-        
+
+
         // Don't update @Published on main thread - let caller handle UI updates
         // await MainActor.run { isAnalyzing = true }
         // defer { Task { @MainActor in isAnalyzing = false } }
-        
+
         let result = try await performAudioKitAnalysis(url: url, genre: genre, mixStage: mixStage)
-        
+
         // Save to iCloud Drive for future use
         do {
-            try AnalysisResultPersistence.shared.saveAnalysisResult(result, forAudioFile: fileName)
+            try AnalysisResultPersistence.shared.saveAnalysisResult(result, forAudioFile: fileName, isDemo: isDemo)
         } catch {
         }
         

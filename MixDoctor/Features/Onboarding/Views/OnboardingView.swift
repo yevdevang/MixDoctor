@@ -31,9 +31,12 @@ struct OnboardingView: View {
                 
                 OnboardingResultsScreen(currentPage: $currentPage)
                     .tag(2)
-                
-                OnboardingFreeTrialScreen(isPresented: $isPresented)
+
+                OnboardingDemoScreen(currentPage: $currentPage)
                     .tag(3)
+
+                OnboardingFreeTrialScreen(isPresented: $isPresented)
+                    .tag(4)
             }
             .tabViewStyle(.page)
             .indexViewStyle(.page(backgroundDisplayMode: .always))
@@ -95,7 +98,7 @@ struct OnboardingView: View {
             // When onboarding is dismissed, mark as completed
             if !newValue {
                 // Log completion event when onboarding is dismissed via "Get Started"
-                if currentPage == 3 {
+                if currentPage == 4 {
                     Analytics.logEvent("onboarding_completed", parameters: nil)
                 }
             }

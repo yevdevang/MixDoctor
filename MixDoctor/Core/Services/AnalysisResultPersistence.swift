@@ -21,12 +21,12 @@ final class AnalysisResultPersistence {
     /// - Parameters:
     ///   - result: The analysis result to save
     ///   - audioFileName: The name of the audio file (without path)
-    func saveAnalysisResult(_ result: AnalysisResult, forAudioFile audioFileName: String) throws {
+    func saveAnalysisResult(_ result: AnalysisResult, forAudioFile audioFileName: String, isDemo: Bool = false) throws {
         let service = iCloudStorageService.shared
         let audioDir = service.getAudioFilesDirectory()
-        
+
         // Create JSON filename based on audio filename
-        let jsonFileName = analysisFileName(for: audioFileName)
+        let jsonFileName = analysisFileName(for: audioFileName, isDemo: isDemo)
         let jsonURL = audioDir.appendingPathComponent(jsonFileName)
         
         // Convert to dictionary
@@ -189,11 +189,11 @@ final class AnalysisResultPersistence {
     /// Loads an analysis result from JSON file if it exists
     /// - Parameter audioFileName: The name of the audio file
     /// - Returns: The loaded analysis result, or nil if no saved result exists
-    func loadAnalysisResult(forAudioFile audioFileName: String) -> AnalysisResult? {
+    func loadAnalysisResult(forAudioFile audioFileName: String, isDemo: Bool = false) -> AnalysisResult? {
         let service = iCloudStorageService.shared
         let audioDir = service.getAudioFilesDirectory()
-        
-        let jsonFileName = analysisFileName(for: audioFileName)
+
+        let jsonFileName = analysisFileName(for: audioFileName, isDemo: isDemo)
         let jsonURL = audioDir.appendingPathComponent(jsonFileName)
         
         
@@ -276,15 +276,36 @@ final class AnalysisResultPersistence {
         }
     }
     
+    // MARK: - Clear Date Tracking
+
+    private static let lastAnalysisClearDateKey = "lastAnalysisClearDate"
+
+    /// Records the current date as the last time all analysis was cleared.
+    /// Used to prevent iCloud-synced JSON files from being re-loaded after a clear.
+    func recordAnalysisClearDate() {
+        UserDefaults.standard.set(Date(), forKey: Self.lastAnalysisClearDateKey)
+        print("🧹 Recorded analysis clear date: \(Date())")
+    }
+
+    /// Checks whether a cached analysis result was created before the last clear.
+    /// - Parameter result: The analysis result loaded from JSON
+    /// - Returns: `true` if the result is stale (created before the last clear), `false` otherwise
+    func isResultStale(_ result: AnalysisResult) -> Bool {
+        guard let clearDate = UserDefaults.standard.object(forKey: Self.lastAnalysisClearDateKey) as? Date else {
+            return false
+        }
+        return result.dateAnalyzed < clearDate
+    }
+
     // MARK: - Delete Analysis Result
-    
+
     /// Deletes the analysis result file from iCloud Drive
     /// - Parameter audioFileName: The name of the audio file
-    func deleteAnalysisResult(forAudioFile audioFileName: String) {
+    func deleteAnalysisResult(forAudioFile audioFileName: String, isDemo: Bool = false) {
         let service = iCloudStorageService.shared
         let audioDir = service.getAudioFilesDirectory()
-        
-        let jsonFileName = analysisFileName(for: audioFileName)
+
+        let jsonFileName = analysisFileName(for: audioFileName, isDemo: isDemo)
         let jsonURL = audioDir.appendingPathComponent(jsonFileName)
         
         if FileManager.default.fileExists(atPath: jsonURL.path) {
@@ -299,7 +320,11 @@ final class AnalysisResultPersistence {
     
     /// Generates the JSON filename for an audio file
     /// Example: "song.mp3" -> "song.mp3.analysis.json"
-    private func analysisFileName(for audioFileName: String) -> String {
+    /// Demo files: "Song 1 MIX" -> "MIX-demo-Song 1 MIX.analysis.json"
+    func analysisFileName(for audioFileName: String, isDemo: Bool = false) -> String {
+        if isDemo {
+            return "MIX-demo-\(audioFileName).analysis.json"
+        }
         return "\(audioFileName).analysis.json"
     }
 }

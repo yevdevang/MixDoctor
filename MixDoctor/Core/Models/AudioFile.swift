@@ -24,6 +24,7 @@ public final class AudioFile {
     var notes: String?
     var genre: String?
     var mixStage: String?  // "mix", "master_streaming", "master_cd"
+    var isDemoFile: Bool
 
     @Relationship(deleteRule: .cascade)
     var analysisResult: AnalysisResult?
@@ -53,7 +54,8 @@ public final class AudioFile {
         numberOfChannels: Int,
         fileSize: Int64,
         genre: String? = nil,
-        mixStage: String? = "mix"  // Default to "mix" for new imports
+        mixStage: String? = "mix",  // Default to "mix" for new imports
+        isDemoFile: Bool = false
     ) {
         self.id = UUID()
         self.fileName = fileName
@@ -69,6 +71,7 @@ public final class AudioFile {
         self.analysisHistory = []
         self.genre = genre
         self.mixStage = mixStage
+        self.isDemoFile = isDemoFile
     }
     
     // MARK: - Simplified Mix Quality Computed Properties
