@@ -514,11 +514,10 @@ struct DashboardView: View {
     // Display value for "Analyzed" card - shows analysis count for free and Pro users
     private var analyzedDisplayValue: String {
         if subscriptionService.isProUser {
-            // For Pro users, show remaining analyses (X/50)
-            let usedAnalyses = 50 - subscriptionService.remainingProAnalyses
-            return "\(usedAnalyses)/50"
+            let limit = subscriptionService.currentProLimit
+            let used = limit - subscriptionService.remainingProAnalyses
+            return "\(used)/\(limit)"
         } else {
-            // Show analysis count (X/4) for free users
             let usedAnalyses = 4 - subscriptionService.remainingFreeAnalyses
             return "\(usedAnalyses)/4"
         }
@@ -1121,8 +1120,8 @@ struct DashboardView: View {
                     }
                     
                     // Log analysis completed event
-                    let usedCount = subscriptionSvc.isProUser ? 
-                        (50 - subscriptionSvc.remainingProAnalyses) : 
+                    let usedCount = subscriptionSvc.isProUser ?
+                        (subscriptionSvc.currentProLimit - subscriptionSvc.remainingProAnalyses) :
                         (4 - subscriptionSvc.remainingFreeAnalyses)
                     AnalyticsService.log(.analysisCompleted, parameters: [
                         "score": String(format: "%.1f", result.overallScore),

@@ -28,7 +28,7 @@ Integration tests are skipped by default; set `RUN_INTEGRATION_TESTS=1` to enabl
 
 ## Project Overview
 
-MixDoctor is an AI-powered audio mix analysis iOS app. Users import audio files, which are analyzed using AudioKit DSP algorithms and AI (Claude API primary, OpenAI fallback) to produce professional mixing quality scores and recommendations. Supports iOS, iPadOS, and macOS via Mac Catalyst. Monetized through RevenueCat subscriptions (4 free analyses/month, 50 for Pro).
+MixDoctor is an AI-powered audio mix analysis iOS app. Users import audio files, which are analyzed using AudioKit DSP algorithms and AI (Claude API primary, OpenAI fallback) to produce professional mixing quality scores and recommendations. Supports iOS, iPadOS, and macOS via Mac Catalyst. Monetized through RevenueCat subscriptions with tiered analysis limits (see Subscription Tiers below). No free trial — payment starts immediately.
 
 ## Architecture
 
@@ -63,6 +63,20 @@ MixDoctor is an AI-powered audio mix analysis iOS app. Users import audio files,
 
 Large arrays (e.g., frequency spectrum data) use `@Transient` computed properties backed by `Data` storage — direct `[Float]` arrays crash CloudKit sync.
 
+### Subscription Tiers
+
+| Tier | Analyses | Reset Period | Notes |
+|------|----------|-------------|-------|
+| Free | 4 | per month | Includes 4 demo tracks |
+| Weekly Pro | 10 | per week | `isWeeklySubscriber = true` |
+| Monthly Pro | 50 | per month | |
+| Annual Pro | 50 | per month | |
+
+- **No free trial** — removed from App Store Connect. Payment starts immediately.
+- `SubscriptionService.currentProLimit` returns 10 or 50 based on `isWeeklySubscriber`
+- Subscription type is saved to iCloud KV store (`subscriptionTypeKey`) and detected from RevenueCat offerings
+- Analysis is disabled (`canPerformAnalysis() → false`) when the limit is reached
+
 ## Configuration
 
 API keys are in `Config.xcconfig` (gitignored). Copy `Config.xcconfig.template` to `Config.xcconfig` and fill in `OPENAI_API_KEY`, `CLAUDE_API_KEY`. Firebase requires `GoogleService-Info.plist` (template provided).
@@ -77,6 +91,7 @@ API keys are in `Config.xcconfig` (gitignored). Copy `Config.xcconfig.template` 
 - **Singleton testing**: call `reset()` in both `setUp()` and `tearDown()` to prevent state leakage
 - **AudioKit warmup**: `AudioKitWarmupTests` must run first (alphabetically) to prevent first-run test failures
 - **`@MainActor` service tests** need `async setUp/tearDown` with initialization delay
+- **No free trial code in UI** — all trial references were removed; `isInTrialPeriod` in `SubscriptionService` is kept only for backward compat with existing RevenueCat trial users
 
 ## Dependencies (SPM)
 

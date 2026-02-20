@@ -102,14 +102,26 @@ struct PaywallView: View {
     
     private var headerSection: some View {
         VStack(spacing: 20) {
-            Text("Unlock Pro Features")
-                .font(.largeTitle.bold())
-                .foregroundColor(.black)
-            
-            Text("Get unlimited AI analysis and access to all premium features")
-                .font(.title3)
-                .foregroundColor(.gray)
-                .multilineTextAlignment(.center)
+            if subscriptionService.hasReachedFreeLimit {
+                Text("You've used 4 free analyses")
+                    .font(.largeTitle.bold())
+                    .foregroundColor(.black)
+                    .multilineTextAlignment(.center)
+
+                Text("Upgrade for unlimited AI-powered mix feedback")
+                    .font(.title3)
+                    .foregroundColor(.gray)
+                    .multilineTextAlignment(.center)
+            } else {
+                Text("Unlock Pro Features")
+                    .font(.largeTitle.bold())
+                    .foregroundColor(.black)
+
+                Text("Get unlimited AI analysis and access to all premium features")
+                    .font(.title3)
+                    .foregroundColor(.gray)
+                    .multilineTextAlignment(.center)
+            }
         }
     }
     

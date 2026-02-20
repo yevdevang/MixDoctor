@@ -82,14 +82,25 @@ struct MockPaywallView: View {
                 .aspectRatio(contentMode: .fit)
                 .frame(width: 100, height: 100)
                 .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-            
-            Text("Unlock Pro Features")
-                .font(.title.bold())
-            
-            Text("Get unlimited access to advanced AI-powered mix analysis and professional features")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+
+            if mockService.hasReachedFreeLimit {
+                Text("You've used 4 free analyses")
+                    .font(.title.bold())
+                    .multilineTextAlignment(.center)
+
+                Text("Upgrade for unlimited AI-powered mix feedback")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            } else {
+                Text("Unlock Pro Features")
+                    .font(.title.bold())
+
+                Text("Get unlimited access to advanced AI-powered mix analysis and professional features")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
         }
     }
     
