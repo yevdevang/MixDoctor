@@ -24,7 +24,7 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
     @Published var remainingProAnalyses: Int = 50
      
     // Free tier limits
-    private let freeAnalysisLimit = 3
+    private let freeAnalysisLimit = 4
     private let monthlyResetKey = "lastMonthlyReset"
     private let analysisCountKey = "analysisCount"
     
@@ -253,7 +253,7 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
             checkProAnalysisReset()
             return remainingProAnalyses > 0
         }
-        // Trial users and free users have 3 analyses limit
+        // Trial users and free users have 4 analyses limit
         return remainingFreeAnalyses > 0
     }
     

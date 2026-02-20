@@ -519,9 +519,9 @@ struct DashboardView: View {
             let usedAnalyses = 50 - subscriptionService.remainingProAnalyses
             return "\(usedAnalyses)/50"
         } else {
-            // Show analysis count (X/3) for free users
-            let usedAnalyses = 3 - subscriptionService.remainingFreeAnalyses
-            return "\(usedAnalyses)/3"
+            // Show analysis count (X/4) for free users
+            let usedAnalyses = 4 - subscriptionService.remainingFreeAnalyses
+            return "\(usedAnalyses)/4"
         }
     }
     
@@ -1121,7 +1121,7 @@ struct DashboardView: View {
                     // Log analysis completed event
                     let usedCount = subscriptionSvc.isProUser ? 
                         (50 - subscriptionSvc.remainingProAnalyses) : 
-                        (3 - subscriptionSvc.remainingFreeAnalyses)
+                        (4 - subscriptionSvc.remainingFreeAnalyses)
                     Analytics.logEvent("analysis_completed", parameters: [
                         "score": String(format: "%.1f", result.overallScore),
                         "analysis_count": String(usedCount)

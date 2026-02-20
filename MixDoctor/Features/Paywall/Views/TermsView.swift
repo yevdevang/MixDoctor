@@ -36,7 +36,7 @@ struct TermsView: View {
                     sectionView(
                         title: "3. Subscription Terms",
                         content: """
-                        • Free users receive 3 audio analyses per month
+                        • Free users receive 4 audio analyses per month
                         • Pro subscription provides 50 analyses per month
                         • 7-day free trial is available for new Pro subscribers
                         • Subscriptions auto-renew unless cancelled 24 hours before the period ends

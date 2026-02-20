@@ -19,7 +19,7 @@ final class MockSubscriptionService {
     // MARK: - Properties
     var isProUser: Bool = false
     var isInTrialPeriod: Bool = false
-    var remainingFreeAnalyses: Int = 3
+    var remainingFreeAnalyses: Int = 4
     var hasReachedFreeLimit: Bool = false
     var trialStartDate: Date?
     
@@ -27,7 +27,7 @@ final class MockSubscriptionService {
     var remainingProAnalyses: Int = 50
     var proAnalysisResetDate: Date?
     
-    private let freeAnalysisLimit = 3
+    private let freeAnalysisLimit = 4
     private let proMonthlyLimit = 50
     private let trialDurationDays = 7
     
@@ -106,7 +106,7 @@ final class MockSubscriptionService {
             checkProAnalysisReset()
             return remainingProAnalyses > 0
         }
-        // Trial users and free users have 3 analyses limit
+        // Trial users and free users have 4 analyses limit
         return remainingFreeAnalyses > 0
     }
     
@@ -121,7 +121,7 @@ final class MockSubscriptionService {
             return
         }
         
-        // Free tier and trial users have 3 analyses limit
+        // Free tier and trial users have 4 analyses limit
         if remainingFreeAnalyses > 0 {
             remainingFreeAnalyses -= 1
             hasReachedFreeLimit = remainingFreeAnalyses <= 0
@@ -142,7 +142,7 @@ final class MockSubscriptionService {
             isInTrialPeriod = true
             isProUser = false // Trial users treated as free tier
             hasReachedFreeLimit = false
-            remainingFreeAnalyses = freeAnalysisLimit // Reset to 3 analyses for trial
+            remainingFreeAnalyses = freeAnalysisLimit // Reset to 4 analyses for trial
             trialStartDate = Date() // Track when trial started
             saveState()
         }

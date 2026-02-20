@@ -28,7 +28,7 @@ Integration tests are skipped by default; set `RUN_INTEGRATION_TESTS=1` to enabl
 
 ## Project Overview
 
-MixDoctor is an AI-powered audio mix analysis iOS app. Users import audio files, which are analyzed using AudioKit DSP algorithms and AI (Claude API primary, OpenAI fallback) to produce professional mixing quality scores and recommendations. Supports iOS, iPadOS, and macOS via Mac Catalyst. Monetized through RevenueCat subscriptions (3 free analyses/month, 50 for Pro).
+MixDoctor is an AI-powered audio mix analysis iOS app. Users import audio files, which are analyzed using AudioKit DSP algorithms and AI (Claude API primary, OpenAI fallback) to produce professional mixing quality scores and recommendations. Supports iOS, iPadOS, and macOS via Mac Catalyst. Monetized through RevenueCat subscriptions (4 free analyses/month, 50 for Pro).
 
 ## Architecture
 

@@ -2047,7 +2047,7 @@ struct ResultsView: View {
             // Log analysis completed event
             let usedCount = subscriptionService.isProUser ? 
                 (50 - subscriptionService.remainingProAnalyses) : 
-                (3 - subscriptionService.remainingFreeAnalyses)
+                (4 - subscriptionService.remainingFreeAnalyses)
             Analytics.logEvent("analysis_completed", parameters: [
                 "score": String(format: "%.1f", result.overallScore),
                 "analysis_count": String(usedCount)

@@ -259,9 +259,9 @@ struct MockPaywallView: View {
                 .cornerRadius(6)
                 
                 Button("Reset Analysis Count") {
-                    mockService.remainingFreeAnalyses = 3
+                    mockService.remainingFreeAnalyses = 4
                     mockService.hasReachedFreeLimit = false
-                    UserDefaults.standard.set(3, forKey: "mock_remainingAnalyses")
+                    UserDefaults.standard.set(4, forKey: "mock_remainingAnalyses")
                     UserDefaults.standard.set(false, forKey: "mock_hasReachedLimit")
                 }
                 .font(.caption2)
@@ -294,11 +294,11 @@ struct MockPaywallView: View {
     
     private var footerSection: some View {
         VStack(spacing: 8) {
-            Text("7-day free trial with 3 analyses, then \(selectedPackageId == "annual" ? "$47.88/year" : "$5.99/month")")
+            Text("7-day free trial with 4 analyses, then \(selectedPackageId == "annual" ? "$47.88/year" : "$5.99/month")")
                 .font(.caption2.bold())
                 .foregroundStyle(.primary)
             
-            Text("Test Pro features during trial. Continue with 3 analyses/month free or subscribe for 50 analyses/month.")
+            Text("Test Pro features during trial. Continue with 4 analyses/month free or subscribe for 50 analyses/month.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

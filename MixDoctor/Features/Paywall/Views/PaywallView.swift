@@ -280,7 +280,7 @@ struct PaywallView: View {
     
     private var footerSection: some View {
         VStack(spacing: 12) {
-            Text("Free trial gives you 3 analyses to test Pro features. After trial, continue with 3 free analyses/month or get 50 analyses/month with Pro subscription. Cancel anytime.")
+            Text("Free trial gives you 4 analyses to test Pro features. After trial, continue with 4 free analyses/month or get 50 analyses/month with Pro subscription. Cancel anytime.")
                 .font(.caption)
                 .foregroundColor(.gray)
                 .multilineTextAlignment(.center)

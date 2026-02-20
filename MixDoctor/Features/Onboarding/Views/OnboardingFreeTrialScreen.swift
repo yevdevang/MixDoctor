@@ -27,7 +27,7 @@ struct OnboardingFreeTrialScreen: View {
                 .multilineTextAlignment(.center)
             
             // Subtitle
-            Text("You have 3 free analyses to get started")
+            Text("You have 4 free analyses to get started")
                 .font(.title3)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
