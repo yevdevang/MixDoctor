@@ -167,6 +167,7 @@ struct iCloudDebugView: View {
                     Label("Clear All Database Records", systemImage: "externaldrive.badge.xmark")
                 }
                 .disabled(isRefreshing || audioFiles.isEmpty || !audioFiles.contains(where: { !$0.isDemoFile }))
+                .opacity(isRefreshing || audioFiles.isEmpty || !audioFiles.contains(where: { !$0.isDemoFile }) ? 0.4 : 1.0)
 
                 Button(role: .destructive) {
                     showDeleteConfirmation = true
@@ -174,6 +175,7 @@ struct iCloudDebugView: View {
                     Label("Delete All Files from iCloud", systemImage: "trash.fill")
                 }
                 .disabled(isRefreshing || !hasNonDemoFilesInICloud)
+                .opacity(isRefreshing || !hasNonDemoFilesInICloud ? 0.4 : 1.0)
             }
         }
         .navigationTitle("iCloud Debug")

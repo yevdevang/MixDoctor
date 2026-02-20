@@ -36,9 +36,9 @@ struct TermsView: View {
                     sectionView(
                         title: "3. Subscription Terms",
                         content: """
-                        • Free users receive 3 audio analyses per month
-                        • Pro subscription provides 50 analyses per month
-                        • 7-day free trial is available for new Pro subscribers
+                        • Free users receive 4 audio analyses per month and demo tracks
+                        • Pro subscription provides unlimited AI analysis
+                        • Payment starts immediately upon subscription
                         • Subscriptions auto-renew unless cancelled 24 hours before the period ends
                         • Payment will be charged to your Apple ID account
                         • You can manage or cancel your subscription in App Store settings

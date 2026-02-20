@@ -19,17 +19,23 @@ final class MockSubscriptionService {
     // MARK: - Properties
     var isProUser: Bool = false
     var isInTrialPeriod: Bool = false
-    var remainingFreeAnalyses: Int = 3
+    var remainingFreeAnalyses: Int = 4
     var hasReachedFreeLimit: Bool = false
     var trialStartDate: Date?
     
-    // Pro user monthly analysis tracking
+    // Pro user analysis tracking
     var remainingProAnalyses: Int = 50
     var proAnalysisResetDate: Date?
-    
-    private let freeAnalysisLimit = 3
-    private let proMonthlyLimit = 50
+    var isWeeklySubscriber: Bool = false
+
+    private let freeAnalysisLimit = 4
+    private let proMonthlyLimit = 50   // Monthly & Annual subscribers
+    private let weeklyProLimit = 10    // Weekly subscribers
     private let trialDurationDays = 7
+
+    var currentProLimit: Int {
+        isWeeklySubscriber ? weeklyProLimit : proMonthlyLimit
+    }
     
     // Mock packages for UI
     struct MockPackage {
@@ -40,8 +46,9 @@ final class MockSubscriptionService {
     }
     
     var mockPackages: [MockPackage] = [
+        MockPackage(id: "annual", title: "Annual", price: "$3.99", period: "per month, billed annually at $47.88"),
         MockPackage(id: "monthly", title: "Monthly", price: "$5.99", period: "per month"),
-        MockPackage(id: "annual", title: "Annual", price: "$3.99", period: "per month, billed annually at $47.88")
+        MockPackage(id: "weekly", title: "Weekly", price: "$2.99", period: "per week")
     ]
     
     // MARK: - Initialization
@@ -81,19 +88,20 @@ final class MockSubscriptionService {
     
     private func checkProAnalysisReset() {
         guard isProUser else { return }
-        
-        // Check if we need to reset monthly analysis count
+
+        let resetComponent: Calendar.Component = isWeeklySubscriber ? .weekOfYear : .month
+
+        // Check if we need to reset analysis count
         if let resetDate = proAnalysisResetDate {
             if Date() >= resetDate {
-                // Reset for new month
-                remainingProAnalyses = proMonthlyLimit
-                proAnalysisResetDate = Calendar.current.date(byAdding: .month, value: 1, to: Date())
+                remainingProAnalyses = currentProLimit
+                proAnalysisResetDate = Calendar.current.date(byAdding: resetComponent, value: 1, to: Date())
                 saveState()
             }
         } else {
-            // First time - set reset date to next month
-            proAnalysisResetDate = Calendar.current.date(byAdding: .month, value: 1, to: Date())
-            remainingProAnalyses = proMonthlyLimit
+            // First time - set reset date
+            proAnalysisResetDate = Calendar.current.date(byAdding: resetComponent, value: 1, to: Date())
+            remainingProAnalyses = currentProLimit
             saveState()
         }
     }
@@ -106,7 +114,7 @@ final class MockSubscriptionService {
             checkProAnalysisReset()
             return remainingProAnalyses > 0
         }
-        // Trial users and free users have 3 analyses limit
+        // Trial users and free users have 4 analyses limit
         return remainingFreeAnalyses > 0
     }
     
@@ -121,7 +129,7 @@ final class MockSubscriptionService {
             return
         }
         
-        // Free tier and trial users have 3 analyses limit
+        // Free tier and trial users have 4 analyses limit
         if remainingFreeAnalyses > 0 {
             remainingFreeAnalyses -= 1
             hasReachedFreeLimit = remainingFreeAnalyses <= 0
@@ -133,71 +141,79 @@ final class MockSubscriptionService {
     func mockPurchase(packageId: String) async -> Bool {
         // Simulate network delay
         try? await Task.sleep(nanoseconds: 1_500_000_000) // 1.5 seconds
-        
+
         // 100% success rate for testing (change to 90 if you want to test failures)
         let success = true // Int.random(in: 1...10) <= 9
-        
+
         if success {
-            // Simulate starting a trial
-            isInTrialPeriod = true
-            isProUser = false // Trial users treated as free tier
+            // Set subscription type based on package
+            isWeeklySubscriber = (packageId == "weekly")
+            let resetComponent: Calendar.Component = isWeeklySubscriber ? .weekOfYear : .month
+
+            // Go straight to paid subscription (no trial)
+            isInTrialPeriod = false
+            isProUser = true
             hasReachedFreeLimit = false
-            remainingFreeAnalyses = freeAnalysisLimit // Reset to 3 analyses for trial
-            trialStartDate = Date() // Track when trial started
+            remainingFreeAnalyses = 0 // Not used for Pro users
+            remainingProAnalyses = currentProLimit
+            proAnalysisResetDate = Calendar.current.date(byAdding: resetComponent, value: 1, to: Date())
+            trialStartDate = nil
             saveState()
         }
-        
+
         return success
     }
     
     func mockPurchaseSkipTrial(packageId: String) async -> Bool {
         // Simulate network delay
         try? await Task.sleep(nanoseconds: 1_500_000_000) // 1.5 seconds
-        
+
         let success = true
-        
+
         if success {
-            // Skip trial, go straight to paid subscription
-            isInTrialPeriod = false
-            isProUser = true // Paid subscriber gets 20 per month
-            hasReachedFreeLimit = false
-            remainingFreeAnalyses = 0 // Not used for Pro users
-            remainingProAnalyses = proMonthlyLimit
-            proAnalysisResetDate = Calendar.current.date(byAdding: .month, value: 1, to: Date())
-            trialStartDate = nil
-            saveState()
-        }
-        
-        return success
-    }
-    
-    func mockConvertTrialToPaid() {
-        // Simulate trial period ending and converting to paid subscription
-        isInTrialPeriod = false
-        isProUser = true // Now they get 50 analyses per month
-        hasReachedFreeLimit = false
-        remainingProAnalyses = proMonthlyLimit
-        proAnalysisResetDate = Calendar.current.date(byAdding: .month, value: 1, to: Date())
-        saveState()
-    }
-    
-    func mockRestore() async -> Bool {
-        // Simulate network delay
-        try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
-        
-        // For testing, let's say 50% chance of having previous purchase
-        let hasPurchase = Int.random(in: 1...10) <= 5
-        
-        if hasPurchase {
-            // Restore as paid subscriber (not trial)
+            isWeeklySubscriber = (packageId == "weekly")
+            let resetComponent: Calendar.Component = isWeeklySubscriber ? .weekOfYear : .month
+
             isInTrialPeriod = false
             isProUser = true
             hasReachedFreeLimit = false
-            remainingProAnalyses = proMonthlyLimit
-            proAnalysisResetDate = Calendar.current.date(byAdding: .month, value: 1, to: Date())
+            remainingFreeAnalyses = 0
+            remainingProAnalyses = currentProLimit
+            proAnalysisResetDate = Calendar.current.date(byAdding: resetComponent, value: 1, to: Date())
+            trialStartDate = nil
             saveState()
         }
-        
+
+        return success
+    }
+
+    func mockConvertTrialToPaid() {
+        let resetComponent: Calendar.Component = isWeeklySubscriber ? .weekOfYear : .month
+        isInTrialPeriod = false
+        isProUser = true
+        hasReachedFreeLimit = false
+        remainingProAnalyses = currentProLimit
+        proAnalysisResetDate = Calendar.current.date(byAdding: resetComponent, value: 1, to: Date())
+        saveState()
+    }
+
+    func mockRestore() async -> Bool {
+        // Simulate network delay
+        try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+
+        // For testing, let's say 50% chance of having previous purchase
+        let hasPurchase = Int.random(in: 1...10) <= 5
+
+        if hasPurchase {
+            // Restore as paid subscriber (default to monthly if unknown)
+            isInTrialPeriod = false
+            isProUser = true
+            hasReachedFreeLimit = false
+            remainingProAnalyses = currentProLimit
+            proAnalysisResetDate = Calendar.current.date(byAdding: isWeeklySubscriber ? .weekOfYear : .month, value: 1, to: Date())
+            saveState()
+        }
+
         return hasPurchase
     }
     
@@ -242,11 +258,12 @@ final class MockSubscriptionService {
     
     var subscriptionStatus: String {
         if isProUser {
-            return "Pro (\(remainingProAnalyses)/\(proMonthlyLimit) analyses this month)"
-        } else if isInTrialPeriod {
-            return "Trial (\(remainingFreeAnalyses)/\(freeAnalysisLimit) analyses)"
+            let periodLabel = isWeeklySubscriber ? "week" : "month"
+            let used = currentProLimit - remainingProAnalyses
+            return "Pro (\(used)/\(currentProLimit) analyses this \(periodLabel))"
         } else {
-            return "Free (\(remainingFreeAnalyses)/\(freeAnalysisLimit) analyses)"
+            let used = freeAnalysisLimit - remainingFreeAnalyses
+            return "Free (\(used)/\(freeAnalysisLimit) analyses)"
         }
     }
     

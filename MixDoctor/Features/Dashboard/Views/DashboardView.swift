@@ -8,7 +8,6 @@
 import SwiftUI
 import SwiftData
 import AVFoundation
-import FirebaseAnalytics
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -164,7 +163,7 @@ struct DashboardView: View {
                 
                 // Log Firebase Analytics event
                 if !hasLoggedDashboardView {
-                    Analytics.logEvent("dashboard_viewed", parameters: nil)
+                    AnalyticsService.log(.dashboardViewed)
                     hasLoggedDashboardView = true
                 }
             }
@@ -265,7 +264,7 @@ struct DashboardView: View {
         
         // Log Firebase Analytics event
         if !hasLoggedDashboardView {
-            Analytics.logEvent("dashboard_viewed", parameters: nil)
+            AnalyticsService.log(.dashboardViewed)
             hasLoggedDashboardView = true
         }
     }
@@ -515,13 +514,12 @@ struct DashboardView: View {
     // Display value for "Analyzed" card - shows analysis count for free and Pro users
     private var analyzedDisplayValue: String {
         if subscriptionService.isProUser {
-            // For Pro users, show remaining analyses (X/50)
-            let usedAnalyses = 50 - subscriptionService.remainingProAnalyses
-            return "\(usedAnalyses)/50"
+            let limit = subscriptionService.currentProLimit
+            let used = limit - subscriptionService.remainingProAnalyses
+            return "\(used)/\(limit)"
         } else {
-            // Show analysis count (X/3) for free users
-            let usedAnalyses = 3 - subscriptionService.remainingFreeAnalyses
-            return "\(usedAnalyses)/3"
+            let usedAnalyses = 4 - subscriptionService.remainingFreeAnalyses
+            return "\(usedAnalyses)/4"
         }
     }
     
@@ -611,12 +609,13 @@ struct DashboardView: View {
     
     private var filesList: some View {
         List {
-            ForEach(filteredFiles) { file in
+            ForEach(Array(filteredFiles.enumerated()), id: \.element.id) { index, file in
                 Button {
                     handleAudioFileSelection(file)
                 } label: {
                     AudioFileRow(
                         audioFile: file,
+                        index: index + 1,
                         onDelete: file.isDemoFile ? nil : {
 #if targetEnvironment(macCatalyst)
                             fileToDelete = file
@@ -933,11 +932,11 @@ struct DashboardView: View {
             await MainActor.run {
                 self.isAnalyzing = true
                 self.analyzingFile = file
-                
+
                 // Log analysis started event
-                Analytics.logEvent("analysis_started", parameters: nil)
+                AnalyticsService.log(.analysisStarted)
             }
-            
+
             // Check subscription (now safe off main thread)
             guard subscriptionSvc.canPerformAnalysis() else {
                 await MainActor.run {
@@ -970,7 +969,7 @@ struct DashboardView: View {
 
                     // Log free analysis count event
                     let remainingFree = subscriptionSvc.remainingFreeAnalyses
-                    Analytics.logEvent("free_analysis_count", parameters: [
+                    AnalyticsService.log(.freeAnalysisCount, parameters: [
                         "remaining": String(remainingFree)
                     ])
 
@@ -996,7 +995,7 @@ struct DashboardView: View {
                     }
                     
                     // Log analysis completed event
-                    Analytics.logEvent("analysis_completed", parameters: [
+                    AnalyticsService.log(.analysisCompleted, parameters: [
                         "overall_score": String(format: "%.1f", result.overallScore)
                     ])
 
@@ -1015,6 +1014,9 @@ struct DashboardView: View {
                 }
 
             } catch {
+                AnalyticsService.log(.analysisFailed, parameters: [
+                    "error": error.localizedDescription
+                ])
                 // Hide loader and navigate to show error (all on main actor)
                 await MainActor.run {
                     withAnimation(.easeOut(duration: 0.3)) {
@@ -1056,11 +1058,11 @@ struct DashboardView: View {
             await MainActor.run {
                 self.isAnalyzing = true
                 self.analyzingFile = file
-                
+
                 // Log analysis started event
-                Analytics.logEvent("analysis_started", parameters: nil)
+                AnalyticsService.log(.analysisStarted)
             }
-            
+
             // Check subscription (now safe off main thread)
             guard await subscriptionSvc.canPerformAnalysis() else {
                 await MainActor.run {
@@ -1092,7 +1094,7 @@ struct DashboardView: View {
 
                     // Log free analysis count event
                     let remainingFree = subscriptionSvc.remainingFreeAnalyses
-                    Analytics.logEvent("free_analysis_count", parameters: [
+                    AnalyticsService.log(.freeAnalysisCount, parameters: [
                         "remaining": String(remainingFree)
                     ])
 
@@ -1118,10 +1120,10 @@ struct DashboardView: View {
                     }
                     
                     // Log analysis completed event
-                    let usedCount = subscriptionSvc.isProUser ? 
-                        (50 - subscriptionSvc.remainingProAnalyses) : 
-                        (3 - subscriptionSvc.remainingFreeAnalyses)
-                    Analytics.logEvent("analysis_completed", parameters: [
+                    let usedCount = subscriptionSvc.isProUser ?
+                        (subscriptionSvc.currentProLimit - subscriptionSvc.remainingProAnalyses) :
+                        (4 - subscriptionSvc.remainingFreeAnalyses)
+                    AnalyticsService.log(.analysisCompleted, parameters: [
                         "score": String(format: "%.1f", result.overallScore),
                         "analysis_count": String(usedCount)
                     ])
@@ -1138,6 +1140,9 @@ struct DashboardView: View {
                 }
 
             } catch {
+                AnalyticsService.log(.analysisFailed, parameters: [
+                    "error": error.localizedDescription
+                ])
                 // Hide loader and navigate to show error (all on main actor)
                 await MainActor.run {
                     withAnimation(.easeOut(duration: 0.3)) {
@@ -1529,7 +1534,7 @@ struct DashboardView: View {
                     try modelContext.save()
                     
                     // Log file imported event
-                    Analytics.logEvent("file_imported", parameters: nil)
+                    AnalyticsService.log(.fileImported)
                     
                     // Yield to prevent blocking UI during bulk imports
                     await Task.yield()
@@ -1763,13 +1768,14 @@ struct DashboardView: View {
                     try iCloudStorageService.shared.deleteAudioFile(at: fileURL)
                 } catch {
                 }
-                
+
                 // Delete the analysis result JSON from iCloud Drive
                 AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: file.fileName, isDemo: file.isDemoFile)
-                
+
                 // Delete the SwiftData record (CloudKit will sync this deletion)
                 modelContext.delete(file)
             }
+            AnalyticsService.log(.fileDeleted)
             
             do {
                 try modelContext.save()
@@ -1831,11 +1837,15 @@ struct DashboardView: View {
             } catch {
                 // Handle save error if needed
             }
-            
+
+            AnalyticsService.log(.allFilesDeleted, parameters: [
+                "count": String(allFiles.count)
+            ])
+
             // Clear cached filtered files
             cachedFilteredFiles = []
             lastFilterHash = 0
-            
+
             // Update statistics after deletion
 #if targetEnvironment(macCatalyst)
             Task(priority: .utility) {

@@ -2,12 +2,12 @@
 
 ## Context
 
-New users open MixDoctor after onboarding to an empty dashboard with no files to analyze. They must import their own audio to experience the app. This creates a poor first impression — users who don't have mixes on their device can't try the core feature. Adding 3 bundled demo audio files lets users explore the analysis experience immediately.
+New users open MixDoctor after onboarding to an empty dashboard with no files to analyze. They must import their own audio to experience the app. This creates a poor first impression — users who don't have mixes on their device can't try the core feature. Adding 4 bundled demo audio files lets users explore the analysis experience immediately.
 
 ## Design Decisions
 
-- **3 demo files**: 2 Mix stage + 1 Master(Streaming), different genres
-- **Analyses count normally** against the free 3/month limit — no special subscription bypass
+- **4 demo files**: 2 Mix stage + 1 Master(Streaming) + 1 Unmixed, different genres
+- **Analyses count normally** against the free 4/month limit — no special subscription bypass
 - **User taps "Analyze"** themselves — no pre-analyzed results
 - **Not deletable** by the user
 - **New onboarding screen** (5th) explains demo files + **"DEMO" badge** on each file in dashboard
@@ -20,7 +20,7 @@ New users open MixDoctor after onboarding to an empty dashboard with no files to
 ### 1. `MixDoctor/Core/Services/DemoFileService.swift`
 
 New `@MainActor` singleton service that:
-- Defines 3 `DemoFileDefinition` structs (bundleFileName, displayName, genre, mixStage)
+- Defines 4 `DemoFileDefinition` structs (bundleFileName, displayName, genre, mixStage)
 - On first launch: copies audio files from app bundle → `AudioFiles/` directory, extracts metadata via `AVURLAsset`, creates `AudioFile` SwiftData records with `isDemoFile = true`
 - Tracks loading state via `UserDefaults("hasLoadedDemoFiles")`
 - Handles edge cases: re-install (checks for existing `isDemoFile == true` records), file already on disk (skips copy)
@@ -31,6 +31,7 @@ Demo file definitions:
 | 1 | Pop Demo | Pop | mix | `DemoMix_Pop_Mix.wav` |
 | 2 | Rock Demo | Rock/Indie | mix | `DemoMix_Rock_Mix.wav` |
 | 3 | EDM Demo | EDM/Electronic | master_streaming | `DemoMix_EDM_Master.wav` |
+| 4 | Unmixed Demo | Pop | unmixed | `DemoMix_Pop_Unmixed.wav` |
 
 *(Bundle filenames are placeholders — will match whatever the user provides)*
 
@@ -41,9 +42,9 @@ New onboarding screen (inserted as page 3, before Free Trial). Uses existing `On
 Content:
 - Icon: `music.note.house.fill` (SF Symbol, 100pt, primaryAccent)
 - Title: **"Sample Mixes Included"**
-- Subtitle: *"We've included 3 demo audio files so you can explore the app right away"*
+- Subtitle: *"We've included 4 demo audio files so you can explore the app right away"*
 - Three steps using `OnboardingStep`:
-  1. `waveform` — "2 Mix Files + 1 Master" / "Different genres and stages to test with"
+  1. `waveform` — "2 Mix + 1 Master + 1 Unmixed" / "Different genres and stages to test with"
   2. `hand.tap` — "Tap to Analyze" / "Select any demo file and tap to run analysis"
   3. `square.and.arrow.down` — "Import Your Own" / "When you're ready, import your own mixes"
 - "Next" button advances to page 4 (Free Trial)
@@ -152,14 +153,14 @@ After onboarding, the existing logic checks `allAudioFiles.isEmpty` to decide wh
 | Risk | Mitigation |
 |------|-----------|
 | Schema migration breaks CloudKit | Test with default `false` first; SwiftData lightweight migration should handle it. Bump schema version only if needed. |
-| App bundle size increase (large WAV files) | Use MP3 or short clips (30-60s). 3 MP3 files ≈ 10-15 MB total. |
+| App bundle size increase (large WAV files) | Use MP3 or short clips (30-60s). 4 MP3 files ≈ 15-20 MB total. |
 | Race condition: demo files not ready when `allAudioFiles.isEmpty` is checked | 1s delay + `.task` ensures loading completes. Worst case: user briefly sees Import tab, demo files appear on Dashboard. |
 | iCloud sync: demo file records sync via CloudKit but physical files are device-local | `DemoFileService` re-copies from bundle on each device. `hasLoadedDemoFiles` is device-local UserDefaults. |
 
 ## Verification
 
-1. **Fresh install**: Onboarding → new demo screen (page 4/5) → "Get Started" → Dashboard shows 3 demo files with DEMO badge → tap file → Analyze → results display normally
+1. **Fresh install**: Onboarding → new demo screen (page 4/5) → "Get Started" → Dashboard shows 4 demo files with DEMO badge → tap file → Analyze → results display normally
 2. **Existing user (app update)**: App launches → demo files auto-load → appear at bottom of dashboard with DEMO badge
 3. **Deletion blocked**: Swipe-to-delete does nothing for demo files. Mac trash button hidden. "Delete All" skips demo files.
-4. **Analysis counts normally**: Analyzing a demo file decrements free tier counter (3→2→1→0→paywall)
+4. **Analysis counts normally**: Analyzing a demo file decrements free tier counter (4→3→2→1→0→paywall)
 5. **Re-install**: Demo files reload correctly from bundle

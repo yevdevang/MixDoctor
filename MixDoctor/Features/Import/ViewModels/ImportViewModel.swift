@@ -1,7 +1,6 @@
 import Foundation
 import Observation
 import SwiftData
-import FirebaseAnalytics
 
 @MainActor
 @Observable
@@ -110,7 +109,7 @@ final class ImportViewModel {
             
             // Log file imported event for each successfully imported file
             if insertedCount > 0 {
-                Analytics.logEvent("file_imported", parameters: nil)
+                AnalyticsService.log(.fileImported)
             }
             
             // Show appropriate message based on results
@@ -246,16 +245,18 @@ final class ImportViewModel {
                     }
                 }
                 
+                AnalyticsService.log(.fileDeleted)
+
                 // CRITICAL: Notify other views AFTER deletion is complete
                 NotificationCenter.default.post(name: .audioFileDeleted, object: nil)
-                
+
                 // Hide loader
                 self.isDeleting = false
                 self.deletingFile = nil
             }
         }
     }
-    
+
     func deleteAllFiles() {
         // Show loader
         isDeletingAll = true

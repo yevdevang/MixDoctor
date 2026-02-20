@@ -21,20 +21,20 @@ struct OnboardingFreeTrialScreen: View {
                 .symbolRenderingMode(.hierarchical)
             
             // Title
-            Text("Try It Free")
+            Text("Start Analyzing")
                 .font(.largeTitle)
                 .bold()
                 .multilineTextAlignment(.center)
-            
+
             // Subtitle
-            Text("You have 3 free analyses to get started")
+            Text("You have 4 free analyses and demo tracks to get started")
                 .font(.title3)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 40)
-            
+
             // Body text
-            Text("No credit card required. Upgrade for 50 analysis per month and premium features.")
+            Text("No credit card required. Upgrade to Pro for unlimited AI analysis and premium features.")
                 .font(.body)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)

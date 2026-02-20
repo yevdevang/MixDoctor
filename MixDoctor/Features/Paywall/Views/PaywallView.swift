@@ -8,7 +8,6 @@
 import SwiftUI
 import RevenueCat
 import StoreKit
-import FirebaseAnalytics
 
 struct PaywallView: View {
     @Environment(\.dismiss) private var dismiss
@@ -23,19 +22,6 @@ struct PaywallView: View {
     
     let onPurchaseComplete: () -> Void
     let onDismiss: (() -> Void)?
-    
-    // Helper functions for trial detection
-    private func hasFreeTrial(for package: Package) -> Bool {
-        // Default to 3-day trial if we can't detect it
-        // This is safer than trying to access StoreKit APIs that may vary
-        return true // Assume free trial exists (configured in App Store Connect)
-    }
-    
-    private func getTrialPeriodDays(for package: Package) -> Int? {
-        // Default to 3 days if we can't detect it programmatically
-        // This matches your App Store Connect configuration
-        return 3
-    }
     
     var body: some View {
         NavigationStack {
@@ -80,6 +66,7 @@ struct PaywallView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button {
+                        AnalyticsService.log(.paywallDismissed)
                         #if targetEnvironment(macCatalyst)
                         onDismiss?()
                         #else
@@ -98,9 +85,9 @@ struct PaywallView: View {
             }
             .task {
                 await loadOfferings()
-                
+
                 // Log paywall shown event
-                Analytics.logEvent("paywall_shown", parameters: nil)
+                AnalyticsService.log(.paywallShown)
             }
             .sheet(isPresented: $showTerms) {
                 TermsView()
@@ -115,14 +102,26 @@ struct PaywallView: View {
     
     private var headerSection: some View {
         VStack(spacing: 20) {
-            Text("Unlock Pro Features")
-                .font(.largeTitle.bold())
-                .foregroundColor(.black)
-            
-            Text("Get 50 audio analyses and access to all premium features")
-                .font(.title3)
-                .foregroundColor(.gray)
-                .multilineTextAlignment(.center)
+            if subscriptionService.hasReachedFreeLimit {
+                Text("You've used 4 free analyses")
+                    .font(.largeTitle.bold())
+                    .foregroundColor(.black)
+                    .multilineTextAlignment(.center)
+
+                Text("Upgrade for unlimited AI-powered mix feedback")
+                    .font(.title3)
+                    .foregroundColor(.gray)
+                    .multilineTextAlignment(.center)
+            } else {
+                Text("Unlock Pro Features")
+                    .font(.largeTitle.bold())
+                    .foregroundColor(.black)
+
+                Text("Get unlimited AI analysis and access to all premium features")
+                    .font(.title3)
+                    .foregroundColor(.gray)
+                    .multilineTextAlignment(.center)
+            }
         }
     }
     
@@ -136,22 +135,16 @@ struct PaywallView: View {
             
             PaywallFeatureRow(
                 icon: "infinity",
-                title: "50 Analyses per Month",
-                description: "Pro subscribers get 50 analyses monthly"
+                title: "Unlimited AI Analysis",
+                description: "Analyze unlimited mixes with AI feedback"
             )
-            
+
             PaywallFeatureRow(
-                icon: "sparkles",
-                title: "Advanced AI Analysis",
-                description: "Powered by Claude Sonnet 4.5"
+                icon: "music.note.list",
+                title: "4 Sample Tracks Included",
+                description: "Learn from pre-analyzed professional mixes"
             )
-            
-            PaywallFeatureRow(
-                icon: "chart.xyaxis.line",
-                title: "Detailed Reports",
-                description: "Get comprehensive mix analysis"
-            )
-            
+
             PaywallFeatureRow(
                 icon: "star.fill",
                 title: "Priority Support",
@@ -167,8 +160,12 @@ struct PaywallView: View {
     // MARK: - Packages Section
     
     private func packagesSection(offering: Offering) -> some View {
-        VStack(spacing: 16) {
-            ForEach(offering.availablePackages, id: \.identifier) { package in
+        let sortedPackages = offering.availablePackages.sorted { a, b in
+            let order: [PackageType: Int] = [.annual: 0, .monthly: 1, .weekly: 2]
+            return (order[a.packageType] ?? 3) < (order[b.packageType] ?? 3)
+        }
+        return VStack(spacing: 16) {
+            ForEach(sortedPackages, id: \.identifier) { package in
                 PackageCard(
                     package: package,
                     isSelected: selectedPackage?.identifier == package.identifier,
@@ -186,8 +183,8 @@ struct PaywallView: View {
         VStack(spacing: 8) {
             Button {
                 // Log upgrade button tapped event
-                Analytics.logEvent("upgrade_button_tapped", parameters: nil)
-                
+                AnalyticsService.log(.upgradeButtonTapped)
+
                 Task {
                     await purchase()
                 }
@@ -199,19 +196,10 @@ struct PaywallView: View {
                     } else {
                         // Show final billed amount prominently
                         if let package = selectedPackage {
-                            let hasTrial = hasFreeTrial(for: package)
-                            
-                            if hasTrial {
-                                Text("Start Free Trial")
-                                    .font(.title3.weight(.semibold))
-                                Text("Then \(package.localizedPriceString) per \(package.packageType == .annual ? "year" : "month")")
-                                    .font(.subheadline.weight(.medium))
-                            } else {
-                                Text("Subscribe for \(package.localizedPriceString)")
-                                    .font(.title3.weight(.semibold))
-                                Text("per \(package.packageType == .annual ? "year" : "month")")
-                                    .font(.subheadline.weight(.medium))
-                            }
+                            Text("Subscribe for \(package.localizedPriceString) per \(package.packageType == .annual ? "year" : package.packageType == .weekly ? "week" : "month")")
+                                .font(.title3.weight(.semibold))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
                         } else {
                             Text("Select a Plan")
                                 .font(.title3.weight(.semibold))
@@ -238,20 +226,10 @@ struct PaywallView: View {
             .opacity(selectedPackage == nil ? 0.6 : 1.0)
             
             // Clear payment timing info below button
-            if let package = selectedPackage {
-                let hasTrial = hasFreeTrial(for: package)
-                let trialDays = getTrialPeriodDays(for: package)
-                
-                if hasTrial, let days = trialDays {
-                    
-                    Text("Payment starts after \(days)-day free trial")
-                        .font(.caption.weight(.semibold))
-                        .foregroundColor(.gray)
-                } else {
-                    Text("Payment starts immediately")
-                        .font(.caption.weight(.semibold))
-                        .foregroundColor(.gray)
-                }
+            if selectedPackage != nil {
+                Text("Payment starts immediately. Cancel anytime.")
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(.gray)
             }
         }
     }
@@ -280,7 +258,7 @@ struct PaywallView: View {
     
     private var footerSection: some View {
         VStack(spacing: 12) {
-            Text("Free trial gives you 3 analyses to test Pro features. After trial, continue with 3 free analyses/month or get 50 analyses/month with Pro subscription. Cancel anytime.")
+            Text("Free users get 4 analyses per month and demo tracks. Upgrade to Pro for unlimited AI analysis and premium features. Cancel anytime.")
                 .font(.caption)
                 .foregroundColor(.gray)
                 .multilineTextAlignment(.center)
@@ -332,20 +310,16 @@ struct PaywallView: View {
             try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
             
             print("   - subscriptionService.isProUser: \(subscriptionService.isProUser)")
-            print("   - subscriptionService.isInTrialPeriod: \(subscriptionService.isInTrialPeriod)")
-            
-            // Verify purchase was successful (trial or paid)
+
+            // Verify purchase was successful
             let hasActiveEntitlement = customerInfo.entitlements["pro"]?.isActive == true
             let isProOrTrial = subscriptionService.isProUser || subscriptionService.isInTrialPeriod
-            
-            // Log trial started event if user is in trial period
-            if subscriptionService.isInTrialPeriod {
-                Analytics.logEvent("trial_started", parameters: nil)
-            }
-            
+
             print("   - Will dismiss: \(hasActiveEntitlement || isProOrTrial)")
-            
+
             if hasActiveEntitlement || isProOrTrial {
+                AnalyticsService.log(.purchaseCompleted)
+
                 // Ensure we're on main actor for UI updates
                 await MainActor.run {
                     isPurchasing = false
@@ -371,6 +345,9 @@ struct PaywallView: View {
                 }
             }
         } catch {
+            AnalyticsService.log(.purchaseFailed, parameters: [
+                "error": error.localizedDescription
+            ])
             await MainActor.run {
                 isPurchasing = false
                 errorMessage = "Purchase failed: \(error.localizedDescription)"
@@ -395,14 +372,16 @@ struct PaywallView: View {
             try? await Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
             
             if subscriptionService.isProUser || subscriptionService.isInTrialPeriod {
+                AnalyticsService.log(.restoreCompleted)
+
                 await MainActor.run {
                     isRestoring = false
                     onPurchaseComplete()
                 }
-                
+
                 // Small delay before dismiss
                 try? await Task.sleep(nanoseconds: 200_000_000) // 0.2 seconds
-                
+
                 await MainActor.run {
                     #if targetEnvironment(macCatalyst)
                     // On MacCatalyst, use explicit dismissal callback
@@ -419,6 +398,9 @@ struct PaywallView: View {
                 }
             }
         } catch {
+            AnalyticsService.log(.restoreFailed, parameters: [
+                "error": error.localizedDescription
+            ])
             await MainActor.run {
                 isRestoring = false
                 errorMessage = "Restore failed: \(error.localizedDescription)"
@@ -466,25 +448,18 @@ private struct PackageCard: View {
     private var isAnnual: Bool {
         package.packageType == .annual
     }
+
+    private var periodLabel: String {
+        switch package.packageType {
+        case .annual: return "year"
+        case .weekly: return "week"
+        default: return "month"
+        }
+    }
     
     // Get the actual billed amount (final price user will pay)
     private var finalBilledAmount: String {
         package.localizedPriceString
-    }
-    
-    // Get free trial period info
-    // Simplified: Assume 3-day free trial as configured in App Store Connect
-    // This avoids complex StoreKit API differences between versions
-    private var hasFreeTrial: Bool {
-        // Check if package has an introductory offer by checking if storeProduct has one
-        // For simplicity, we'll assume all packages have a 3-day trial
-        // This matches your App Store Connect configuration
-        return true
-    }
-    
-    private var trialPeriodDays: Int? {
-        // Return 3 days as configured in App Store Connect
-        return 3
     }
     
     private var pricePerMonth: String {
@@ -547,25 +522,9 @@ private struct PackageCard: View {
                         .font(.system(size: 36, weight: .bold, design: .rounded))
                         .foregroundColor(.black)
                     
-                    // When payment starts - clearly shown
-                    if hasFreeTrial, let days = trialPeriodDays {
-                        HStack(spacing: 3) {
-                            Text("\(days)-day free trial, then")
-                                .font(.caption.weight(.medium))
-                                .foregroundColor(.gray)
-                            Text(finalBilledAmount)
-                                .font(.caption.weight(.semibold))
-                                .foregroundColor(.gray)
-                            Text(isAnnual ? "per year" : "per month")
-                                .font(.caption.weight(.medium))
-                                .foregroundColor(.gray)
-                        }
-                        .lineLimit(1)
-                    } else {
-                        Text(isAnnual ? "per year" : "per month")
-                            .font(.subheadline)
-                            .foregroundColor(.gray)
-                    }
+                    Text("per \(periodLabel)")
+                        .font(.subheadline)
+                        .foregroundColor(.gray)
                     
                     // Monthly equivalent (secondary, smaller)
                     if isAnnual {

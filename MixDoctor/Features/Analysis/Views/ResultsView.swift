@@ -7,7 +7,6 @@
 
 import SwiftUI
 import SwiftData
-import FirebaseAnalytics
 
 @MainActor
 struct ResultsView: View {
@@ -2010,7 +2009,7 @@ struct ResultsView: View {
         defer { isAnalyzing = false }
         
         // Log analysis started event
-        Analytics.logEvent("analysis_started", parameters: nil)
+        AnalyticsService.log(.analysisStarted)
 
         do {
             
@@ -2033,7 +2032,7 @@ struct ResultsView: View {
             
             // Log free analysis count event
             let remainingFree = subscriptionService.remainingFreeAnalyses
-            Analytics.logEvent("free_analysis_count", parameters: [
+            AnalyticsService.log(.freeAnalysisCount, parameters: [
                 "remaining": String(remainingFree)
             ])
             
@@ -2047,8 +2046,8 @@ struct ResultsView: View {
             // Log analysis completed event
             let usedCount = subscriptionService.isProUser ? 
                 (50 - subscriptionService.remainingProAnalyses) : 
-                (3 - subscriptionService.remainingFreeAnalyses)
-            Analytics.logEvent("analysis_completed", parameters: [
+                (4 - subscriptionService.remainingFreeAnalyses)
+            AnalyticsService.log(.analysisCompleted, parameters: [
                 "score": String(format: "%.1f", result.overallScore),
                 "analysis_count": String(usedCount)
             ])
@@ -2075,6 +2074,9 @@ struct ResultsView: View {
             }
             
         } catch {
+            AnalyticsService.log(.analysisFailed, parameters: [
+                "error": error.localizedDescription
+            ])
             errorMessage = error.localizedDescription
             showError = true
         }

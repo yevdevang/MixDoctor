@@ -1,6 +1,5 @@
 import SwiftUI
 import SwiftData
-import FirebaseAnalytics
 
 struct SettingsView: View {
     @State private var viewModel = SettingsViewModel()
@@ -71,7 +70,7 @@ struct SettingsView: View {
                     
                     if !subscriptionService.isProUser {
                         Button {
-                            Analytics.logEvent("upgrade_button_tapped", parameters: nil)
+                            AnalyticsService.log(.upgradeButtonTapped)
                             showPaywall = true
                         } label: {
                             HStack {
@@ -252,7 +251,7 @@ struct SettingsView: View {
                         }
                     }
                     .foregroundStyle(.orange)
-                    .disabled(isClearingAnalysis || !hasNonDemoAnalysis)
+                    .disabled(isClearingAnalysis)
                 }
                 #endif
             }
@@ -264,6 +263,7 @@ struct SettingsView: View {
             #endif
             .navigationBarTitleDisplayMode(.inline)
             .task {
+                AnalyticsService.log(.settingsViewed)
                 await loadStorageInfo()
             }
             .refreshable {

@@ -15,6 +15,7 @@ struct ImportView: View {
     @Binding var shouldAutoPlay: Bool
     @State private var showBatchImportInfo = false
     @State private var showDeleteAllConfirmation = false
+    @State private var sortOption: ImportSortOption = .date
     #if targetEnvironment(macCatalyst)
     @State private var fileToDelete: AudioFile?
     @State private var showDeleteConfirmation = false
@@ -452,22 +453,43 @@ struct ImportView: View {
                         .foregroundStyle(Color.primaryAccent)
                 }
                 .buttonStyle(.bordered)
-                
-                // Delete All menu button (only show if there are non-demo files)
-                if viewModel.importedFiles.contains(where: { !$0.isDemoFile }) {
-                    Menu {
+
+                // Sort & actions menu
+                Menu {
+                    Button(action: { sortOption = .date }) {
+                        Label("Sort by Date", systemImage: "calendar")
+                        if sortOption == .date {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                    Button(action: { sortOption = .name }) {
+                        Label("Sort by Name", systemImage: "textformat")
+                        if sortOption == .name {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                    Button(action: { sortOption = .score }) {
+                        Label("Sort by Score", systemImage: "star")
+                        if sortOption == .score {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+
+                    if viewModel.importedFiles.contains(where: { !$0.isDemoFile }) {
+                        Divider()
+
                         Button(role: .destructive, action: {
                             showDeleteAllConfirmation = true
                         }) {
                             Label("Delete All Files", systemImage: "trash")
                         }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                            .foregroundStyle(Color.primaryAccent)
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(viewModel.isImporting || viewModel.isDeleting)
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .foregroundStyle(Color.primaryAccent)
                 }
+                .buttonStyle(.bordered)
+                .disabled(viewModel.isImporting || viewModel.isDeleting)
 
                 // Genre selection dropdown
                 Menu {
@@ -594,22 +616,43 @@ struct ImportView: View {
                             .foregroundStyle(Color.primaryAccent)
                     }
                     .font(.subheadline)
-                    
-                    // Delete All menu button (only show if there are non-demo files)
-                    if viewModel.importedFiles.contains(where: { !$0.isDemoFile }) {
-                        Menu {
+
+                    // Sort & actions menu
+                    Menu {
+                        Button(action: { sortOption = .date }) {
+                            Label("Sort by Date", systemImage: "calendar")
+                            if sortOption == .date {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                        Button(action: { sortOption = .name }) {
+                            Label("Sort by Name", systemImage: "textformat")
+                            if sortOption == .name {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                        Button(action: { sortOption = .score }) {
+                            Label("Sort by Score", systemImage: "star")
+                            if sortOption == .score {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+
+                        if viewModel.importedFiles.contains(where: { !$0.isDemoFile }) {
+                            Divider()
+
                             Button(role: .destructive, action: {
                                 showDeleteAllConfirmation = true
                             }) {
                                 Label("Delete All Files", systemImage: "trash")
                             }
-                        } label: {
-                            Image(systemName: "ellipsis.circle")
-                                .foregroundStyle(Color.primaryAccent)
                         }
-                        .font(.subheadline)
-                        .disabled(viewModel.isImporting || viewModel.isDeleting)
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .foregroundStyle(Color.primaryAccent)
                     }
+                    .font(.subheadline)
+                    .disabled(viewModel.isImporting || viewModel.isDeleting)
                 }
                 .padding(.vertical, 4)
                 
@@ -760,11 +803,13 @@ struct ImportView: View {
             #endif
             
             // Scrollable list
+            let sorted = sortedFiles(viewModel.importedFiles)
             List {
                 Section {
-                    ForEach(viewModel.importedFiles) { file in
+                    ForEach(Array(sorted.enumerated()), id: \.element.id) { index, file in
                         ImportedFileRow(
                             audioFile: file,
+                            index: index + 1,
                             onPlayTapped: {
                                 selectedAudioFile = file
                                 shouldAutoPlay = true
@@ -787,7 +832,13 @@ struct ImportView: View {
                         #endif
                     }
                     .onDelete { indexSet in
-                        deleteFiles(at: indexSet, viewModel: viewModel)
+                        // Map sorted indices back to original viewModel indices
+                        let originalIndices = IndexSet(indexSet.compactMap { sortedIndex -> Int? in
+                            guard sortedIndex < sorted.count else { return nil }
+                            let file = sorted[sortedIndex]
+                            return viewModel.importedFiles.firstIndex(where: { $0.id == file.id })
+                        })
+                        deleteFiles(at: originalIndices, viewModel: viewModel)
                     }
                     
                     // Spacer row to make list take full height and accept drops
@@ -975,6 +1026,32 @@ struct ImportView: View {
         )
     }
     
+    // MARK: - Sorting
+
+    enum ImportSortOption: String, CaseIterable {
+        case date = "Sort by Date"
+        case name = "Sort by Name"
+        case score = "Sort by Score"
+    }
+
+    private func sortedFiles(_ files: [AudioFile]) -> [AudioFile] {
+        var result = files
+        switch sortOption {
+        case .date:
+            result.sort { $0.dateImported > $1.dateImported }
+        case .name:
+            result.sort { $0.fileName.localizedCaseInsensitiveCompare($1.fileName) == .orderedAscending }
+        case .score:
+            result.sort {
+                ($0.analysisResult?.overallScore ?? 0) > ($1.analysisResult?.overallScore ?? 0)
+            }
+        }
+        // Sort demo files to the bottom
+        let userFiles = result.filter { !$0.isDemoFile }
+        let demoFiles = result.filter { $0.isDemoFile }
+        return userFiles + demoFiles
+    }
+
     private func mixStageDisplayName(_ stage: String?) -> String {
         switch stage {
         case "mix": return "Mix (Pre-Master)"
@@ -989,6 +1066,7 @@ struct ImportView: View {
 
 private struct ImportedFileRow: View {
     let audioFile: AudioFile
+    var index: Int? = nil
     let onPlayTapped: () -> Void
     var onDelete: (() -> Void)? = nil
 
@@ -1103,9 +1181,29 @@ private struct ImportedFileRow: View {
                 .frame(width: 40, height: 40)
                 .padding(3)
             }
+
+            // Index number badge at bottom-left
+            if let index {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Text("\(index)")
+                            .font(.system(size: 9, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                            .frame(width: 16, height: 16)
+                            .background(
+                                Circle()
+                                    .fill(statusColor.opacity(0.85))
+                            )
+                        Spacer()
+                    }
+                }
+                .frame(width: 40, height: 40)
+                .offset(x: -4, y: 4)
+            }
         }
     }
-    
+
     private var statusColor: Color {
         if let result = audioFile.analysisResult {
             // Use scoreColor directly (matches AudioFileRow)

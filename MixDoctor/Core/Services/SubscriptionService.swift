@@ -9,7 +9,6 @@ import Foundation
 import RevenueCat
 import SwiftUI
 import Combine
-import FirebaseAnalytics
 
 @MainActor
 public final class SubscriptionService: NSObject, ObservableObject, PurchasesDelegate {
@@ -22,17 +21,25 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
     @Published var currentOffering: Offering?
     @Published var customerInfo: CustomerInfo?
     @Published var remainingProAnalyses: Int = 50
-     
+    @Published var isWeeklySubscriber: Bool = false
+
     // Free tier limits
-    private let freeAnalysisLimit = 3
+    private let freeAnalysisLimit = 4
     private let monthlyResetKey = "lastMonthlyReset"
     private let analysisCountKey = "analysisCount"
-    
-    // Pro tier limits (50 analyses per month)
-    private let proMonthlyLimit = 50
+
+    // Pro tier limits
+    private let proMonthlyLimit = 50   // Monthly & Annual subscribers
+    private let weeklyProLimit = 10    // Weekly subscribers
     private let proAnalysisCountKey = "proAnalysisCount"
     private let proResetDateKey = "proAnalysisResetDate"
+    private let subscriptionTypeKey = "subscriptionType"
     private let cloudStore = NSUbiquitousKeyValueStore.default
+
+    /// The current analysis limit based on subscription type
+    var currentProLimit: Int {
+        isWeeklySubscriber ? weeklyProLimit : proMonthlyLimit
+    }
     
     // Total analysis tracking (for rating prompts)
     private let totalAnalysisCountKey = "totalAnalysisCount"
@@ -56,6 +63,8 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
     
     private override init() {
         super.init()
+        // Load subscription type first (needed for currentProLimit)
+        isWeeklySubscriber = cloudStore.string(forKey: subscriptionTypeKey) == "weekly"
         loadProAnalysisState()
         // Skip RevenueCat during tests to prevent crashes
         if !Self.isRunningTests {
@@ -125,10 +134,12 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
             if let proEntitlement = info.entitlements["pro"] {
                 willRenew = proEntitlement.willRenew
             }
+            // Detect subscription type from offerings
+            detectSubscriptionType(from: info)
             // Initialize Pro analysis limit if becoming Pro for first time
             if remainingProAnalyses == 0 && proAnalysisResetDate == nil {
-                remainingProAnalyses = proMonthlyLimit
-                proAnalysisResetDate = Calendar.current.date(byAdding: .month, value: 1, to: Date())
+                remainingProAnalyses = currentProLimit
+                proAnalysisResetDate = Calendar.current.date(byAdding: isWeeklySubscriber ? .weekOfYear : .month, value: 1, to: Date())
                 saveProAnalysisState()
             }
         } else {
@@ -151,14 +162,17 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
     func purchase(package: Package) async throws -> CustomerInfo {
         let result = try await Purchases.shared.purchase(package: package)
         customerInfo = result.customerInfo
-        
+
         print("💳 Purchase result received")
-        
+
+        // Save subscription type based on package
+        let isWeekly = package.packageType == .weekly
+        isWeeklySubscriber = isWeekly
+        saveSubscriptionType()
+
         // Check if user has active pro entitlement
         let hasProEntitlement = result.customerInfo.entitlements["pro"]?.isActive == true
-        
-       
-        
+
         // Check if currently in trial period
         if let proEntitlement = result.customerInfo.entitlements["pro"],
            proEntitlement.isActive,
@@ -167,25 +181,22 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
             isInTrialPeriod = true
             isProUser = false // Treat trial users as free tier for analysis limits
             willRenew = proEntitlement.willRenew
-            
-            // Log trial started event
-            Analytics.logEvent("trial_started", parameters: nil)
         } else if hasProEntitlement {
-            print("   - Setting isProUser = true")
+            print("   - Setting isProUser = true (weekly: \(isWeekly), limit: \(currentProLimit))")
             isInTrialPeriod = false
-            isProUser = true // Paid subscribers get monthly limit
+            isProUser = true
             // Update renewal status
             if let proEntitlement = result.customerInfo.entitlements["pro"] {
                 willRenew = proEntitlement.willRenew
             }
             // Initialize Pro analysis limit for new purchase
-            remainingProAnalyses = proMonthlyLimit
-            proAnalysisResetDate = Calendar.current.date(byAdding: .month, value: 1, to: Date())
+            remainingProAnalyses = currentProLimit
+            proAnalysisResetDate = Calendar.current.date(byAdding: isWeeklySubscriber ? .weekOfYear : .month, value: 1, to: Date())
             saveProAnalysisState()
         } else {
             print("   - ⚠️ No valid entitlement detected!")
         }
-        
+
         return result.customerInfo
     }
     
@@ -207,15 +218,17 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
             willRenew = proEntitlement.willRenew
         } else if hasProEntitlement {
             isInTrialPeriod = false
-            isProUser = true // Paid subscribers get monthly limit
+            isProUser = true
             // Update renewal status
             if let proEntitlement = info.entitlements["pro"] {
                 willRenew = proEntitlement.willRenew
             }
+            // Detect subscription type from offerings
+            detectSubscriptionType(from: info)
             // Initialize Pro analysis limit when restoring
             if remainingProAnalyses == 0 && proAnalysisResetDate == nil {
-                remainingProAnalyses = proMonthlyLimit
-                proAnalysisResetDate = Calendar.current.date(byAdding: .month, value: 1, to: Date())
+                remainingProAnalyses = currentProLimit
+                proAnalysisResetDate = Calendar.current.date(byAdding: isWeeklySubscriber ? .weekOfYear : .month, value: 1, to: Date())
                 saveProAnalysisState()
             }
         } else {
@@ -253,7 +266,7 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
             checkProAnalysisReset()
             return remainingProAnalyses > 0
         }
-        // Trial users and free users have 3 analyses limit
+        // Trial users and free users have 4 analyses limit
         return remainingFreeAnalyses > 0
     }
     
@@ -284,13 +297,13 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
     
     private func checkProAnalysisReset() {
         guard isProUser, let resetDate = proAnalysisResetDate else { return }
-        
+
         let now = Date()
         if now >= resetDate {
-            // Reset to full monthly limit
-            remainingProAnalyses = proMonthlyLimit
-            // Set next reset date (1 month from now)
-            proAnalysisResetDate = Calendar.current.date(byAdding: .month, value: 1, to: now)
+            // Reset to full limit based on subscription type
+            remainingProAnalyses = currentProLimit
+            // Set next reset date based on subscription type
+            proAnalysisResetDate = Calendar.current.date(byAdding: isWeeklySubscriber ? .weekOfYear : .month, value: 1, to: now)
             saveProAnalysisState()
         }
     }
@@ -305,7 +318,7 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
     
     private func loadProAnalysisState() {
         let savedCount = cloudStore.longLong(forKey: proAnalysisCountKey)
-        remainingProAnalyses = savedCount > 0 ? Int(savedCount) : proMonthlyLimit
+        remainingProAnalyses = savedCount > 0 ? Int(savedCount) : currentProLimit
         proAnalysisResetDate = cloudStore.object(forKey: proResetDateKey) as? Date
     }
     
@@ -334,13 +347,14 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
     var subscriptionStatus: String {
         if isProUser {
             if !willRenew {
-                return "Pro (Cancels at period end) (\(remainingProAnalyses)/\(proMonthlyLimit))"
+                return "Pro (Cancels at period end)"
             }
-            return "Pro (\(remainingProAnalyses)/\(proMonthlyLimit) analyses this month)"
-        } else if isInTrialPeriod {
-            return "Trial (\(remainingFreeAnalyses)/\(freeAnalysisLimit) analyses)"
+            let periodLabel = isWeeklySubscriber ? "week" : "month"
+            let used = currentProLimit - remainingProAnalyses
+            return "Pro (\(used)/\(currentProLimit) analyses this \(periodLabel))"
         } else {
-            return "Free (\(remainingFreeAnalyses)/\(freeAnalysisLimit) analyses)"
+            let used = freeAnalysisLimit - remainingFreeAnalyses
+            return "Free (\(used)/\(freeAnalysisLimit) analyses)"
         }
     }
     
@@ -378,10 +392,12 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
                 print("✅ Status: Pro user (active)")
                 self.isInTrialPeriod = false
                 self.isProUser = true
+                // Detect subscription type from offerings
+                self.detectSubscriptionType(from: customerInfo)
                 // Initialize Pro analysis limit if becoming Pro for first time
                 if self.remainingProAnalyses == 0 && self.proAnalysisResetDate == nil {
-                    self.remainingProAnalyses = self.proMonthlyLimit
-                    self.proAnalysisResetDate = Calendar.current.date(byAdding: .month, value: 1, to: Date())
+                    self.remainingProAnalyses = self.currentProLimit
+                    self.proAnalysisResetDate = Calendar.current.date(byAdding: self.isWeeklySubscriber ? .weekOfYear : .month, value: 1, to: Date())
                     self.saveProAnalysisState()
                 }
             } else {
@@ -390,5 +406,32 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
                 self.isProUser = false
             }
         }
+    }
+
+    // MARK: - Subscription Type Detection
+
+    /// Detect subscription type (weekly vs monthly/annual) from product identifier
+    private func detectSubscriptionType(from customerInfo: CustomerInfo) {
+        guard let proEntitlement = customerInfo.entitlements["pro"],
+              proEntitlement.isActive,
+              proEntitlement.periodType != .trial else { return }
+
+        let productId = proEntitlement.productIdentifier
+
+        // Try to match against current offerings
+        if let offering = currentOffering {
+            if let weekly = offering.weekly, weekly.storeProduct.productIdentifier == productId {
+                isWeeklySubscriber = true
+            } else {
+                isWeeklySubscriber = false
+            }
+            saveSubscriptionType()
+        }
+        // If offerings aren't loaded, keep the saved value from cloud store
+    }
+
+    private func saveSubscriptionType() {
+        cloudStore.set(isWeeklySubscriber ? "weekly" : "other", forKey: subscriptionTypeKey)
+        cloudStore.synchronize()
     }
 }
