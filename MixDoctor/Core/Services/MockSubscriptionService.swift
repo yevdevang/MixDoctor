@@ -40,6 +40,7 @@ final class MockSubscriptionService {
     }
     
     var mockPackages: [MockPackage] = [
+        MockPackage(id: "weekly", title: "Weekly", price: "$2.99", period: "per week"),
         MockPackage(id: "monthly", title: "Monthly", price: "$5.99", period: "per month"),
         MockPackage(id: "annual", title: "Annual", price: "$3.99", period: "per month, billed annually at $47.88")
     ]

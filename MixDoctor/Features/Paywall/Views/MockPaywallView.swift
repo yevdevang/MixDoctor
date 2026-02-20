@@ -294,7 +294,7 @@ struct MockPaywallView: View {
     
     private var footerSection: some View {
         VStack(spacing: 8) {
-            Text("7-day free trial with 4 analyses, then \(selectedPackageId == "annual" ? "$47.88/year" : "$5.99/month")")
+            Text("7-day free trial with 4 analyses, then \(selectedPackageId == "annual" ? "$47.88/year" : selectedPackageId == "weekly" ? "$2.99/week" : "$5.99/month")")
                 .font(.caption2.bold())
                 .foregroundStyle(.primary)
             

@@ -204,12 +204,12 @@ struct PaywallView: View {
                             if hasTrial {
                                 Text("Start Free Trial")
                                     .font(.title3.weight(.semibold))
-                                Text("Then \(package.localizedPriceString) per \(package.packageType == .annual ? "year" : "month")")
+                                Text("Then \(package.localizedPriceString) per \(package.packageType == .annual ? "year" : package.packageType == .weekly ? "week" : "month")")
                                     .font(.subheadline.weight(.medium))
                             } else {
                                 Text("Subscribe for \(package.localizedPriceString)")
                                     .font(.title3.weight(.semibold))
-                                Text("per \(package.packageType == .annual ? "year" : "month")")
+                                Text("per \(package.packageType == .annual ? "year" : package.packageType == .weekly ? "week" : "month")")
                                     .font(.subheadline.weight(.medium))
                             }
                         } else {
@@ -476,6 +476,14 @@ private struct PackageCard: View {
     private var isAnnual: Bool {
         package.packageType == .annual
     }
+
+    private var periodLabel: String {
+        switch package.packageType {
+        case .annual: return "year"
+        case .weekly: return "week"
+        default: return "month"
+        }
+    }
     
     // Get the actual billed amount (final price user will pay)
     private var finalBilledAmount: String {
@@ -566,13 +574,13 @@ private struct PackageCard: View {
                             Text(finalBilledAmount)
                                 .font(.caption.weight(.semibold))
                                 .foregroundColor(.gray)
-                            Text(isAnnual ? "per year" : "per month")
+                            Text("per \(periodLabel)")
                                 .font(.caption.weight(.medium))
                                 .foregroundColor(.gray)
                         }
                         .lineLimit(1)
                     } else {
-                        Text(isAnnual ? "per year" : "per month")
+                        Text("per \(periodLabel)")
                             .font(.subheadline)
                             .foregroundColor(.gray)
                     }
