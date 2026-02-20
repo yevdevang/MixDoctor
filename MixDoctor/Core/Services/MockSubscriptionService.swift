@@ -46,9 +46,9 @@ final class MockSubscriptionService {
     }
     
     var mockPackages: [MockPackage] = [
-        MockPackage(id: "weekly", title: "Weekly", price: "$2.99", period: "per week"),
+        MockPackage(id: "annual", title: "Annual", price: "$3.99", period: "per month, billed annually at $47.88"),
         MockPackage(id: "monthly", title: "Monthly", price: "$5.99", period: "per month"),
-        MockPackage(id: "annual", title: "Annual", price: "$3.99", period: "per month, billed annually at $47.88")
+        MockPackage(id: "weekly", title: "Weekly", price: "$2.99", period: "per week")
     ]
     
     // MARK: - Initialization
@@ -259,9 +259,11 @@ final class MockSubscriptionService {
     var subscriptionStatus: String {
         if isProUser {
             let periodLabel = isWeeklySubscriber ? "week" : "month"
-            return "Pro (\(remainingProAnalyses)/\(currentProLimit) analyses this \(periodLabel))"
+            let used = currentProLimit - remainingProAnalyses
+            return "Pro (\(used)/\(currentProLimit) analyses this \(periodLabel))"
         } else {
-            return "Free (\(remainingFreeAnalyses)/\(freeAnalysisLimit) analyses)"
+            let used = freeAnalysisLimit - remainingFreeAnalyses
+            return "Free (\(used)/\(freeAnalysisLimit) analyses)"
         }
     }
     

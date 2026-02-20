@@ -350,9 +350,11 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
                 return "Pro (Cancels at period end)"
             }
             let periodLabel = isWeeklySubscriber ? "week" : "month"
-            return "Pro (\(remainingProAnalyses)/\(currentProLimit) analyses this \(periodLabel))"
+            let used = currentProLimit - remainingProAnalyses
+            return "Pro (\(used)/\(currentProLimit) analyses this \(periodLabel))"
         } else {
-            return "Free (\(remainingFreeAnalyses)/\(freeAnalysisLimit) analyses)"
+            let used = freeAnalysisLimit - remainingFreeAnalyses
+            return "Free (\(used)/\(freeAnalysisLimit) analyses)"
         }
     }
     

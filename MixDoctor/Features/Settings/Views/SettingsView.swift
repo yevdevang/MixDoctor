@@ -251,7 +251,7 @@ struct SettingsView: View {
                         }
                     }
                     .foregroundStyle(.orange)
-                    .disabled(isClearingAnalysis || !hasNonDemoAnalysis)
+                    .disabled(isClearingAnalysis)
                 }
                 #endif
             }

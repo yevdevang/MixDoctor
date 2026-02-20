@@ -160,8 +160,12 @@ struct PaywallView: View {
     // MARK: - Packages Section
     
     private func packagesSection(offering: Offering) -> some View {
-        VStack(spacing: 16) {
-            ForEach(offering.availablePackages, id: \.identifier) { package in
+        let sortedPackages = offering.availablePackages.sorted { a, b in
+            let order: [PackageType: Int] = [.annual: 0, .monthly: 1, .weekly: 2]
+            return (order[a.packageType] ?? 3) < (order[b.packageType] ?? 3)
+        }
+        return VStack(spacing: 16) {
+            ForEach(sortedPackages, id: \.identifier) { package in
                 PackageCard(
                     package: package,
                     isSelected: selectedPackage?.identifier == package.identifier,
@@ -192,10 +196,10 @@ struct PaywallView: View {
                     } else {
                         // Show final billed amount prominently
                         if let package = selectedPackage {
-                            Text("Subscribe for \(package.localizedPriceString)")
+                            Text("Subscribe for \(package.localizedPriceString) per \(package.packageType == .annual ? "year" : package.packageType == .weekly ? "week" : "month")")
                                 .font(.title3.weight(.semibold))
-                            Text("per \(package.packageType == .annual ? "year" : package.packageType == .weekly ? "week" : "month")")
-                                .font(.subheadline.weight(.medium))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
                         } else {
                             Text("Select a Plan")
                                 .font(.title3.weight(.semibold))
