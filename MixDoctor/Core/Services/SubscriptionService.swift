@@ -9,7 +9,6 @@ import Foundation
 import RevenueCat
 import SwiftUI
 import Combine
-import FirebaseAnalytics
 
 @MainActor
 public final class SubscriptionService: NSObject, ObservableObject, PurchasesDelegate {
@@ -169,7 +168,7 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
             willRenew = proEntitlement.willRenew
             
             // Log trial started event
-            Analytics.logEvent("trial_started", parameters: nil)
+            AnalyticsService.log(.trialStarted)
         } else if hasProEntitlement {
             print("   - Setting isProUser = true")
             isInTrialPeriod = false

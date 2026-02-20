@@ -8,7 +8,6 @@
 import SwiftUI
 import RevenueCat
 import StoreKit
-import FirebaseAnalytics
 
 struct PaywallView: View {
     @Environment(\.dismiss) private var dismiss
@@ -80,6 +79,7 @@ struct PaywallView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button {
+                        AnalyticsService.log(.paywallDismissed)
                         #if targetEnvironment(macCatalyst)
                         onDismiss?()
                         #else
@@ -98,9 +98,9 @@ struct PaywallView: View {
             }
             .task {
                 await loadOfferings()
-                
+
                 // Log paywall shown event
-                Analytics.logEvent("paywall_shown", parameters: nil)
+                AnalyticsService.log(.paywallShown)
             }
             .sheet(isPresented: $showTerms) {
                 TermsView()
@@ -186,8 +186,8 @@ struct PaywallView: View {
         VStack(spacing: 8) {
             Button {
                 // Log upgrade button tapped event
-                Analytics.logEvent("upgrade_button_tapped", parameters: nil)
-                
+                AnalyticsService.log(.upgradeButtonTapped)
+
                 Task {
                     await purchase()
                 }
@@ -340,12 +340,14 @@ struct PaywallView: View {
             
             // Log trial started event if user is in trial period
             if subscriptionService.isInTrialPeriod {
-                Analytics.logEvent("trial_started", parameters: nil)
+                AnalyticsService.log(.trialStarted)
             }
             
             print("   - Will dismiss: \(hasActiveEntitlement || isProOrTrial)")
             
             if hasActiveEntitlement || isProOrTrial {
+                AnalyticsService.log(.purchaseCompleted)
+
                 // Ensure we're on main actor for UI updates
                 await MainActor.run {
                     isPurchasing = false
@@ -371,6 +373,9 @@ struct PaywallView: View {
                 }
             }
         } catch {
+            AnalyticsService.log(.purchaseFailed, parameters: [
+                "error": error.localizedDescription
+            ])
             await MainActor.run {
                 isPurchasing = false
                 errorMessage = "Purchase failed: \(error.localizedDescription)"
@@ -395,14 +400,16 @@ struct PaywallView: View {
             try? await Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
             
             if subscriptionService.isProUser || subscriptionService.isInTrialPeriod {
+                AnalyticsService.log(.restoreCompleted)
+
                 await MainActor.run {
                     isRestoring = false
                     onPurchaseComplete()
                 }
-                
+
                 // Small delay before dismiss
                 try? await Task.sleep(nanoseconds: 200_000_000) // 0.2 seconds
-                
+
                 await MainActor.run {
                     #if targetEnvironment(macCatalyst)
                     // On MacCatalyst, use explicit dismissal callback
@@ -419,6 +426,9 @@ struct PaywallView: View {
                 }
             }
         } catch {
+            AnalyticsService.log(.restoreFailed, parameters: [
+                "error": error.localizedDescription
+            ])
             await MainActor.run {
                 isRestoring = false
                 errorMessage = "Restore failed: \(error.localizedDescription)"

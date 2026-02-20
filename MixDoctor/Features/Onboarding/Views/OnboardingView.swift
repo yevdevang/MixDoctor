@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import FirebaseAnalytics
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -63,7 +62,7 @@ struct OnboardingView: View {
                     Spacer()
                     Button("Skip") {
                         // Log skip event
-                        Analytics.logEvent("onboarding_skipped", parameters: [
+                        AnalyticsService.log(.onboardingSkipped, parameters: [
                             "screen": String(currentPage)
                         ])
                         
@@ -86,11 +85,11 @@ struct OnboardingView: View {
         .ignoresSafeArea()
         .onAppear {
             // Log onboarding started event
-            Analytics.logEvent("onboarding_started", parameters: nil)
+            AnalyticsService.log(.onboardingStarted)
         }
         .onChange(of: currentPage) { _, newPage in
             // Log screen view event when user navigates to a new onboarding screen
-            Analytics.logEvent("onboarding_screen_viewed", parameters: [
+            AnalyticsService.log(.onboardingScreenViewed, parameters: [
                 "screen": String(newPage + 1)  // Screen numbers are 1-indexed for analytics
             ])
         }
@@ -99,7 +98,7 @@ struct OnboardingView: View {
             if !newValue {
                 // Log completion event when onboarding is dismissed via "Get Started"
                 if currentPage == 4 {
-                    Analytics.logEvent("onboarding_completed", parameters: nil)
+                    AnalyticsService.log(.onboardingCompleted)
                 }
             }
         }

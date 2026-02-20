@@ -9,7 +9,6 @@ import SwiftUI
 import SwiftData
 import StoreKit
 import FirebaseCore
-import FirebaseAnalytics
 
 class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
@@ -17,10 +16,12 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         // Skip Firebase during tests
         guard !AppDelegate.isRunningTests else { return true }
 
+        #if !DEBUG
         FirebaseApp.configure()
+        #endif
 
-        // Log app launch event
-        Analytics.logEvent("app_launched", parameters: nil)
+        // Log app launch event (no-op in DEBUG via AnalyticsService)
+        AnalyticsService.log(.appLaunched)
 
         return true
     }
