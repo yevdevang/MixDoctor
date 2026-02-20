@@ -166,9 +166,6 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
             isInTrialPeriod = true
             isProUser = false // Treat trial users as free tier for analysis limits
             willRenew = proEntitlement.willRenew
-            
-            // Log trial started event
-            AnalyticsService.log(.trialStarted)
         } else if hasProEntitlement {
             print("   - Setting isProUser = true")
             isInTrialPeriod = false
@@ -333,11 +330,9 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
     var subscriptionStatus: String {
         if isProUser {
             if !willRenew {
-                return "Pro (Cancels at period end) (\(remainingProAnalyses)/\(proMonthlyLimit))"
+                return "Pro (Cancels at period end)"
             }
-            return "Pro (\(remainingProAnalyses)/\(proMonthlyLimit) analyses this month)"
-        } else if isInTrialPeriod {
-            return "Trial (\(remainingFreeAnalyses)/\(freeAnalysisLimit) analyses)"
+            return "Pro (Unlimited analyses)"
         } else {
             return "Free (\(remainingFreeAnalyses)/\(freeAnalysisLimit) analyses)"
         }

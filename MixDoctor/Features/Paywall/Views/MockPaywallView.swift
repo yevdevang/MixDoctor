@@ -38,10 +38,7 @@ struct MockPaywallView: View {
                         
                         // Purchase button
                         purchaseButton
-                        
-                        // Skip trial button (testing only)
-                        skipTrialButton
-                        
+
                         // Restore button
                         restoreButton
                         
@@ -105,22 +102,16 @@ struct MockPaywallView: View {
             
             MockFeatureRow(
                 icon: "infinity",
-                title: "50 Analyses per Month",
-                description: "Pro subscribers get 50 analyses monthly"
+                title: "Unlimited AI Analysis",
+                description: "Analyze unlimited mixes with AI feedback"
             )
-            
+
             MockFeatureRow(
-                icon: "sparkles",
-                title: "Advanced AI",
-                description: "Powered by OpenAI's latest models"
+                icon: "music.note.list",
+                title: "4 Sample Tracks Included",
+                description: "Learn from pre-analyzed professional mixes"
             )
-            
-            MockFeatureRow(
-                icon: "chart.xyaxis.line",
-                title: "Detailed Reports",
-                description: "Get comprehensive mix analysis"
-            )
-            
+
             MockFeatureRow(
                 icon: "star.fill",
                 title: "Priority Support",
@@ -161,7 +152,7 @@ struct MockPaywallView: View {
                     ProgressView()
                         .tint(.white)
                 } else {
-                    Text("Start 7-Day Free Trial")
+                    Text("Subscribe Now")
                         .font(.headline)
                 }
             }
@@ -177,42 +168,6 @@ struct MockPaywallView: View {
                     endPoint: .trailing
                 )
             )
-            .foregroundColor(.white)
-            .cornerRadius(12)
-        }
-        .disabled(isPurchasing)
-    }
-    
-    // MARK: - Skip Trial Button
-    
-    private var skipTrialButton: some View {
-        Button {
-            Task {
-                isPurchasing = true
-                let success = await mockService.mockPurchaseSkipTrial(packageId: selectedPackageId)
-                isPurchasing = false
-                
-                if success {
-                    onPurchaseComplete()
-                    dismiss()
-                } else {
-                    errorMessage = "Failed to skip trial and subscribe"
-                    showError = true
-                }
-            }
-        } label: {
-            HStack {
-                if isPurchasing {
-                    ProgressView()
-                } else {
-                    Image(systemName: "bolt.fill")
-                    Text("Skip Trial - Subscribe Now")
-                }
-            }
-            .font(.headline)
-            .frame(maxWidth: .infinity)
-            .padding()
-            .background(Color.purple)
             .foregroundColor(.white)
             .cornerRadius(12)
         }
@@ -272,17 +227,6 @@ struct MockPaywallView: View {
                 .cornerRadius(6)
             }
             
-            if mockService.isInTrialPeriod {
-                Button("Convert Trial → Paid") {
-                    mockService.mockConvertTrialToPaid()
-                }
-                .font(.caption2)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(Color.green.opacity(0.2))
-                .foregroundColor(.green)
-                .cornerRadius(6)
-            }
         }
         .padding(.vertical, 8)
         .padding(.horizontal)
@@ -294,11 +238,11 @@ struct MockPaywallView: View {
     
     private var footerSection: some View {
         VStack(spacing: 8) {
-            Text("7-day free trial with 4 analyses, then \(selectedPackageId == "annual" ? "$47.88/year" : selectedPackageId == "weekly" ? "$2.99/week" : "$5.99/month")")
+            Text("Payment starts immediately. Cancel anytime.")
                 .font(.caption2.bold())
                 .foregroundStyle(.primary)
-            
-            Text("Test Pro features during trial. Continue with 4 analyses/month free or subscribe for 50 analyses/month.")
+
+            Text("Free users get 4 analyses per month and demo tracks. Upgrade to Pro for unlimited AI analysis and premium features.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

@@ -39,7 +39,6 @@ enum AnalyticsEvent: String {
     case paywallShown = "paywall_shown"
     case paywallDismissed = "paywall_dismissed"
     case upgradeButtonTapped = "upgrade_button_tapped"
-    case trialStarted = "trial_started"
     case purchaseCompleted = "purchase_completed"
     case purchaseFailed = "purchase_failed"
     case restoreCompleted = "restore_completed"

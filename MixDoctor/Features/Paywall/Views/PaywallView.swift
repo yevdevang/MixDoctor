@@ -23,19 +23,6 @@ struct PaywallView: View {
     let onPurchaseComplete: () -> Void
     let onDismiss: (() -> Void)?
     
-    // Helper functions for trial detection
-    private func hasFreeTrial(for package: Package) -> Bool {
-        // Default to 3-day trial if we can't detect it
-        // This is safer than trying to access StoreKit APIs that may vary
-        return true // Assume free trial exists (configured in App Store Connect)
-    }
-    
-    private func getTrialPeriodDays(for package: Package) -> Int? {
-        // Default to 3 days if we can't detect it programmatically
-        // This matches your App Store Connect configuration
-        return 3
-    }
-    
     var body: some View {
         NavigationStack {
             ZStack {
@@ -119,7 +106,7 @@ struct PaywallView: View {
                 .font(.largeTitle.bold())
                 .foregroundColor(.black)
             
-            Text("Get 50 audio analyses and access to all premium features")
+            Text("Get unlimited AI analysis and access to all premium features")
                 .font(.title3)
                 .foregroundColor(.gray)
                 .multilineTextAlignment(.center)
@@ -136,22 +123,16 @@ struct PaywallView: View {
             
             PaywallFeatureRow(
                 icon: "infinity",
-                title: "50 Analyses per Month",
-                description: "Pro subscribers get 50 analyses monthly"
+                title: "Unlimited AI Analysis",
+                description: "Analyze unlimited mixes with AI feedback"
             )
-            
+
             PaywallFeatureRow(
-                icon: "sparkles",
-                title: "Advanced AI Analysis",
-                description: "Powered by Claude Sonnet 4.5"
+                icon: "music.note.list",
+                title: "4 Sample Tracks Included",
+                description: "Learn from pre-analyzed professional mixes"
             )
-            
-            PaywallFeatureRow(
-                icon: "chart.xyaxis.line",
-                title: "Detailed Reports",
-                description: "Get comprehensive mix analysis"
-            )
-            
+
             PaywallFeatureRow(
                 icon: "star.fill",
                 title: "Priority Support",
@@ -199,19 +180,10 @@ struct PaywallView: View {
                     } else {
                         // Show final billed amount prominently
                         if let package = selectedPackage {
-                            let hasTrial = hasFreeTrial(for: package)
-                            
-                            if hasTrial {
-                                Text("Start Free Trial")
-                                    .font(.title3.weight(.semibold))
-                                Text("Then \(package.localizedPriceString) per \(package.packageType == .annual ? "year" : package.packageType == .weekly ? "week" : "month")")
-                                    .font(.subheadline.weight(.medium))
-                            } else {
-                                Text("Subscribe for \(package.localizedPriceString)")
-                                    .font(.title3.weight(.semibold))
-                                Text("per \(package.packageType == .annual ? "year" : package.packageType == .weekly ? "week" : "month")")
-                                    .font(.subheadline.weight(.medium))
-                            }
+                            Text("Subscribe for \(package.localizedPriceString)")
+                                .font(.title3.weight(.semibold))
+                            Text("per \(package.packageType == .annual ? "year" : package.packageType == .weekly ? "week" : "month")")
+                                .font(.subheadline.weight(.medium))
                         } else {
                             Text("Select a Plan")
                                 .font(.title3.weight(.semibold))
@@ -238,20 +210,10 @@ struct PaywallView: View {
             .opacity(selectedPackage == nil ? 0.6 : 1.0)
             
             // Clear payment timing info below button
-            if let package = selectedPackage {
-                let hasTrial = hasFreeTrial(for: package)
-                let trialDays = getTrialPeriodDays(for: package)
-                
-                if hasTrial, let days = trialDays {
-                    
-                    Text("Payment starts after \(days)-day free trial")
-                        .font(.caption.weight(.semibold))
-                        .foregroundColor(.gray)
-                } else {
-                    Text("Payment starts immediately")
-                        .font(.caption.weight(.semibold))
-                        .foregroundColor(.gray)
-                }
+            if selectedPackage != nil {
+                Text("Payment starts immediately. Cancel anytime.")
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(.gray)
             }
         }
     }
@@ -280,7 +242,7 @@ struct PaywallView: View {
     
     private var footerSection: some View {
         VStack(spacing: 12) {
-            Text("Free trial gives you 4 analyses to test Pro features. After trial, continue with 4 free analyses/month or get 50 analyses/month with Pro subscription. Cancel anytime.")
+            Text("Free users get 4 analyses per month and demo tracks. Upgrade to Pro for unlimited AI analysis and premium features. Cancel anytime.")
                 .font(.caption)
                 .foregroundColor(.gray)
                 .multilineTextAlignment(.center)
@@ -332,19 +294,13 @@ struct PaywallView: View {
             try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
             
             print("   - subscriptionService.isProUser: \(subscriptionService.isProUser)")
-            print("   - subscriptionService.isInTrialPeriod: \(subscriptionService.isInTrialPeriod)")
-            
-            // Verify purchase was successful (trial or paid)
+
+            // Verify purchase was successful
             let hasActiveEntitlement = customerInfo.entitlements["pro"]?.isActive == true
             let isProOrTrial = subscriptionService.isProUser || subscriptionService.isInTrialPeriod
-            
-            // Log trial started event if user is in trial period
-            if subscriptionService.isInTrialPeriod {
-                AnalyticsService.log(.trialStarted)
-            }
-            
+
             print("   - Will dismiss: \(hasActiveEntitlement || isProOrTrial)")
-            
+
             if hasActiveEntitlement || isProOrTrial {
                 AnalyticsService.log(.purchaseCompleted)
 
@@ -490,21 +446,6 @@ private struct PackageCard: View {
         package.localizedPriceString
     }
     
-    // Get free trial period info
-    // Simplified: Assume 3-day free trial as configured in App Store Connect
-    // This avoids complex StoreKit API differences between versions
-    private var hasFreeTrial: Bool {
-        // Check if package has an introductory offer by checking if storeProduct has one
-        // For simplicity, we'll assume all packages have a 3-day trial
-        // This matches your App Store Connect configuration
-        return true
-    }
-    
-    private var trialPeriodDays: Int? {
-        // Return 3 days as configured in App Store Connect
-        return 3
-    }
-    
     private var pricePerMonth: String {
         if isAnnual {
             let price = package.storeProduct.price
@@ -565,25 +506,9 @@ private struct PackageCard: View {
                         .font(.system(size: 36, weight: .bold, design: .rounded))
                         .foregroundColor(.black)
                     
-                    // When payment starts - clearly shown
-                    if hasFreeTrial, let days = trialPeriodDays {
-                        HStack(spacing: 3) {
-                            Text("\(days)-day free trial, then")
-                                .font(.caption.weight(.medium))
-                                .foregroundColor(.gray)
-                            Text(finalBilledAmount)
-                                .font(.caption.weight(.semibold))
-                                .foregroundColor(.gray)
-                            Text("per \(periodLabel)")
-                                .font(.caption.weight(.medium))
-                                .foregroundColor(.gray)
-                        }
-                        .lineLimit(1)
-                    } else {
-                        Text("per \(periodLabel)")
-                            .font(.subheadline)
-                            .foregroundColor(.gray)
-                    }
+                    Text("per \(periodLabel)")
+                        .font(.subheadline)
+                        .foregroundColor(.gray)
                     
                     // Monthly equivalent (secondary, smaller)
                     if isAnnual {

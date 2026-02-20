@@ -139,12 +139,14 @@ final class MockSubscriptionService {
         let success = true // Int.random(in: 1...10) <= 9
         
         if success {
-            // Simulate starting a trial
-            isInTrialPeriod = true
-            isProUser = false // Trial users treated as free tier
+            // Go straight to paid subscription (no trial)
+            isInTrialPeriod = false
+            isProUser = true
             hasReachedFreeLimit = false
-            remainingFreeAnalyses = freeAnalysisLimit // Reset to 4 analyses for trial
-            trialStartDate = Date() // Track when trial started
+            remainingFreeAnalyses = 0 // Not used for Pro users
+            remainingProAnalyses = proMonthlyLimit
+            proAnalysisResetDate = Calendar.current.date(byAdding: .month, value: 1, to: Date())
+            trialStartDate = nil
             saveState()
         }
         
@@ -243,9 +245,7 @@ final class MockSubscriptionService {
     
     var subscriptionStatus: String {
         if isProUser {
-            return "Pro (\(remainingProAnalyses)/\(proMonthlyLimit) analyses this month)"
-        } else if isInTrialPeriod {
-            return "Trial (\(remainingFreeAnalyses)/\(freeAnalysisLimit) analyses)"
+            return "Pro (Unlimited analyses)"
         } else {
             return "Free (\(remainingFreeAnalyses)/\(freeAnalysisLimit) analyses)"
         }
