@@ -156,6 +156,7 @@ struct StatCard: View {
 
 struct AudioFileRow: View {
     let audioFile: AudioFile
+    var index: Int? = nil
     var onDelete: (() -> Void)? = nil
     var isAnalyzing: Bool = false
     
@@ -214,6 +215,26 @@ struct AudioFileRow: View {
                     }
                     .frame(width: 40, height: 40)
                     .padding(3)
+                }
+
+                // Index number badge at bottom-left
+                if let index {
+                    VStack {
+                        Spacer()
+                        HStack {
+                            Text("\(index)")
+                                .font(.system(size: 9, weight: .bold, design: .rounded))
+                                .foregroundStyle(.white)
+                                .frame(width: 16, height: 16)
+                                .background(
+                                    Circle()
+                                        .fill(statusColor.opacity(0.85))
+                                )
+                            Spacer()
+                        }
+                    }
+                    .frame(width: 40, height: 40)
+                    .offset(x: -4, y: 4)
                 }
             }
 

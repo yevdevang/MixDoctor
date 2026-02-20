@@ -611,12 +611,13 @@ struct DashboardView: View {
     
     private var filesList: some View {
         List {
-            ForEach(filteredFiles) { file in
+            ForEach(Array(filteredFiles.enumerated()), id: \.element.id) { index, file in
                 Button {
                     handleAudioFileSelection(file)
                 } label: {
                     AudioFileRow(
                         audioFile: file,
+                        index: index + 1,
                         onDelete: file.isDemoFile ? nil : {
 #if targetEnvironment(macCatalyst)
                             fileToDelete = file
