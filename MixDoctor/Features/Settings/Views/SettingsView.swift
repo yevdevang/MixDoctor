@@ -337,74 +337,72 @@ struct SettingsView: View {
     private func clearAllAnalysis() {
         Task { @MainActor in
             isClearingAnalysis = true
-            
+
             do {
                 // Fetch all audio files
                 let audioFilesDescriptor = FetchDescriptor<AudioFile>()
                 let audioFiles = try modelContext.fetch(audioFilesDescriptor)
-                
+
                 print("🧹 Clearing analysis for \(audioFiles.count) files...")
 
                 // Record the clear date so iCloud-restored JSONs won't be re-loaded
                 AnalysisResultPersistence.shared.recordAnalysisClearDate()
 
-                // Step 1: Delete JSON files from iCloud (prevent re-loading), skip demo files
-                var jsonDeletedCount = 0
-                for audioFile in audioFiles where !audioFile.isDemoFile {
-                    if audioFile.analysisResult != nil {
-                        // Delete the JSON file for this audio file
-                        AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: audioFile.fileName, isDemo: audioFile.isDemoFile)
-                        jsonDeletedCount += 1
-                        print("🗑️ Deleted JSON for: \(audioFile.fileName)")
-                    }
-                }
-                print("💾 Deleted \(jsonDeletedCount) JSON files from iCloud")
+                // Step 1: Delete JSON files from iCloud on background thread (file I/O)
+                let filesToDelete = audioFiles
+                    .filter { !$0.isDemoFile }
+                    .map { (fileName: $0.fileName, isDemo: $0.isDemoFile) }
 
-                // Step 2: Clear the relationship from SwiftData (don't delete yet), skip demo files
+                await Task.detached(priority: .utility) {
+                    for file in filesToDelete {
+                        AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: file.fileName, isDemo: file.isDemo)
+                    }
+                }.value
+                print("💾 Deleted \(filesToDelete.count) JSON files")
+
+                // Step 2: Delete AnalysisResult objects and clear relationships for non-demo files
                 var clearedCount = 0
                 for audioFile in audioFiles where !audioFile.isDemoFile {
-                    if audioFile.analysisResult != nil {
+                    // Delete the AnalysisResult directly from context
+                    if let result = audioFile.analysisResult {
                         audioFile.analysisResult = nil
-                        audioFile.dateAnalyzed = nil
-                        clearedCount += 1
-                        print("✅ Cleared relationship for: \(audioFile.fileName)")
-                    }
-                }
-                
-                // Step 3: Save to commit relationship changes
-                try modelContext.save()
-                print("💾 Saved relationship changes for \(clearedCount) files")
-                
-                // Step 4: Now fetch and delete orphaned AnalysisResults from SwiftData
-                let analysisDescriptor = FetchDescriptor<AnalysisResult>()
-                let allAnalysisResults = try modelContext.fetch(analysisDescriptor)
-                
-                var deletedCount = 0
-                for result in allAnalysisResults {
-                    // Delete only orphaned results (no associated audio file)
-                    if result.audioFile == nil {
                         modelContext.delete(result)
-                        deletedCount += 1
                     }
+                    // Also delete analysis history
+                    for historyResult in audioFile.analysisHistory {
+                        modelContext.delete(historyResult)
+                    }
+                    audioFile.analysisHistory = []
+                    audioFile.dateAnalyzed = nil
+                    clearedCount += 1
                 }
-                
-                // Step 5: Final save to commit deletions
+
+                // Step 3: Save all changes in one batch
                 try modelContext.save()
-                print("🗑️ Deleted \(deletedCount) orphaned analysis results from SwiftData")
-                
-                // Verify remaining files
-                let remainingFiles = try modelContext.fetch(audioFilesDescriptor)
-                print("✅ Successfully cleared all analysis data")
-                print("📊 Audio files remaining: \(remainingFiles.count) (should be \(audioFiles.count))")
-                print("📊 Files now ready for re-analysis")
-                
+                print("✅ Cleared analysis for \(clearedCount) files")
+
+                // Yield to let UI update
+                await Task.yield()
+
+                // Step 4: Clean up any remaining orphaned AnalysisResults
+                let analysisDescriptor = FetchDescriptor<AnalysisResult>()
+                let remainingResults = try modelContext.fetch(analysisDescriptor)
+                let orphaned = remainingResults.filter { $0.audioFile == nil || $0.audioFile?.isDemoFile == false }
+                for result in orphaned {
+                    modelContext.delete(result)
+                }
+                if !orphaned.isEmpty {
+                    try modelContext.save()
+                    print("🗑️ Cleaned up \(orphaned.count) orphaned results")
+                }
+
                 // Small delay for visual feedback
                 try? await Task.sleep(nanoseconds: 500_000_000)
-                
+
             } catch {
                 print("❌ Error clearing analysis: \(error.localizedDescription)")
             }
-            
+
             isClearingAnalysis = false
         }
     }
