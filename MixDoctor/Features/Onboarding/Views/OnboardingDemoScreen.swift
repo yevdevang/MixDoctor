@@ -34,7 +34,7 @@ struct OnboardingDemoScreen: View {
                 .padding(.horizontal, 40)
 
             // Steps
-            VStack(spacing: 20) {
+            VStack(alignment: .leading, spacing: 20) {
                 OnboardingStep(
                     icon: "waveform",
                     title: "Mix & Master Files",
@@ -53,7 +53,7 @@ struct OnboardingDemoScreen: View {
                     description: "When you're ready, import your own mixes"
                 )
             }
-            .padding(.horizontal, 40)
+            .frame(maxWidth: 400)
             .padding(.top, 8)
 
             Spacer()

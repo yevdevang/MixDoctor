@@ -350,7 +350,6 @@ struct SettingsView: View {
 
                 // Step 1: Delete JSON files from iCloud on background thread (file I/O)
                 let filesToDelete = audioFiles
-                    .filter { !$0.isDemoFile }
                     .map { (fileName: $0.fileName, isDemo: $0.isDemoFile) }
 
                 await Task.detached(priority: .utility) {
@@ -360,41 +359,27 @@ struct SettingsView: View {
                 }.value
                 print("💾 Deleted \(filesToDelete.count) JSON files")
 
-                // Step 2: Delete AnalysisResult objects and clear relationships for non-demo files
+                // Step 2: Clear relationships for ALL files (including demos).
+                // Setting analysisResult = nil triggers cascade delete of the
+                // AnalysisResult object automatically — do NOT call
+                // modelContext.delete() on the same object (double-delete crash).
                 var clearedCount = 0
-                for audioFile in audioFiles where !audioFile.isDemoFile {
-                    // Delete the AnalysisResult directly from context
-                    if let result = audioFile.analysisResult {
-                        audioFile.analysisResult = nil
-                        modelContext.delete(result)
-                    }
-                    // Also delete analysis history
-                    for historyResult in audioFile.analysisHistory {
-                        modelContext.delete(historyResult)
-                    }
+                for audioFile in audioFiles {
+                    audioFile.analysisResult = nil
                     audioFile.analysisHistory = []
                     audioFile.dateAnalyzed = nil
                     clearedCount += 1
                 }
 
-                // Step 3: Save all changes in one batch
+                // Step 3: Save all changes in one batch.
+                // Cascade delete rule on AudioFile.analysisResult and
+                // AudioFile.analysisHistory automatically removes the
+                // AnalysisResult objects — no separate orphan cleanup needed.
                 try modelContext.save()
                 print("✅ Cleared analysis for \(clearedCount) files")
 
-                // Yield to let UI update
-                await Task.yield()
-
-                // Step 4: Clean up any remaining orphaned AnalysisResults
-                let analysisDescriptor = FetchDescriptor<AnalysisResult>()
-                let remainingResults = try modelContext.fetch(analysisDescriptor)
-                let orphaned = remainingResults.filter { $0.audioFile == nil || $0.audioFile?.isDemoFile == false }
-                for result in orphaned {
-                    modelContext.delete(result)
-                }
-                if !orphaned.isEmpty {
-                    try modelContext.save()
-                    print("🗑️ Cleaned up \(orphaned.count) orphaned results")
-                }
+                // Notify Dashboard to invalidate its cache and refresh
+                NotificationCenter.default.post(name: .analysisCleared, object: nil)
 
                 // Small delay for visual feedback
                 try? await Task.sleep(nanoseconds: 500_000_000)

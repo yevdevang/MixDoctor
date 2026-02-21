@@ -22,13 +22,11 @@ struct OnboardingStep: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
                     .font(.headline)
-                
+
                 Text(description)
                     .font(.subheadline)
                     .foregroundColor(.secondary)
             }
-            
-            Spacer()
         }
     }
 }

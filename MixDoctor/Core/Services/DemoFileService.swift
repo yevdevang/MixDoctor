@@ -64,14 +64,15 @@ final class DemoFileService {
         )
         let existingDemoFiles = (try? modelContext.fetch(descriptor)) ?? []
 
-        // If we already have demo files, skip
-        if existingDemoFiles.count >= Self.demoFiles.count {
+        // Get existing demo file display names to avoid duplicates
+        let existingNames = Set(existingDemoFiles.map { $0.fileName })
+
+        // If all demo files already exist by name, skip
+        let allDemoFilesExist = Self.demoFiles.allSatisfy { existingNames.contains($0.displayName) }
+        if allDemoFilesExist {
             UserDefaults.standard.set(true, forKey: hasLoadedKey)
             return
         }
-
-        // Get existing demo file display names to avoid duplicates
-        let existingNames = Set(existingDemoFiles.map { $0.fileName })
 
         let audioDir = iCloudStorageService.shared.getAudioFilesDirectory()
 

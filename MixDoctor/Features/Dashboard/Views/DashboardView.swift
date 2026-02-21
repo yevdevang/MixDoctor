@@ -187,6 +187,16 @@ struct DashboardView: View {
                 updateStatistics()
             }
 #endif
+            .onReceive(NotificationCenter.default.publisher(for: .analysisCleared)) { _ in
+                // Invalidate cached filtered files so the UI reflects cleared analysis
+                cachedFilteredFiles = []
+                lastFilterHash = 0
+#if targetEnvironment(macCatalyst)
+                reloadAudioFiles()
+#else
+                updateStatistics()
+#endif
+            }
     }
     
     private var contentStack: some View {
@@ -257,7 +267,9 @@ struct DashboardView: View {
         // Statistics will be updated by loadAudioFiles() in performInitialSync
         
         // Mark initial load complete after a short delay to allow files to load
+        // Also reload files to pick up demo files that may have been inserted by DemoFileService
         try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+        await loadAudioFiles()
         await MainActor.run {
             isInitialLoad = false
         }
@@ -1311,8 +1323,7 @@ struct DashboardView: View {
             checkedFiles.insert(file)
         }
         
-        // Delete all identified duplicates (never delete demo files)
-        duplicatesToDelete = duplicatesToDelete.filter { !$0.isDemoFile }
+        // Delete all identified duplicates (including demo file duplicates from CloudKit sync)
         if !duplicatesToDelete.isEmpty {
             for duplicate in duplicatesToDelete {
                 modelContext.delete(duplicate)

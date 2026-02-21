@@ -16,7 +16,11 @@ struct OnboardingButton: View {
             Text(title)
                 .font(.headline)
                 .foregroundColor(.white)
+                #if targetEnvironment(macCatalyst)
+                .frame(maxWidth: 400)
+                #else
                 .frame(maxWidth: .infinity)
+                #endif
                 .frame(height: 50)
                 .background(Color.primaryAccent)
                 .cornerRadius(12)
