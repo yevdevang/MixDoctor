@@ -88,7 +88,7 @@ struct MockPaywallView: View {
                     .font(.title.bold())
                     .multilineTextAlignment(.center)
 
-                Text("Upgrade for unlimited AI-powered mix feedback")
+                Text("Upgrade for up to 50 AI-powered mix analyses per month")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -96,7 +96,7 @@ struct MockPaywallView: View {
                 Text("Unlock Pro Features")
                     .font(.title.bold())
 
-                Text("Get unlimited access to advanced AI-powered mix analysis and professional features")
+                Text("Get up to 50 AI analyses per month and access to professional features")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -112,9 +112,9 @@ struct MockPaywallView: View {
                 .font(.headline)
             
             MockFeatureRow(
-                icon: "infinity",
-                title: "Unlimited AI Analysis",
-                description: "Analyze unlimited mixes with AI feedback"
+                icon: "waveform.badge.plus",
+                title: "Up to 50 Analyses/Month",
+                description: "Analyze your mixes with AI-powered feedback"
             )
 
             MockFeatureRow(
@@ -253,7 +253,7 @@ struct MockPaywallView: View {
                 .font(.caption2.bold())
                 .foregroundStyle(.primary)
 
-            Text("Free users get 4 analyses per month and demo tracks. Upgrade to Pro for unlimited AI analysis and premium features.")
+            Text("Free users get 4 analyses per month and demo tracks. Upgrade to Pro for up to 50 AI analyses per month and premium features.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
