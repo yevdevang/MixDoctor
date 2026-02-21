@@ -127,15 +127,19 @@ struct PaywallView: View {
     
     // MARK: - Features Section
     
+    private var analysisLimitTitle: String {
+        selectedPackage?.packageType == .weekly ? "Up to 10 Analyses/Week" : "Up to 50 Analyses/Month"
+    }
+
     private var featuresSection: some View {
         VStack(alignment: .leading, spacing: 24) {
             Text("Premium Features")
                 .font(.title2.weight(.semibold))
                 .foregroundColor(.primary)
-            
+
             PaywallFeatureRow(
                 icon: "waveform.badge.plus",
-                title: "Up to 50 Analyses/Month",
+                title: analysisLimitTitle,
                 description: "Analyze your mixes with AI-powered feedback"
             )
 

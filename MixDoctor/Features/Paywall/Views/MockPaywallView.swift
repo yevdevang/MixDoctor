@@ -106,14 +106,18 @@ struct MockPaywallView: View {
     
     // MARK: - Features Section
     
+    private var analysisLimitTitle: String {
+        selectedPackageId == "weekly" ? "Up to 10 Analyses/Week" : "Up to 50 Analyses/Month"
+    }
+
     private var featuresSection: some View {
         VStack(alignment: .leading, spacing: 20) {
             Text("Premium Features")
                 .font(.headline)
-            
+
             MockFeatureRow(
                 icon: "waveform.badge.plus",
-                title: "Up to 50 Analyses/Month",
+                title: analysisLimitTitle,
                 description: "Analyze your mixes with AI-powered feedback"
             )
 
