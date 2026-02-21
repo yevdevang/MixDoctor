@@ -39,6 +39,7 @@ struct OnboardingView: View {
             }
             .tabViewStyle(.page)
             .indexViewStyle(.page(backgroundDisplayMode: .always))
+            .ignoresSafeArea()
             .onAppear {
                 #if canImport(UIKit)
                 // Set page indicator color to purple (primaryAccent)
@@ -65,24 +66,20 @@ struct OnboardingView: View {
                         AnalyticsService.log(.onboardingSkipped, parameters: [
                             "screen": String(currentPage)
                         ])
-                        
+
                         withAnimation {
                             isPresented = false
                         }
-                        
+
                         // Post notification when onboarding is skipped
                         NotificationCenter.default.post(name: NSNotification.Name("OnboardingCompleted"), object: nil)
                     }
                     .foregroundStyle(Color.primaryAccent)
                     .padding()
-                    #if canImport(UIKit)
-                    .padding(.top, UIDevice.current.userInterfaceIdiom == .pad ? 20 : 0)
-                    #endif
                 }
                 Spacer()
             }
         }
-        .ignoresSafeArea()
         .onAppear {
             // Log onboarding started event
             AnalyticsService.log(.onboardingStarted)
