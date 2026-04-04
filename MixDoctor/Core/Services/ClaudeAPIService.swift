@@ -137,7 +137,10 @@ class ClaudeAPIService {
         if frequencyTotal < 1.0 {
             print("⚠️ WARNING: All frequency bands are near zero — AnalysisResult may not be fully populated")
         }
-        
+
+        // Validate metrics before building any prompt
+        try validateMetrics(metrics)
+
         // Detect track type and genre
         // User-selected stage takes PRIORITY over metrics detection
         let stageLower = mixStage?.lowercased() ?? ""
@@ -1529,6 +1532,30 @@ class ClaudeAPIService {
     
     
     
+    private func validateMetrics(_ metrics: AudioMetricsForClaude) throws {
+        // All-zeros check — fired when audio read fails silently
+        if metrics.loudness == 0.0 && metrics.peakLevel == 0.0 &&
+           metrics.stereoWidth == 0.0 && metrics.phaseCoherence == 0.0 &&
+           metrics.dynamicRange == 0.0 {
+            throw AudioAnalysisError.allZeroMetrics
+        }
+        guard (-70.0...0.0).contains(metrics.loudness) else {
+            throw AudioAnalysisError.invalidLoudness(metrics.loudness)
+        }
+        guard (-60.0...0.0).contains(metrics.peakLevel) else {
+            throw AudioAnalysisError.invalidPeakLevel(metrics.peakLevel)
+        }
+        guard (0.0...100.0).contains(metrics.stereoWidth) else {
+            throw AudioAnalysisError.invalidStereoWidth(metrics.stereoWidth)
+        }
+        guard (-1.0...1.0).contains(metrics.phaseCoherence) else {
+            throw AudioAnalysisError.invalidPhaseCoherence(metrics.phaseCoherence)
+        }
+        guard (0.0...60.0).contains(metrics.dynamicRange) else {
+            throw AudioAnalysisError.invalidDynamicRange(metrics.dynamicRange)
+        }
+    }
+
     private func createMasteredTrackPrompt(metrics: AudioMetricsForClaude, genre: String) -> String {
         return """
         You are analyzing a MASTERED TRACK using industry-standard professional mastering metrics.
@@ -1592,62 +1619,79 @@ class ClaudeAPIService {
         • Dynamic Range Issues: \(metrics.hasDynamicRangeIssues ? "❌ YES" : "✅ No")
         
         🎯 SCORING RULES (0-100 scale):
-        
-        Start with base score of 80 points (INCREASED from 75 - be more generous!).
-        
+
+        Start with base score of 85 points.
+
+        GENRE-SPECIFIC SCORING ADJUSTMENTS (apply BEFORE penalties):
+        The selected genre is: \(genre)
+
+        Electronic/EDM/Hip-Hop/Trap:
+        • Low End 40-60%: NORMAL — no frequency penalty
+        • Loudness -8 to -6 LUFS: NORMAL for club/streaming masters — no loudness deduction
+        • Dynamic Range 4-8 dB: NORMAL (brickwall limiting is intentional) — no DR penalty
+
+        Acoustic/Classical/Jazz/Singer-Songwriter:
+        • Low End 12-25%: NORMAL — no frequency penalty
+        • Loudness -20 to -16 LUFS: NORMAL for natural dynamics — no loudness deduction
+        • Dynamic Range 10-22 dB: EXPECTED — no DR penalty
+
+        Rock/Pop (default baseline):
+        • Low End 20-40%: NORMAL — no frequency penalty
+        • Loudness -10 to -6 LUFS: NORMAL — no loudness deduction
+
         APPLY THRESHOLDS (use the warning thresholds above):
-        
+
         STEREO WIDTH:
         • 20-90%: Good (no change)
         • 15-20% OR 90-95%: Minor issue (-3 points)
         • <15% OR >95%: Problem (-8 points)
-        
+
         PHASE CORRELATION:
         • ≥0.4 (40%): Good (no change)
         • 0.3-0.4 (30-40%): Minor issues (-3 points)
         • <0.3 (30%): Phase issues (-8 points)
-        
+
         MONO COMPATIBILITY:
         • ≤3dB loss: Good (no change)
         • 3-5dB loss: Minor issue (-5 points)
         • >5dB loss: Fail (-12 points)
-        
+
         PEAK LEVEL:
         • ≤-0.1 dBFS: Good (+5 points)
         • -0.1 to 0 dBFS: Minor clipping risk (-5 points)
         • >0 dBFS: Clipping (-15 points)
-        
-        LOUDNESS (IMPROVED - more realistic for mastered tracks):
+
+        LOUDNESS (apply genre-specific norms from above first):
         • -10 to -6 LUFS: Modern streaming master (+10 points)
         • -16 to -10 LUFS: Professional master (+5 points)
-        • -20 to -16 LUFS: Acceptable (-2 points)
-        • <-20 LUFS: Too quiet (-5 points)
-        • >-6 LUFS: Too loud (-8 points)
-        
-        DYNAMIC RANGE:
+        • -20 to -16 LUFS: Acceptable (-2 points) [waived for Acoustic/Classical/Jazz]
+        • <-20 LUFS: Too quiet (-5 points) [waived for Acoustic/Classical/Jazz]
+        • >-6 LUFS: Too loud (-8 points) [waived for Electronic/EDM/Hip-Hop]
+
+        DYNAMIC RANGE (apply genre-specific norms from above first):
         • ≥8 DR: Good (+5 points)
         • 6-8 DR: Acceptable (no change)
-        • 4-6 DR: Compressed (-5 points)
-        • <4 DR: Over-compressed (-10 points)
-        
+        • 4-6 DR: Compressed (-5 points) [waived for Electronic/EDM/Hip-Hop/Trap]
+        • <4 DR: Over-compressed (-10 points) [waived for Electronic/EDM/Hip-Hop/Trap]
+
         CREST FACTOR:
         • ≥8 dB: Excellent dynamics (+5 points)
         • 6-8 dB: Good dynamics (+3 points)
         • 4-6 dB: Moderate compression (no change)
         • <4 dB: Crushed dynamics (-8 points)
-        
+
         FREQUENCY BALANCE:
         • Only penalize SEVERE imbalances (>75% bass, <2% highs, etc.)
-        • Genre-specific frequency characteristics are ACCEPTABLE
+        • Genre-specific frequency characteristics are ACCEPTABLE (see genre norms above)
         • Dark/warm masters (low highs) are PROFESSIONAL choices, not problems
         • Slight imbalances (60-75% bass) are only -3 points
-        
+
         IMPORTANT: Mastered tracks with good metrics should score 85-100
         • No clipping + good loudness + balanced frequencies = 88-95
         • Professional masters from Abbey Road, etc. should score 90-100
         • Be GENEROUS with scoring - real professional tracks should score high!
-        
-        Calculate final score: Base 80 + bonuses - penalties (cap 0-100)
+
+        Final score = min(100, max(0, base + bonuses - penalties))
         
         📝 RESPONSE FORMAT (CRITICAL - FOLLOW EXACTLY):
         
@@ -1698,21 +1742,37 @@ class ClaudeAPIService {
         • Dynamic Range Issues: \(metrics.hasDynamicRangeIssues ? "❌ YES (Penalty)" : "✅ No")
         
         PRE-MASTER SCORING (Start: 88 base - BE VERY LENIENT!):
-        
+
+        GENRE-SPECIFIC SCORING ADJUSTMENTS (apply BEFORE penalties):
+        The selected genre is: \(genre)
+
+        Electronic/EDM/Hip-Hop/Trap:
+        • Low End 40-60%: NORMAL — no frequency penalty
+        • Loudness -8 to -6 LUFS: NORMAL for pre-masters targeting club play — no loudness deduction
+        • Dynamic Range 4-8 dB: NORMAL (heavy bus limiting is common) — no DR penalty
+
+        Acoustic/Classical/Jazz/Singer-Songwriter:
+        • Low End 12-25%: NORMAL — no frequency penalty
+        • Loudness -23 to -16 LUFS: NORMAL (natural dynamics preserved) — no loudness deduction
+        • Dynamic Range 10-22 dB: EXPECTED — no DR penalty
+
+        Rock/Pop (default baseline):
+        • Low End 20-40%: NORMAL — no frequency penalty
+        • Loudness -16 to -10 LUFS: NORMAL — no loudness deduction
+
         PENALTIES (VERY REDUCED - maximum 8 points total!):
         • Peak >0dB: -6 (clipping - severe, but rare) | Peak >-1dB: -1 (minor) | True Peak >-1dBFS: -1
         • Stereo Width <15% or >85%: -2 (only if extreme) | Phase <30%: -6 (severe) | Phase 30-40%: -3 | Phase 40-60%: -1 (minor)
         • Mono <30%: -5 | Mono 30-50%: -2 | Mono 50-70%: -1
-        • Dynamic Range <6dB: -2 | Frequency: ZERO (artistic choice - don't penalize!)
-        • ⚠️ CRITICAL: Maximum total penalties = 8 points (even if you calculate more!)
-        • ⚠️ CRITICAL: Only apply ONE penalty (the worst one), don't stack multiple penalties!
-        
+        • Dynamic Range <6dB: -2 [waived for Electronic/EDM/Hip-Hop/Trap] | Frequency: ZERO (artistic choice - don't penalize!)
+        • ⚠️ CRITICAL: Apply ALL applicable penalties, but cap total penalties at 8 points maximum
+
         BONUSES (INCREASED):
         • Peak -3 to -6dB: +5 | DR >8dB: +5 (>15dB: +7) | Phase >75%: +5
         • Balanced frequencies: +5 | Good mono (>70%): +3 | Excellent stereo (25-45%): +3
         • Stereo 25-45%: +5 | Loudness -16 to -6 LUFS: +5 to +10
-        
-        FINAL SCORE = 88 + bonuses - penalties (max penalty 8, min score 80, max score 90)
+
+        FINAL SCORE = min(90, max(0, 88 + bonuses - penalties)) [cap total penalties at 8 points]
         
         SCORE RANGES (DIFFERENTIATE - NO FLOOR, ONLY CAP AT 90):
         • 85-90: Professional commercial quality, ready for mastering (MAXIMUM 90!)
@@ -2131,6 +2191,34 @@ class ClaudeAPIService {
     /// - Returns: True if metrics strongly indicate a professional master
     func testDetectDefiniteProfessionalMaster(_ metrics: AudioMetricsForClaude) -> Bool {
         return detectDefiniteProfessionalMaster(metrics)
+    }
+}
+
+// MARK: - Validation
+
+enum AudioAnalysisError: Error, LocalizedError {
+    case allZeroMetrics
+    case invalidLoudness(Double)
+    case invalidPeakLevel(Double)
+    case invalidStereoWidth(Double)
+    case invalidPhaseCoherence(Double)
+    case invalidDynamicRange(Double)
+
+    var errorDescription: String? {
+        switch self {
+        case .allZeroMetrics:
+            return "Audio read failed: all metrics are zero — the file may be silent, corrupt, or unreadable"
+        case .invalidLoudness(let v):
+            return "Invalid loudness value: \(String(format: "%.1f", v)) LUFS (expected -70 to 0)"
+        case .invalidPeakLevel(let v):
+            return "Invalid peak level: \(String(format: "%.1f", v)) dBFS (expected -60 to 0)"
+        case .invalidStereoWidth(let v):
+            return "Invalid stereo width: \(String(format: "%.1f", v))% (expected 0 to 100)"
+        case .invalidPhaseCoherence(let v):
+            return "Invalid phase coherence: \(String(format: "%.2f", v)) (expected -1.0 to 1.0)"
+        case .invalidDynamicRange(let v):
+            return "Invalid dynamic range: \(String(format: "%.1f", v)) dB (expected 0 to 60)"
+        }
     }
 }
 
