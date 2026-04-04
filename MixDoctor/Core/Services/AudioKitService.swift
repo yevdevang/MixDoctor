@@ -133,12 +133,15 @@ public class AudioKitService: ObservableObject {
         result.spectralCentroid = analysisResult.spectralCentroid
         result.hasClipping = analysisResult.hasClipping
         
-        // AudioKit frequency analysis
-        result.lowEndBalance = analysisResult.lowEnd
-        result.lowMidBalance = analysisResult.lowMid
-        result.midBalance = analysisResult.mid
-        result.highMidBalance = analysisResult.highMid
-        result.highBalance = analysisResult.high
+        // Use spectralBalance (loudest-window analysis) for frequency data sent to AI.
+        // performAudioKitFFT only analyzes the first 4096 samples and returns zeros
+        // when the track starts with silence/fade-in. spectralBalance scans the full
+        // audio for the loudest window, so its values always reflect real content.
+        result.lowEndBalance = analysisResult.spectralBalance.subBassEnergy + analysisResult.spectralBalance.bassEnergy
+        result.lowMidBalance = analysisResult.spectralBalance.lowMidEnergy
+        result.midBalance = analysisResult.spectralBalance.midEnergy
+        result.highMidBalance = analysisResult.spectralBalance.highMidEnergy
+        result.highBalance = analysisResult.spectralBalance.presenceEnergy + analysisResult.spectralBalance.airEnergy
         
         // Store full FFT spectrum for professional analyzer visualization
         result.frequencySpectrum = analysisResult.spectralBalance.frequencySpectrum

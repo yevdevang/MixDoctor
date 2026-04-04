@@ -41,4 +41,5 @@ extension Notification.Name {
     static let iCloudSyncCompleted = Notification.Name("iCloudSyncCompleted")
     static let iCloudFilesChanged = Notification.Name("iCloudFilesChanged")
     static let iCloudSyncToggled = Notification.Name("iCloudSyncToggled")
+    static let analysisCleared = Notification.Name("analysisCleared")
 }

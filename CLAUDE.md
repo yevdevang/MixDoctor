@@ -81,6 +81,65 @@ Large arrays (e.g., frequency spectrum data) use `@Transient` computed propertie
 
 API keys are in `Config.xcconfig` (gitignored). Copy `Config.xcconfig.template` to `Config.xcconfig` and fill in `OPENAI_API_KEY`, `CLAUDE_API_KEY`. Firebase requires `GoogleService-Info.plist` (template provided).
 
+## Common UI Patterns
+
+### ViewModel Loading in Views
+```swift
+@State private var viewModel: ImportViewModel?
+
+var body: some View {
+    if let viewModel {
+        contentView(viewModel: viewModel)
+    } else {
+        ProgressView("Loading...")
+            .task { await initializeViewModel() }
+    }
+}
+```
+
+### Cross-View Updates via NotificationCenter
+```swift
+// Post (e.g., after file deletion)
+NotificationCenter.default.post(name: .audioFileDeleted, object: nil)
+
+// Listen in other views
+.onReceive(NotificationCenter.default.publisher(for: .audioFileDeleted)) { _ in
+    viewModel.loadImports()
+}
+```
+
+### Primary Accent Color
+```swift
+Color(red: 0.435, green: 0.173, blue: 0.871)  // Purple
+```
+
+## MacCatalyst-Specific Patterns
+
+Font scaling (applied in `MixDoctorApp.init`):
+```swift
+#if targetEnvironment(macCatalyst)
+let fontScale: CGFloat = 1.4
+let navBarAppearance = UINavigationBarAppearance()
+navBarAppearance.largeTitleTextAttributes = [
+    .font: UIFont.systemFont(ofSize: 34 * fontScale, weight: .bold)
+]
+#endif
+```
+
+Window sizing (applied in `ContentView.onAppear`):
+```swift
+#if targetEnvironment(macCatalyst)
+if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+    let screenBounds = windowScene.screen.bounds
+    windowScene.sizeRestrictions?.minimumSize = screenBounds.size
+}
+#endif
+```
+
+## Subscription Testing
+
+Use `MockSubscriptionService` + `MockPaywallView` for rapid iteration without App Store Connect. Switch by replacing `.shared` references and imports. See `SUBSCRIPTION_TESTING_GUIDE.md` for the full swap procedure.
+
 ## Critical Patterns & Pitfalls
 
 - **Never store full file paths in SwiftData** — simulator container paths change between builds
@@ -102,3 +161,9 @@ AudioKit, OpenAI, RevenueCat (+ RevenueCatUI, ReceiptParser), FirebaseAnalytics
 - `MixDoctor` — main iOS scheme (includes tests)
 - `MixDoctorMac` / `MixDoctorMac-Simulator` — Mac Catalyst
 - Device-specific: `MixDoctor-iPhone-Simulator-17-ProMax`, `MixDoctor-iPad`, `MixDoctor-iPad-real`
+
+## Key Documentation
+
+- `SUBSCRIPTION_TESTING_GUIDE.md` — mock vs real RevenueCat testing
+- `TESTING_GUIDE.md` — full app testing procedures
+- `.docs/` — phase-by-phase implementation guides and design specs

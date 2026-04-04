@@ -108,7 +108,7 @@ struct PaywallView: View {
                     .foregroundColor(.black)
                     .multilineTextAlignment(.center)
 
-                Text("Upgrade for unlimited AI-powered mix feedback")
+                Text("Upgrade for up to 50 AI-powered mix analyses per month")
                     .font(.title3)
                     .foregroundColor(.gray)
                     .multilineTextAlignment(.center)
@@ -117,7 +117,7 @@ struct PaywallView: View {
                     .font(.largeTitle.bold())
                     .foregroundColor(.black)
 
-                Text("Get unlimited AI analysis and access to all premium features")
+                Text("Get up to 50 AI analyses per month and access to all premium features")
                     .font(.title3)
                     .foregroundColor(.gray)
                     .multilineTextAlignment(.center)
@@ -127,16 +127,20 @@ struct PaywallView: View {
     
     // MARK: - Features Section
     
+    private var analysisLimitTitle: String {
+        selectedPackage?.packageType == .weekly ? "Up to 10 Analyses/Week" : "Up to 50 Analyses/Month"
+    }
+
     private var featuresSection: some View {
         VStack(alignment: .leading, spacing: 24) {
             Text("Premium Features")
                 .font(.title2.weight(.semibold))
                 .foregroundColor(.primary)
-            
+
             PaywallFeatureRow(
-                icon: "infinity",
-                title: "Unlimited AI Analysis",
-                description: "Analyze unlimited mixes with AI feedback"
+                icon: "waveform.badge.plus",
+                title: analysisLimitTitle,
+                description: "Analyze your mixes with AI-powered feedback"
             )
 
             PaywallFeatureRow(
@@ -258,7 +262,7 @@ struct PaywallView: View {
     
     private var footerSection: some View {
         VStack(spacing: 12) {
-            Text("Free users get 4 analyses per month and demo tracks. Upgrade to Pro for unlimited AI analysis and premium features. Cancel anytime.")
+            Text("Free users get 4 analyses per month and demo tracks. Upgrade to Pro for up to 50 AI analyses per month and premium features. Cancel anytime.")
                 .font(.caption)
                 .foregroundColor(.gray)
                 .multilineTextAlignment(.center)
