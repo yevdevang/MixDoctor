@@ -1,4 +1,4 @@
-# Current Feature: Fix AI Analysis Frequency Data Passed as Zeros
+# Current Feature: Shorten AI Analysis Text to 3-5 Sentence Summary
 
 ## Status
 
@@ -6,18 +6,19 @@ Complete
 
 ## Goals
 
-- Ensure the AI prompt is assembled after all audio analysis values are fully computed
-- Pass actual frequency band values (Sub Bass, Bass, Low Mid, Mid, High Mid, Presence, Air percentages) into the prompt
-- Include Dynamic Range, Peak, RMS, Loudness (LUFS), Stereo Width, Phase Coherence, and Mono Compatibility in the prompt payload
-- Add a debug log before the API call to verify all values are non-zero before sending
-- Do not call the AI analysis until the `AnalysisResult` model is fully populated
+- The AI "Analysis" section must output a concise 3–5 sentence summary, not a long technical breakdown
+- The summary should be meaningful and human-readable — covering overall quality, key strengths, and main concern(s)
+- Remove the verbose per-metric repetition (e.g. "Stereo Width: 89.5% Excellent stereo image... Phase Correlation: 74.0% Strong phase coherence...")
+- The individual metric cards (Stereo Width, Phase Coherence, etc.) already show those details — the Analysis text should give a holistic picture, not repeat them
 
 ## Notes
 
-- The UI correctly displays real frequency band values (e.g., Sub Bass 71.7%, Bass 81.9%, etc.)
-- The AI analysis text incorrectly describes "absolutely no frequency content across the entire spectrum - every band shows 0%"
-- Root cause: frequency distribution values are either not yet computed when the prompt is assembled, read from an uninitialized/default-zero state, or pulled from a different model instance than the one bound to the UI
+- From the screenshot: the current output dumps raw metric commentary line by line ("TECHNICAL METRICS Stereo Width: 89.5%...", "Phase Correlation: 74.0%...", "FREQUENCY ANALYSIS...") — this is very long and redundant
+- The fix is in the Claude API prompt instructions in `ClaudeAPIService.swift` — the system/user prompt needs to explicitly instruct Claude to respond with a short 3–5 sentence paragraph summary
+- The individual metric details are already shown in dedicated UI cards; the Analysis text should be a higher-level narrative
 
 ## History
 
 <!-- Keep this updated. Earliest to latest -->
+
+- **Fix AI Analysis Frequency Data Passed as Zeros** — `result.lowEndBalance` etc. were sourced from `performAudioKitFFT` which only analyzed the first 4096 samples; replaced with `spectralBalance.*` values (loudest-window analysis) so Claude receives correct non-zero frequency data.

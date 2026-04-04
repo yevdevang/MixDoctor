@@ -674,7 +674,7 @@ class ClaudeAPIService {
 
             SCORE: [50-75]
 
-            ANALYSIS: ⚠️ CRITICAL - You MUST start EXACTLY with this sentence: "This is an unmixed/raw track that requires professional mixing and mastering before release." Then add 2-3 sentences describing the main issues: Is it muddy, harsh, thin, unbalanced, too quiet, or lacking clarity? Be HONEST about problems - do NOT say "Good track" or anything positive. This is unmixed audio with issues that need fixing.
+            ANALYSIS: ⚠️ FORMAT — Write EXACTLY 3-5 sentences as a single paragraph. NO headers, NO metric values, NO dB/LUFS/% numbers. Start EXACTLY with: "This is an unmixed/raw track that requires professional mixing and mastering before release." Then add 2-4 sentences describing the main issues in plain language (muddy, harsh, thin, unbalanced, too quiet, lacking clarity). Be HONEST — do NOT say "Good track" or anything positive.
 
             ⚠️ FORBIDDEN PHRASES FOR UNMIXED TRACKS:
             - "Good track" - NEVER use this for unmixed audio
@@ -702,8 +702,11 @@ class ClaudeAPIService {
         } else if isMastered {
             return """
             ⚠️ CRITICAL RESPONSE STYLE REQUIREMENT:
-            In the ANALYSIS and RECOMMENDATIONS sections:
-            - Use CONVERSATIONAL, SIMPLE language
+            In the ANALYSIS field:
+            - Write EXACTLY 3-5 sentences as a SINGLE flowing paragraph
+            - DO NOT use section headers (no "TECHNICAL METRICS", "FREQUENCY ANALYSIS", "STEREO", etc.)
+            - DO NOT list or echo back individual metric values (no "Stereo Width: 89.5%", no numbers at all)
+            - Use CONVERSATIONAL language: describe what you HEAR, not what the data says
             - DO NOT mention specific numbers, dB values, percentages, frequencies, LUFS, points, penalties, or bonuses
             - Describe what you HEAR in plain terms (muddy, clear, bright, dark, punchy, compressed, etc.)
             - Keep recommendations simple and actionable without technical jargon
@@ -1190,19 +1193,26 @@ class ClaudeAPIService {
             - Korn masters should score 96-100, good masters 88-94, amateur 80-87!
             
             ANALYSIS: Write like a top mastering engineer (Bob Ludwig, Randy Merrill, Chris Lord-Alge) giving feedback.
-            
+
+            ⚠️ ANALYSIS FORMAT RULES — STRICTLY ENFORCED:
+            - Write EXACTLY 3-5 sentences as a single flowing paragraph. NO MORE.
+            - DO NOT use section headers (no "TECHNICAL METRICS", "FREQUENCY ANALYSIS", "STEREO", etc.)
+            - DO NOT list or repeat individual metric values (no "Stereo Width: 89.5%", no dB/LUFS/% numbers) — those are shown in the app's UI cards
+            - Write a HOLISTIC SUMMARY: overall sound quality, vibe, key strengths, and at most 1 specific concern
+            - Sound like a human engineer talking, NOT a data report
+
             ⚠️ CRITICAL ANALYSIS TONE RULES FOR MASTERS:
-            - If score is 85+: Write PURELY CELEBRATORY analysis (1-2 sentences). This is PROFESSIONAL QUALITY - celebrate it ONLY, NO improvements or suggestions!
+            - If score is 85+: Write PURELY CELEBRATORY analysis (2-3 sentences). This is PROFESSIONAL QUALITY - celebrate it ONLY, NO improvements or suggestions!
               ✅ REQUIRED for 85+: Describe how it FEELS - "This \(genre) master slams hard", "Has weight and presence", "Translates beautifully", "Professional quality", "Ready to go", "Crushing it"
               ✅ Tone: Pure celebration. Like: "This \(genre) master slams hard with weight and presence. Professional quality that translates beautifully across systems."
-              ❌ ABSOLUTELY FORBIDDEN for 85+: 
+              ❌ ABSOLUTELY FORBIDDEN for 85+:
                 - NO improvements in analysis: "could hit harder", "needs more air", "could use", "should consider"
                 - NO suggestions: "might want to", "consider", "try", "could be"
                 - NO critiques: "needs", "lacks", "missing"
                 - NO recommendations in analysis section - save those for RECOMMENDATIONS section only
               ⚠️ REMEMBER: Score 85+ = PROFESSIONAL QUALITY. Analysis should be PURE PRAISE ONLY. Zero improvements, zero suggestions, zero critiques in the ANALYSIS section.
-            - If score is 70-84: Brief (2 sentences) - describe the vibe and mention ONE area that could be polished
-            - If score is below 70: More detailed feedback about what needs work
+            - If score is 70-84: 3-4 sentences — describe the overall vibe, mention the main strength and ONE area to polish
+            - If score is below 70: 4-5 sentences — describe what's holding it back in plain engineer language, no metric dumps
             
             ⚠️ NEVER mention "score capped at 85" - professional dynamic masters (-14 to -18 LUFS) are INTENTIONAL and should be praised, not presented as capped!
             ⚠️ DO NOT mention "Score includes:", points, or technical breakdowns.
@@ -1220,9 +1230,15 @@ class ClaudeAPIService {
         } else {
             return """
             ⚠️ CRITICAL RESPONSE STYLE REQUIREMENT:
-            
+
             WRITE LIKE A TOP PROFESSIONAL MIXING ENGINEER (Dave Pensado, Chris Lord-Alge, Manny Marroquin, Michael Brauer):
-            
+
+            ⚠️ ANALYSIS FORMAT — STRICTLY ENFORCED:
+            - Write EXACTLY 3-5 sentences as a SINGLE flowing paragraph
+            - DO NOT use section headers (no "TECHNICAL METRICS", "FREQUENCY ANALYSIS", "STEREO", etc.)
+            - DO NOT list or echo back individual metric values — those are shown in the app's UI already
+            - Sound like a human engineer giving a quick honest take, NOT a data report
+
             - Use their conversational, confident tone - talk about the VIBE, ENERGY, and FEELING of the mix
             - Focus on what matters: Does it HIT? Does it have IMPACT? Does it TRANSLATE? Does it feel PROFESSIONAL?
             - Be direct and honest but encouraging when appropriate
@@ -1374,18 +1390,25 @@ class ClaudeAPIService {
             ⚠️ NO FLOOR - Scores can go below 75 if quality is genuinely poor!
             
             ANALYSIS: [Write analysis based on score]
+            ⚠️ ANALYSIS FORMAT RULES — STRICTLY ENFORCED:
+            - Write EXACTLY 3-5 sentences as a single flowing paragraph. NO MORE.
+            - DO NOT use section headers (no "TECHNICAL METRICS", "FREQUENCY ANALYSIS", "STEREO", etc.)
+            - DO NOT list or repeat individual metric values (no "Stereo Width: 89.5%", no dB/LUFS/% numbers) — those are shown in the app's UI cards
+            - Write a HOLISTIC SUMMARY: overall sound quality, vibe, key strengths, and at most 1 specific concern
+            - Sound like a human engineer talking, NOT a data report
+
             ⚠️ CRITICAL ANALYSIS TONE RULES:
-            - If score is 85+: Write PURELY CELEBRATORY analysis (1-2 sentences). This is PROFESSIONAL QUALITY - celebrate it ONLY, NO improvements or suggestions!
+            - If score is 85+: Write PURELY CELEBRATORY analysis (2-3 sentences). This is PROFESSIONAL QUALITY - celebrate it ONLY, NO improvements or suggestions!
               ✅ REQUIRED phrases for 85+: "Professional quality mix", "Ready for mastering", "Excellent work", "Solid professional mix", "This mix hits hard", "Well-balanced and professional", "Great mix that translates well"
               ✅ Tone: Pure celebration and acknowledgment. Like: "This is a professional quality mix ready for mastering. Excellent work - it hits hard and translates well across systems."
-              ❌ ABSOLUTELY FORBIDDEN for 85+: 
+              ❌ ABSOLUTELY FORBIDDEN for 85+:
                 - NO improvements: "could use", "should consider", "might benefit from", "would benefit from"
                 - NO suggestions: "could be", "might want to", "consider", "try"
                 - NO negative phrases: "needs improvements", "needs mixing", "needs work", "to reach professional standards"
                 - NO recommendations in analysis section - save those for RECOMMENDATIONS section only
-              ⚠️ REMEMBER: Score 85+ = PROFESSIONAL QUALITY. Analysis should be PURE PRAISE ONLY. Zero improvements, zero suggestions, zero critiques. Just celebrate the professional achievement.
-            - If score is 70-84: Brief (2 sentences) with balanced tone - acknowledge strengths and mention ONE key area for polish
-            - If score is below 70: More detailed, direct feedback about what needs work
+              ⚠️ REMEMBER: Score 85+ = PROFESSIONAL QUALITY. Analysis section = PURE PRAISE ONLY. Zero improvements, zero suggestions, zero critiques. Just celebrate the achievement.
+            - If score is 70-84: 3-4 sentences — acknowledge the main strength and mention ONE key area for polish
+            - If score is below 70: 4-5 sentences — direct, honest feedback in plain engineer language about what's holding it back
             
             RECOMMENDATIONS: [Write recommendations based on score]
             ⚠️ CRITICAL RECOMMENDATIONS RULES:
