@@ -129,13 +129,14 @@ class ClaudeAPIService {
     /// Send audio analysis metrics to Claude and get AI insights
     func analyzeAudioMetrics(_ metrics: AudioMetricsForClaude, userGenre: String? = nil, mixStage: String? = nil) async throws -> ClaudeAnalysisResponse {
         
-        // DEBUG: Print actual values being sent to Claude
+        // Debug: verify all frequency values are non-zero before sending to Claude
         print("🎵 FREQUENCY DATA SENT TO CLAUDE:")
-        print("  Low End: \(String(format: "%.1f", metrics.lowEnd))%")
-        print("  Low Mid: \(String(format: "%.1f", metrics.lowMid))%")
-        print("  Mid: \(String(format: "%.1f", metrics.mid))%")
-        print("  High Mid: \(String(format: "%.1f", metrics.highMid))%")
-        print("  High: \(String(format: "%.1f", metrics.high))%")
+        print("  5-band: Low End \(String(format: "%.1f", metrics.lowEnd))%, Low Mid \(String(format: "%.1f", metrics.lowMid))%, Mid \(String(format: "%.1f", metrics.mid))%, High Mid \(String(format: "%.1f", metrics.highMid))%, High \(String(format: "%.1f", metrics.high))%")
+        print("  7-band: SubBass \(String(format: "%.1f", metrics.subBassEnergy))%, Bass \(String(format: "%.1f", metrics.bassEnergy))%, LowMid \(String(format: "%.1f", metrics.lowMidEnergy))%, Mid \(String(format: "%.1f", metrics.midEnergy))%, HighMid \(String(format: "%.1f", metrics.highMidEnergy))%, Presence \(String(format: "%.1f", metrics.presenceEnergy))%, Air \(String(format: "%.1f", metrics.airEnergy))%")
+        let frequencyTotal = metrics.lowEnd + metrics.lowMid + metrics.mid + metrics.highMid + metrics.high
+        if frequencyTotal < 1.0 {
+            print("⚠️ WARNING: All frequency bands are near zero — AnalysisResult may not be fully populated")
+        }
         
         // Detect track type and genre
         // User-selected stage takes PRIORITY over metrics detection
