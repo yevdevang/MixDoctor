@@ -42,36 +42,33 @@ public class AudioKitService: ObservableObject {
     /// Must be nonisolated to avoid blocking main thread on MacCatalyst
     nonisolated public func getDetailedAnalysis(for url: URL, genre: String? = nil, mixStage: String? = nil, isDemo: Bool = false) async throws -> AnalysisResult {
 
-        // Check if analysis already exists in iCloud Drive to avoid re-analyzing
+        // Check if analysis already exists in iCloud Drive to avoid re-analyzing.
+        // Include mixStage in the cache key so Final Mix and Mastering results are stored separately.
         let fileName = url.lastPathComponent
+        let cacheKey = mixStage.map { "\(fileName).\($0)" } ?? fileName
         let currentVersion = "AudioKit-\(AppConstants.analysisVersion)"
 
-        if let existingResult = AnalysisResultPersistence.shared.loadAnalysisResult(forAudioFile: fileName, isDemo: isDemo) {
+        if let existingResult = AnalysisResultPersistence.shared.loadAnalysisResult(forAudioFile: cacheKey, isDemo: isDemo) {
             // Skip results that were cleared by the user (iCloud may re-sync the JSON)
             if AnalysisResultPersistence.shared.isResultStale(existingResult) {
-                AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: fileName, isDemo: isDemo)
+                AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: cacheKey, isDemo: isDemo)
             } else if existingResult.analysisVersion == currentVersion {
                 // Check if cached version matches current version
                 return existingResult
             } else {
                 // Delete old cached result to avoid confusion
-                AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: fileName, isDemo: isDemo)
+                AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: cacheKey, isDemo: isDemo)
             }
         }
-
-
-        // Don't update @Published on main thread - let caller handle UI updates
-        // await MainActor.run { isAnalyzing = true }
-        // defer { Task { @MainActor in isAnalyzing = false } }
 
         let result = try await performAudioKitAnalysis(url: url, genre: genre, mixStage: mixStage)
 
         // Save to iCloud Drive for future use
         do {
-            try AnalysisResultPersistence.shared.saveAnalysisResult(result, forAudioFile: fileName, isDemo: isDemo)
+            try AnalysisResultPersistence.shared.saveAnalysisResult(result, forAudioFile: cacheKey, isDemo: isDemo)
         } catch {
         }
-        
+
         return result
     }
     
@@ -2134,18 +2131,25 @@ enum AudioKitError: Error {
     }
     
     nonisolated private func performFFTAnalysis(_ samples: [Float]) -> [Float] {
-        guard !samples.isEmpty else { return [] }
-        
+        guard !samples.isEmpty else {
+            print("⚠️ performFFTAnalysis: empty samples array")
+            return []
+        }
+
         // Use smaller FFT for better temporal resolution and more variation
         let maxSize = 2048 // Force smaller FFT to show more detail
         let fftSize = min(Int(pow(2, floor(log2(Double(samples.count))))), maxSize)
-        guard fftSize >= 512 else { return [] }
-        
+        guard fftSize >= 512 else {
+            print("⚠️ performFFTAnalysis: insufficient samples for FFT (count=\(samples.count), fftSize=\(fftSize), need ≥512)")
+            return []
+        }
+
         let actualSamples = Array(samples.prefix(fftSize))
         let log2n = vDSP_Length(log2(Float(fftSize)))
-        
+
         // Create FFT setup
         guard let fftSetup = vDSP_create_fftsetup(log2n, FFTRadix(kFFTRadix2)) else {
+            print("⚠️ performFFTAnalysis: vDSP_create_fftsetup failed (log2n=\(log2n))")
             return []
         }
         defer { vDSP_destroy_fftsetup(fftSetup) }
@@ -2578,27 +2582,39 @@ enum AudioKitError: Error {
         }
         
         let windowSamples = Array(samples[bestWindowStart..<min(bestWindowStart + windowSize, frameCount)])
-        
+
         // Get FFT from real audio
         let magnitudes = performFFTAnalysis(windowSamples)
-        
+
+        // Guard against empty FFT result (too-short file, all-silence, or vDSP setup failure)
+        guard !magnitudes.isEmpty else {
+            print("⚠️ analyzeSpectralBalance: FFT returned empty magnitudes — returning default spectral balance")
+            return SpectralBalanceResult()
+        }
+
         let nyquist = sampleRate / 2.0
         let binWidth = nyquist / Double(magnitudes.count / 2)
-        
+
         // Professional mastering frequency bands
         let subBassRange = (20.0, 60.0)        // Sub-bass
-        let bassRange = (60.0, 250.0)          // Bass  
+        let bassRange = (60.0, 250.0)          // Bass
         let lowMidRange = (250.0, 500.0)       // Low-midrange
         let midRange = (500.0, 2000.0)         // Midrange
         let highMidRange = (2000.0, 6000.0)    // High-midrange
         let presenceRange = (6000.0, 12000.0)  // Presence
         let airRange = (12000.0, 20000.0)      // Air
-        
+
         // Calculate energy in each band as PERCENTAGES
         let totalEnergy = magnitudes.prefix(magnitudes.count / 2).reduce(0.0) { sum, mag in
             sum + Double(mag * mag)
         }
-        
+
+        // Guard against zero total energy (all-silent window) to prevent NaN from 0/0 division
+        guard totalEnergy > 0.0 else {
+            print("⚠️ analyzeSpectralBalance: totalEnergy is zero (silent audio window) — returning default spectral balance")
+            return SpectralBalanceResult()
+        }
+
         // FIXED: Convert to percentages by multiplying by 100
         let subBassEnergy = (calculateBandEnergyForRange(magnitudes, lowFreq: subBassRange.0, highFreq: subBassRange.1, binWidth: binWidth) / totalEnergy) * 100.0
         let bassEnergy = (calculateBandEnergyForRange(magnitudes, lowFreq: bassRange.0, highFreq: bassRange.1, binWidth: binWidth) / totalEnergy) * 100.0
