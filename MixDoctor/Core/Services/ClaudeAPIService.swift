@@ -1363,7 +1363,7 @@ class ClaudeAPIService {
         guard (-60.0...0.0).contains(metrics.peakLevel) else {
             throw AudioAnalysisError.invalidPeakLevel(metrics.peakLevel)
         }
-        guard (0.0...100.0).contains(metrics.stereoWidth) else {
+        guard (0.0...150.0).contains(metrics.stereoWidth) else {
             throw AudioAnalysisError.invalidStereoWidth(metrics.stereoWidth)
         }
         guard (-1.0...1.0).contains(metrics.phaseCoherence) else {
@@ -2044,7 +2044,7 @@ enum AudioAnalysisError: Error, LocalizedError {
         case .invalidPeakLevel(let v):
             return "Invalid peak level: \(String(format: "%.1f", v)) dBFS (expected -60 to 0)"
         case .invalidStereoWidth(let v):
-            return "Invalid stereo width: \(String(format: "%.1f", v))% (expected 0 to 100)"
+            return "Invalid stereo width: \(String(format: "%.1f", v))% (expected 0 to 150)"
         case .invalidPhaseCoherence(let v):
             return "Invalid phase coherence: \(String(format: "%.2f", v)) (expected -1.0 to 1.0)"
         case .invalidDynamicRange(let v):

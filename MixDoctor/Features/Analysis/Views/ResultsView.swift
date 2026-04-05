@@ -515,8 +515,8 @@ struct ResultsView: View {
         // Metal with good mono compatibility can use 95-100% professionally
         if result.stereoWidthScore < 10 {
             issues.append("Mono or very narrow stereo")
-        } else if result.stereoWidthScore > 100 {
-            issues.append("Impossible stereo width value")
+        } else if result.stereoWidthScore > 120 {
+            issues.append("Excessively wide stereo image")
         }
         
         // Frequency balance - use FFT data if available, otherwise use old values
