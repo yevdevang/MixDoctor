@@ -28,7 +28,7 @@ enum AppConstants {
     
     // Versioning
     static let appVersion = "1.0.0"
-    static let analysisVersion = "3.4"  // Added critical mono override (<45%) + enhanced debug logging
+    static let analysisVersion = "4.2"  // Fix FFT: use magnitude (not power/mag²) for frequency balance — power was giving 87% bass
     
     // Storage
     static let maxStorageGB: Int64 = 10
