@@ -17,6 +17,7 @@ struct ResultsView: View {
     @State private var errorMessage = ""
     @State private var showPaywall = false
     @State private var showScoreGuide = false
+    @State private var showDeleteConfirmation = false
     // MARK: - Production - Access shared instance directly
     private var subscriptionService: SubscriptionService { SubscriptionService.shared }
 
@@ -73,6 +74,14 @@ struct ResultsView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(errorMessage)
+        }
+        .alert("Delete File", isPresented: $showDeleteConfirmation) {
+            Button("Delete", role: .destructive) {
+                deleteFile()
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Are you sure you want to delete this file? This action cannot be undone.")
         }
         .sheet(isPresented: $showScoreGuide) {
             ScoreGuideView()
@@ -143,36 +152,41 @@ struct ResultsView: View {
             // Overall Score Card - always show
             overallScoreCard(result: result)
 
-            // Unmixed Track Warning Banner (if detected)
-            if !result.isProfessionallyMixed {
-                unmixedTrackWarningBanner(result: result)
-            }
+            if let mismatch = result.stageMismatch {
+                // Stage mismatch banner
+                stageMismatchBanner(detectedStage: mismatch)
+            } else {
+                // Unmixed Track Warning Banner (if detected)
+                if !result.isProfessionallyMixed {
+                    unmixedTrackWarningBanner(result: result)
+                }
 
-            // Individual Metrics
-            VStack(spacing: 16) {
-                stereoWidthCard(result: result)
-                phaseCoherenceCard(result: result)
-                monoCompatibilityCard(result: result)
-                // PAZ-style frequency analyzer
-                PAZFrequencyAnalyzer(result: result)
-                dynamicRangeCard(result: result)
-            }
-            
-            // Issues Section
-            let detectedIssues = calculateActualIssues(result: result)
-            if !detectedIssues.isEmpty {
-                modernIssuesSection(issues: detectedIssues)
-            }
-            
-            // Analysis Section - ALWAYS show for all tracks
-            if let aiSummary = result.aiSummary, !aiSummary.isEmpty {
-                modernAnalysisOnlySection(result: result)
-            }
+                // Individual Metrics
+                VStack(spacing: 16) {
+                    stereoWidthCard(result: result)
+                    phaseCoherenceCard(result: result)
+                    monoCompatibilityCard(result: result)
+                    // PAZ-style frequency analyzer
+                    PAZFrequencyAnalyzer(result: result)
+                    dynamicRangeCard(result: result)
+                }
 
-            // Recommendations Section - Show when there are AI recommendations OR detected issues
-            let allRecommendations = generateAllRecommendations(result: result, detectedIssues: detectedIssues)
-            if !allRecommendations.isEmpty && (!result.isProfessionallyMixed || result.overallScore < 85 || !detectedIssues.isEmpty) {
-                modernRecommendationsOnlySectionWithIssues(result: result, recommendations: allRecommendations)
+                // Issues Section
+                let detectedIssues = calculateActualIssues(result: result)
+                if !detectedIssues.isEmpty {
+                    modernIssuesSection(issues: detectedIssues)
+                }
+
+                // Analysis Section - ALWAYS show for all tracks
+                if let aiSummary = result.aiSummary, !aiSummary.isEmpty {
+                    modernAnalysisOnlySection(result: result)
+                }
+
+                // Recommendations Section - Show when there are AI recommendations OR detected issues
+                let allRecommendations = generateAllRecommendations(result: result, detectedIssues: detectedIssues)
+                if !allRecommendations.isEmpty && (!result.isProfessionallyMixed || result.overallScore < 85 || !detectedIssues.isEmpty) {
+                    modernRecommendationsOnlySectionWithIssues(result: result, recommendations: allRecommendations)
+                }
             }
 
             // Action Buttons
@@ -329,20 +343,42 @@ struct ResultsView: View {
                         .cornerRadius(8)
                 }
                 
-                // Mix Stage Display (read-only)
+                // Mix Stage Display — editable when stage mismatch detected
                 HStack {
                     Text("Stage:")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .frame(width: 80, alignment: .leading)
-                    
-                    Text(mixStageDisplayName(audioFile.mixStage))
-                        .foregroundStyle(.primary)
+
+                    if audioFile.analysisResult?.stageMismatch != nil {
+                        Picker("", selection: Binding(
+                            get: { audioFile.mixStage ?? "mix" },
+                            set: { audioFile.mixStage = $0 }
+                        )) {
+                            Text("Mix (Pre-Master)").tag("mix")
+                            Text("Master (Streaming)").tag("master_streaming")
+                            Text("Master (CD)").tag("master_cd")
+                        }
+                        .pickerStyle(.menu)
+                        .tint(Color(red: 0.435, green: 0.173, blue: 0.871))
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Color.gray.opacity(0.05))
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 4)
+                        .background(Color(red: 0.435, green: 0.173, blue: 0.871).opacity(0.08))
                         .cornerRadius(8)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color(red: 0.435, green: 0.173, blue: 0.871).opacity(0.3), lineWidth: 1)
+                        )
+                    } else {
+                        Text(mixStageDisplayName(audioFile.mixStage))
+                            .foregroundStyle(.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.gray.opacity(0.05))
+                            .cornerRadius(8)
+                    }
                 }
             }
         }
@@ -386,7 +422,26 @@ struct ResultsView: View {
             }
             
             // Score Circle with Modern Design
-            if result.isProfessionallyMixed {
+            if let mismatch = result.stageMismatch {
+                // Stage mismatch — show info indicator instead of score
+                let detectedLabel = mismatch == "master" ? "Detected as Master" : "Detected as Mix"
+                ZStack {
+                    Circle()
+                        .stroke(Color(red: 0.435, green: 0.173, blue: 0.871).opacity(0.3), lineWidth: 12)
+                        .frame(width: 160, height: 160)
+
+                    VStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.arrow.trianglehead.2.clockwise.rotate.90")
+                            .font(.system(size: 36))
+                            .foregroundColor(Color(red: 0.435, green: 0.173, blue: 0.871))
+
+                        Text(detectedLabel)
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(Color(red: 0.435, green: 0.173, blue: 0.871))
+                    }
+                }
+            } else if result.isProfessionallyMixed {
                 ZStack {
                     // Background Circle
                     Circle()
@@ -439,15 +494,17 @@ struct ResultsView: View {
                     }
                 }
             }
-            
+
             // Score Description with Status
             VStack(spacing: 8) {
-                Text(scoreDescription(result.overallScore, isProfessionallyMixed: result.isProfessionallyMixed, mixStage: audioFile.mixStage))
+                Text(scoreDescription(result.overallScore, isProfessionallyMixed: result.isProfessionallyMixed, mixStage: audioFile.mixStage, stageMismatch: result.stageMismatch))
                     .font(.title3)
                     .fontWeight(.medium)
                     .multilineTextAlignment(.center)
 
-                modernIssuesSummary(result: result)
+                if result.stageMismatch == nil {
+                    modernIssuesSummary(result: result)
+                }
             }
         }
         .padding(24)
@@ -799,6 +856,41 @@ struct ResultsView: View {
             RoundedRectangle(cornerRadius: 16)
                 .fill(Color.backgroundSecondary)
                 .shadow(color: Color.black.opacity(0.05), radius: 10, x: 0, y: 2)
+        )
+    }
+
+    // MARK: - Stage Mismatch Banner
+
+    private func stageMismatchBanner(detectedStage: String) -> some View {
+        let isMaster = detectedStage == "master"
+        let title = isMaster ? "This Track Appears to Be a Master" : "This Track Appears to Be a Mix"
+        let description = isMaster
+            ? "The audio metrics (loudness, peak level, dynamics) indicate this is a mastered track. Please select a Master stage in Analysis Settings and re-analyze for accurate scoring."
+            : "The audio metrics indicate this is a pre-master mix, not a mastered track. Please select Mix (Pre-Master) stage in Analysis Settings and re-analyze for accurate scoring."
+
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .foregroundStyle(Color(red: 0.435, green: 0.173, blue: 0.871))
+                    .font(.title2)
+
+                Text(title)
+                    .font(.headline)
+                    .fontWeight(.bold)
+            }
+
+            Text(description)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .padding(20)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color(red: 0.435, green: 0.173, blue: 0.871).opacity(0.08))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color(red: 0.435, green: 0.173, blue: 0.871).opacity(0.3), lineWidth: 1)
+                )
         )
     }
 
@@ -1481,9 +1573,18 @@ struct ResultsView: View {
         return strengths
     }
 
-    private func scoreDescription(_ score: Double, isProfessionallyMixed: Bool, mixStage: String?) -> String {
+    private func scoreDescription(_ score: Double, isProfessionallyMixed: Bool, mixStage: String?, stageMismatch: String? = nil) -> String {
         let isMaster = mixStage == "master_streaming" || mixStage == "master_cd"
         let qualityType = isMaster ? "Master" : "Mix"
+
+        // Stage mismatch — tell the user what was detected
+        if let mismatch = stageMismatch {
+            if mismatch == "master" {
+                return "Select Master stage and re-analyze"
+            } else {
+                return "Select Mix stage and re-analyze"
+            }
+        }
 
         // If unmixed, don't show positive quality labels
         if !isProfessionallyMixed {
@@ -1873,8 +1974,20 @@ struct ResultsView: View {
 
     private func actionButtons(result: AnalysisResult) -> some View {
         VStack(spacing: 12) {
-            Button(role: .destructive, action: { 
-                deleteFile()
+            if result.stageMismatch != nil {
+                Button(action: {
+                    Task { await performAnalysis() }
+                }) {
+                    Label("Analyze", systemImage: "waveform.badge.magnifyingglass")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Color(red: 0.435, green: 0.173, blue: 0.871))
+                .disabled(isAnalyzing)
+            }
+
+            Button(role: .destructive, action: {
+                showDeleteConfirmation = true
             }) {
                 Label("Delete File", systemImage: "trash")
                     .frame(maxWidth: .infinity)

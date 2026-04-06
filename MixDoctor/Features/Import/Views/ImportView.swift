@@ -16,10 +16,8 @@ struct ImportView: View {
     @State private var showBatchImportInfo = false
     @State private var showDeleteAllConfirmation = false
     @State private var sortOption: ImportSortOption = .date
-    #if targetEnvironment(macCatalyst)
     @State private var fileToDelete: AudioFile?
     @State private var showDeleteConfirmation = false
-    #endif
 
     var body: some View {
         NavigationStack {
@@ -87,7 +85,6 @@ struct ImportView: View {
                 Text("Are you sure you want to delete all \(viewModel.importedFiles.count) file\(viewModel.importedFiles.count == 1 ? "" : "s")? This action cannot be undone and will remove files from all your devices.")
             }
         }
-        #if targetEnvironment(macCatalyst)
         .alert("Delete File", isPresented: $showDeleteConfirmation) {
             Button("Cancel", role: .cancel) {
                 fileToDelete = nil
@@ -96,16 +93,16 @@ struct ImportView: View {
                 if let viewModel = viewModel,
                    let file = fileToDelete,
                    let index = viewModel.importedFiles.firstIndex(where: { $0.id == file.id }) {
-                    // Delete the file (this handles cleanup and notification)
                     deleteFiles(at: IndexSet(integer: index), viewModel: viewModel)
                 }
                 fileToDelete = nil
             }
         } message: {
             if let file = fileToDelete {
-                Text("Are you sure you want to delete '\(file.fileName)'? This will remove it from all your devices.")
+                Text("Are you sure you want to delete '\(file.fileName)'? This action cannot be undone.")
             }
         }
+        #if targetEnvironment(macCatalyst)
         .background(Color.backgroundPrimary.ignoresSafeArea(edges: [.top, .horizontal]))
         #else
         .background(Color.backgroundPrimary.ignoresSafeArea())
@@ -816,14 +813,8 @@ struct ImportView: View {
                                 selectedTab = 2 // Navigate to Player tab
                             },
                             onDelete: file.isDemoFile ? nil : {
-                                #if targetEnvironment(macCatalyst)
                                 fileToDelete = file
                                 showDeleteConfirmation = true
-                                #else
-                                if let index = viewModel.importedFiles.firstIndex(where: { $0.id == file.id }) {
-                                    deleteFiles(at: IndexSet(integer: index), viewModel: viewModel)
-                                }
-                                #endif
                             }
                         )
                         .deleteDisabled(file.isDemoFile)
@@ -832,13 +823,10 @@ struct ImportView: View {
                         #endif
                     }
                     .onDelete { indexSet in
-                        // Map sorted indices back to original viewModel indices
-                        let originalIndices = IndexSet(indexSet.compactMap { sortedIndex -> Int? in
-                            guard sortedIndex < sorted.count else { return nil }
-                            let file = sorted[sortedIndex]
-                            return viewModel.importedFiles.firstIndex(where: { $0.id == file.id })
-                        })
-                        deleteFiles(at: originalIndices, viewModel: viewModel)
+                        if let firstIndex = indexSet.first, firstIndex < sorted.count {
+                            fileToDelete = sorted[firstIndex]
+                            showDeleteConfirmation = true
+                        }
                     }
                     
                     // Spacer row to make list take full height and accept drops

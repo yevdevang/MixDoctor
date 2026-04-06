@@ -274,6 +274,37 @@ public class AudioKitService: ObservableObject {
                 isProUser: isProUser
             )
             
+            // ========================================
+            // STAGE MISMATCH DETECTION
+            // Check if user-selected stage matches the audio metrics.
+            // If mismatch, skip Claude API call and return early.
+            // ========================================
+            let isMasteredByMetrics = ClaudeAPIService.shared.detectMasteredTrack(metrics)
+            let userSelectedMix = mixStage == "mix"
+            let userSelectedMaster = mixStage?.contains("master") == true
+
+            if userSelectedMix && isMasteredByMetrics {
+                // User says Mix, but audio is clearly a mastered track
+                print("🚫 STAGE MISMATCH: User selected 'Mix' but metrics indicate mastered track — skipping Claude API")
+                result.stageMismatch = "master"
+                result.isProfessionallyMixed = true
+                result.overallScore = 0
+                result.aiSummary = nil
+                result.aiRecommendations = []
+                return result
+            }
+
+            if userSelectedMaster && !isMasteredByMetrics {
+                // User says Master, but audio is clearly a pre-master mix
+                print("🚫 STAGE MISMATCH: User selected 'Master' but metrics indicate pre-master mix — skipping Claude API")
+                result.stageMismatch = "mix"
+                result.isProfessionallyMixed = true
+                result.overallScore = 0
+                result.aiSummary = nil
+                result.aiRecommendations = []
+                return result
+            }
+
             // Claude API call - ensure it's off main thread
             // Pass user-selected genre and mixStage if available (passed through function chain)
             let claudeResponse = try await Task.detached(priority: .userInitiated) {
@@ -291,39 +322,13 @@ public class AudioKitService: ObservableObject {
             await MainActor.run {
                 AnalysisProgressTracker.shared.updateProgress(step: "Finalizing results...", progress: 0.95)
             }
-            
-            // ========================================
-            // SMART UNMIXED DETECTION
-            // Genre-aware + Stage-aware logic
-            // ========================================
+
+            // UNMIXED DETECTION
+            // Only show "Unmixed" when AudioKit's DSP detector explicitly says so.
             let isUnmixedByDetection = result.unmixedDetection!.isLikelyUnmixed
-            let isUnmixedByScore = claudeResponse.score < 70  // Lowered threshold - only very low scores indicate unmixed
+            result.isProfessionallyMixed = !isUnmixedByDetection
 
-            let genreLower = genre?.lowercased() ?? ""
-            let isJazzOrClassical = genreLower.contains("jazz") || genreLower.contains("classical") ||
-                                    genreLower.contains("blues") || genreLower.contains("acoustic") ||
-                                    genreLower.contains("orchestral") || genreLower.contains("live") ||
-                                    genreLower.contains("singer-songwriter") || genreLower.contains("singer") ||
-                                    genreLower.contains("acapella") || genreLower.contains("a capella")
-
-            // Genre-aware thresholds - Jazz/Classical/Live have naturally different characteristics
-            let minPhaseForGenre: Double = isJazzOrClassical ? 0.15 : 0.40
-            let maxDynamicRangeForGenre: Double = isJazzOrClassical ? 35.0 : 22.0
-
-            let hasSevereTechnicalIssues = (
-                result.phaseCoherence < minPhaseForGenre ||
-                (result.stereoWidthScore > 98 && result.monoCompatibility < 0.60) ||  // More lenient
-                result.dynamicRange > maxDynamicRangeForGenre
-            )
-
-            // Stage-aware: Both Mix and Master stages should use same threshold
-            // A score of 68+ indicates the track is processed (mixed), not raw/unmixed
-            let claudeOverride = claudeResponse.score >= 68  // Consistent threshold for all stages
-
-            // Final decision: Claude score can override, OR no unmixed indicators
-            result.isProfessionallyMixed = claudeOverride || !(isUnmixedByDetection || isUnmixedByScore || hasSevereTechnicalIssues)
-
-            print("🔍 UNMIXED CHECK: detection=\(isUnmixedByDetection), score<70=\(isUnmixedByScore), techIssues=\(hasSevereTechnicalIssues), claudeOverride=\(claudeOverride) → isPro=\(result.isProfessionallyMixed)")
+            print("🔍 UNMIXED CHECK: detection=\(isUnmixedByDetection) → isPro=\(result.isProfessionallyMixed)")
             result.aiSummary = claudeResponse.summary
             result.aiRecommendations = claudeResponse.recommendations
             result.isReadyForMastering = claudeResponse.isReadyForMastering
@@ -341,22 +346,8 @@ public class AudioKitService: ObservableObject {
                 print("❌ Analysis Error: \(error.localizedDescription)")
             }
             
-            // API failed - use genre-aware detection logic
-            let genreLowerFallback = genre?.lowercased() ?? ""
-            let isJazzOrClassicalFallback = genreLowerFallback.contains("jazz") || genreLowerFallback.contains("classical") ||
-                                            genreLowerFallback.contains("blues") || genreLowerFallback.contains("acoustic") ||
-                                            genreLowerFallback.contains("orchestral") || genreLowerFallback.contains("live") ||
-                                            genreLowerFallback.contains("singer-songwriter") || genreLowerFallback.contains("singer") ||
-                                            genreLowerFallback.contains("acapella") || genreLowerFallback.contains("a capella")
-            let minPhaseFallback: Double = isJazzOrClassicalFallback ? 0.15 : 0.40
-            let maxDRFallback: Double = isJazzOrClassicalFallback ? 35.0 : 22.0
-
-            let hasSevereTechnicalIssuesFallback = (
-                result.phaseCoherence < minPhaseFallback ||
-                (result.stereoWidthScore > 98 && result.monoCompatibility < 0.60) ||
-                result.dynamicRange > maxDRFallback
-            )
-            result.isProfessionallyMixed = !(result.unmixedDetection!.isLikelyUnmixed || hasSevereTechnicalIssuesFallback)
+            // API failed - rely solely on AudioKit's unmixed detector (same rule as success path)
+            result.isProfessionallyMixed = !result.unmixedDetection!.isLikelyUnmixed
             
             // Provide more specific error messages based on error type
             if let claudeError = error as? ClaudeAPIError {

@@ -164,56 +164,34 @@ class ClaudeAPIService {
         try validateMetrics(metrics)
 
         // Detect track type and genre
-        // User-selected stage takes PRIORITY over metrics detection
+        // Stage mismatches (user says Mix but it's a Master, or vice versa) are caught
+        // BEFORE this function is called — AudioKitService returns early without calling Claude.
+        // By the time we get here, the user-selected stage is trusted.
         let stageLower = mixStage?.lowercased() ?? ""
         let isMasteredByStage = stageLower.contains("master")
-        let isMixStage = stageLower == "mix"  // Exact match only - don't match "master_streaming"!
+        let isMixStage = stageLower == "mix"
         let isMasteredByMetrics = detectMasteredTrack(metrics)
-        let isDefinitelyProfessionalMaster = detectDefiniteProfessionalMaster(metrics)
 
-        // INTELLIGENT OVERRIDE: Even if user says "Mix", if metrics STRONGLY indicate
-        // a professional master (Korn, Green Day, etc.), we should score it appropriately
         let isMastered: Bool
-        var professionalMasterOverride = false  // Used for scoring adjustment
         if isMixStage {
-            // Check if metrics STRONGLY indicate this is actually a professional master
-            if isDefinitelyProfessionalMaster {
-                print("🎯 PROFESSIONAL OVERRIDE: User labeled as 'Mix' but metrics indicate professional master")
-                print("   - Will use hybrid scoring: Mix prompts but professional-friendly score ranges")
-                isMastered = false  // Keep using mix prompts for context
-                professionalMasterOverride = true  // Flag for score adjustment
-            } else {
-                isMastered = false  // User said it's a Mix - respect that
-            }
+            isMastered = false
         } else if isMasteredByStage {
-            isMastered = true   // User said it's a Master - respect that!
+            isMastered = true
         } else {
             isMastered = isMasteredByMetrics  // Auto-detect from metrics
         }
-        
+
         if let stage = mixStage {
             print("🎚️ USER-SELECTED STAGE: \(stage) - isMastered: \(isMastered) (Mix='\(isMixStage)', Master='\(isMasteredByStage)')")
         }
         // Prioritize genre from metrics (user-selected), then userGenre parameter, then auto-detect
         let genre = metrics.genre ?? userGenre ?? detectGenre(metrics)
 
-        // CRITICAL: Override unmixed detection based on user selection
-        // If user explicitly selected a Master stage, it's NOT unmixed regardless of metrics
-        // If user selected Mix, use metrics detection
-        // If professional master override is active, it's NOT unmixed
+        // Unmixed detection
         let isUnmixed: Bool
         if isMasteredByStage {
-            // User said it's a Master - NEVER treat as unmixed
             isUnmixed = false
-            if metrics.isLikelyUnmixed {
-                print("🎯 MASTER OVERRIDE: User selected Master stage - ignoring unmixed detection")
-            }
-        } else if professionalMasterOverride {
-            // Professional master detected even though labeled as Mix - NOT unmixed
-            isUnmixed = false
-            print("🎯 PROFESSIONAL OVERRIDE: Metrics indicate professional master - ignoring unmixed detection")
         } else {
-            // Use metrics detection
             isUnmixed = metrics.isLikelyUnmixed
         }
 
@@ -298,7 +276,7 @@ class ClaudeAPIService {
             print("📥 CLAUDE API RAW JSON RESPONSE:\n\(jsonString.prefix(500))\n")
         }
         
-        return try parseClaudeResponse(data, isMastered: isMastered, professionalMasterOverride: professionalMasterOverride)
+        return try parseClaudeResponse(data, isMastered: isMastered)
     }
 
     private func determineModel(isProUser: Bool) -> String {
@@ -307,7 +285,7 @@ class ClaudeAPIService {
         return isProUser ? "claude-sonnet-4-5-20250929" : "claude-haiku-4-5-20251001"
     }
     
-    private func detectMasteredTrack(_ metrics: AudioMetricsForClaude) -> Bool {
+    func detectMasteredTrack(_ metrics: AudioMetricsForClaude) -> Bool {
         // If detected as unmixed, it's definitely NOT mastered
         if metrics.isLikelyUnmixed {
             print("🚨 UNMIXED TRACK DETECTED - not mastered")
@@ -383,10 +361,10 @@ class ClaudeAPIService {
     /// This is used to override user "Mix" label when metrics clearly indicate mastered audio
     /// Amateur mixes cannot achieve these characteristics - they require professional mastering
     private func detectDefiniteProfessionalMaster(_ metrics: AudioMetricsForClaude) -> Bool {
-        // Skip if detected as unmixed - unmixed tracks are never professional masters
-        if metrics.isLikelyUnmixed {
-            return false
-        }
+        // NOTE: We intentionally do NOT short-circuit on isLikelyUnmixed here.
+        // AudioKit's unmixed detector can be wrong, especially for live/remix tracks.
+        // If the hard metrics (loudness, peaks, dynamics) all pass the strict professional
+        // thresholds below, that is a stronger signal than the unmixed heuristic.
 
         // STRICT CRITERIA - Only override if indicators STRONGLY point to professional master
         // These are characteristics that amateur mixes simply cannot achieve
@@ -1735,7 +1713,7 @@ class ClaudeAPIService {
         return showAsRecommendation.contains(where: { lowercased.contains($0) })
     }
     
-    private func parseClaudeResponse(_ data: Data, isMastered: Bool, professionalMasterOverride: Bool = false) throws -> ClaudeAnalysisResponse {
+    private func parseClaudeResponse(_ data: Data, isMastered: Bool) throws -> ClaudeAnalysisResponse {
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         
         guard let content = json?["content"] as? [[String: Any]],
@@ -1904,29 +1882,14 @@ class ClaudeAPIService {
         // Enforce score caps and floors based on track type
         var finalScore = score ?? 50
         if !isMastered {
-            if professionalMasterOverride {
-                // PROFESSIONAL MASTER mislabeled as "Mix" - use wider scoring range
-                // These are commercial releases like Korn that user incorrectly labeled as Mix
-                if finalScore > 92 {
-                    print("🎯 PROFESSIONAL OVERRIDE: Capping score from \(finalScore) to 92 (professional track mislabeled as mix)")
-                    finalScore = 92
-                }
-                if finalScore < 85 {
-                    // Don't let professional masters score too low - they're clearly high quality
-                    print("🎯 PROFESSIONAL OVERRIDE: Raising score from \(finalScore) to 85 (professional floor for mislabeled master)")
-                    finalScore = 85
-                }
-                print("🎯 PROFESSIONAL MASTER (labeled as Mix): \(finalScore)")
-            } else {
-                // Standard pre-master mix cap at 90 maximum (mixes don't score 91+)
-                if finalScore > 90 {
-                    print("⚠️ PRE-MASTER MIX SCORE CAP: Capping score from \(finalScore) to 90 (pre-master mixes max at 90)")
-                    finalScore = 90
-                }
-                // NO FLOOR - let scores vary naturally to differentiate between songs
-                // Professional mixes should score 85-90, amateur 70-84, weak/unmixed 50-69
-                print("✅ MIX SCORE (no floor): \(finalScore)")
+            // Standard pre-master mix cap at 90 maximum (mixes don't score 91+)
+            if finalScore > 90 {
+                print("⚠️ PRE-MASTER MIX SCORE CAP: Capping score from \(finalScore) to 90 (pre-master mixes max at 90)")
+                finalScore = 90
             }
+            // NO FLOOR - let scores vary naturally to differentiate between songs
+            // Professional mixes should score 85-90, amateur 70-84, weak/unmixed 50-69
+            print("✅ MIX SCORE (no floor): \(finalScore)")
         }
         
         // Check for contradictory analysis: if score is 85+ but analysis contains negative phrases, use fallback
@@ -1970,9 +1933,8 @@ class ClaudeAPIService {
     /// - Parameters:
     ///   - responseText: The raw response text to parse
     ///   - isMastered: Whether the track is mastered
-    ///   - professionalMasterOverride: Whether professional master override is active
     /// - Returns: Parsed response with score and analysis
-    func parseClaudeResponse(_ responseText: String, isMastered: Bool, professionalMasterOverride: Bool = false) -> (score: Int, summary: String, recommendations: [String]) {
+    func parseClaudeResponse(_ responseText: String, isMastered: Bool) -> (score: Int, summary: String, recommendations: [String]) {
         // Extract score using same patterns as real parser
         var score: Int? = nil
 
@@ -1998,15 +1960,8 @@ class ClaudeAPIService {
         // Apply enforcement logic (same as in real parseClaudeResponse)
         var finalScore = score ?? 50
         if !isMastered {
-            if professionalMasterOverride {
-                // Professional master mislabeled as Mix - wider range 85-92
-                if finalScore > 92 { finalScore = 92 }
-                if finalScore < 85 { finalScore = 85 }
-            } else {
-                // Standard mix cap at 90
-                if finalScore > 90 { finalScore = 90 }
-                // NO FLOOR - let scores vary naturally
-            }
+            // Standard mix cap at 90
+            if finalScore > 90 { finalScore = 90 }
         }
 
         // Cap masters at 100

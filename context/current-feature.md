@@ -1,45 +1,23 @@
-# Current Feature: Fix Scoring System
+# Current Feature: Fix Mislabeled Master Shown as Unmixed
 
 ## Status
 
-In Progress
+Complete
 
 ## Goals
 
-- Replace the old contradictory scoring rules with a clean **BaseScore + Bonuses − Penalties** formula
-  - Master: `min(100, max(0, 75 + bonuses − penalties))`
-  - Pre-master/Mix: `min(90, max(0, 65 + bonuses − penalties))`
-- Implement **9 genre groups** with per-metric Excellent / Acceptable / Penalize threshold tables: Metal/Hard Rock, Electronic/EDM, Hip-Hop/Trap/R&B, Pop, Rock/Indie, Classical/Orchestral, A Cappella/Vocal, Jazz, Live
-- Implement **universal bonuses** (apply when metric is in Excellent range for genre):
-  - +8 pts: no clipping AND loudness in Excellent range
-  - +5 pts: phase coherence in Excellent range
-  - +3 pts: mono compatibility in Excellent range
-  - +5 pts: dynamic range in Excellent range
-- Implement **universal penalties** (apply regardless of genre):
-  - −15 pts: clipping (peak > 0 dBFS)
-  - −10 pts: true peak > 0.0 dBTP
-  - −12 pts: phase coherence < 0.2
-  - −15 pts: mono cancellation of key element
-  - −5 pts per metric: any metric in the genre's Penalize range
-- Fix Metal/Hard Rock scoring: DR 4–6 and loudness −6 to −8 LUFS are genre-normal — never penalize
-- Make `getUserMessage` genre-aware: skip `hasFrequencyImbalance` / `hasDynamicRangeIssues` flags for Metal/EDM; raise `lowEnd` threshold to 70% for Metal
-- Pre-master cap at 90; master cap at 100 — no conflicting floor rules
+- When user labels a track as "Mix" but metrics strongly indicate a professional master (`professionalMasterOverride = true`), show a clear message like **"Detected as Master"** in the Overall Score section instead of "Unmixed - Needs Processing"
+- The track should receive a proper master-level score (e.g. 85–92) rather than an "Unmixed" label
+- `scoreDescription()` in `ResultsView.swift` must be aware of the `professionalMasterOverride` case and return an appropriate label
+- The `AnalysisResult` model (or a computed property) must surface the `professionalMasterOverride` flag so the view can use it
 
 ## Notes
 
-- Core principle from spec: LUFS is a result, not a goal. Score against the genre's own standard, not a universal baseline
-- Reference scores (sanity check):
-  - Korn "Twisted Transistor" (Metal, Master): 87–93
-  - Metallica "Enter Sandman" (Metal, Master): 82–88
-  - Daft Punk "Get Lucky" (EDM/Pop, Master): 88–94
-  - Billie Eilish "Bad Guy" (Pop, Master): 85–92
-  - Bach Cello Suite No.1 (Classical, Master): 90–96
-  - Miles Davis "Kind of Blue" (Jazz, Master): 88–94
-  - Professional rock pre-master: 82–88
-  - Good amateur pop pre-master: 72–80
-  - Amateur mix with clipping: 35–55
-- Cache version bumped to `v12.0-METAL-GENRE-OVERRIDE` to force fresh Claude responses
-- `createMasteredTrackPrompt` and `createPreMasterPrompt` are dead code — the active path is `getSystemPrompt` + `getUserMessage`
+- The override flag is set in `ClaudeAPIService.swift` around line 184: `professionalMasterOverride = true`
+- Currently `isUnmixed = false` is already set when override is active (line 213), but `isProfessionallyMixed` may still be `false`, causing `scoreDescription()` to fall into the "Unmixed" branch at line 1489
+- `scoreDescription(_:isProfessionallyMixed:mixStage:)` in `ResultsView.swift:1484` — need to add a third signal for the mislabeled-master case
+- The fix must NOT change how a genuine "Mix" stage with truly unmixed metrics is handled
+- Check whether `AnalysisResult` already stores a flag like `detectedAsMaster` or if one needs to be added
 
 ## History
 
@@ -52,3 +30,5 @@ In Progress
 - **Fix "Could Not Read Any Frequencies" Intermittent Error** — Investigated AVFoundation audio reading pipeline and async timing issues; adjusted cache key usage and enhanced FFT analysis error handling to resolve intermittent failure on same audio file.
 
 - **Fix Prompt & Scoring Issues** — Added `validateMetrics` guard, `AudioAnalysisError` enum, genre-aware scoring adjustments for electronic/acoustic/rock baselines, fixed scoring contradictions in mastered track and pre-master prompts.
+
+- **Fix Scoring System** — Replaced contradictory scoring rules with BaseScore + Bonuses − Penalties formula, 9 genre groups with per-metric thresholds, universal bonuses/penalties, Metal/Hard Rock scoring fix, pre-master cap at 90 / master cap at 100.

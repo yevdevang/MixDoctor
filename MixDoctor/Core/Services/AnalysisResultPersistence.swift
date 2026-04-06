@@ -63,6 +63,7 @@ final class AnalysisResultPersistence {
             "rmsLevel": result.rmsLevel,
             // Unmixed detection fields
             "isProfessionallyMixed": result.isProfessionallyMixed,
+            "stageMismatch": result.stageMismatch as Any,
             "monoCompatibility": result.monoCompatibility,
             "unmixedDetectionData": result.unmixedDetectionData?.base64EncodedString() as Any
         ]
@@ -261,6 +262,7 @@ final class AnalysisResultPersistence {
 
             // Load unmixed detection fields
             result.isProfessionallyMixed = data["isProfessionallyMixed"] as? Bool ?? true
+            result.stageMismatch = data["stageMismatch"] as? String
             result.monoCompatibility = data["monoCompatibility"] as? Double ?? 1.0
             if let base64String = data["unmixedDetectionData"] as? String,
                let decodedData = Data(base64Encoded: base64String) {
