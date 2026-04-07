@@ -430,16 +430,19 @@ struct ResultsView: View {
                         .stroke(Color(red: 0.435, green: 0.173, blue: 0.871).opacity(0.3), lineWidth: 12)
                         .frame(width: 160, height: 160)
 
-                    VStack(spacing: 8) {
+                    VStack(spacing: 6) {
                         Image(systemName: "exclamationmark.arrow.trianglehead.2.clockwise.rotate.90")
-                            .font(.system(size: 36))
+                            .font(.system(size: 32))
                             .foregroundColor(Color(red: 0.435, green: 0.173, blue: 0.871))
 
                         Text(detectedLabel)
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
+                            .font(.system(size: 13, weight: .semibold))
                             .foregroundColor(Color(red: 0.435, green: 0.173, blue: 0.871))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .padding(.horizontal, 8)
                     }
+                    .frame(width: 140)
                 }
             } else if result.isProfessionallyMixed {
                 ZStack {
