@@ -169,44 +169,46 @@ final class ProfessionalMasterOverrideTests: XCTestCase {
 
     // MARK: - Professional Master Override Score Tests
 
-    /// Test that professional override enforces 85-92 range
-    func testProfessionalOverride_ScoreRange() {
-        // Test cap at 92
-        let highScore = claudeService.parseClaudeResponse("SCORE: 98", isMastered: false, professionalMasterOverride: true)
-        XCTAssertEqual(highScore.score, 92, "Professional override should cap at 92")
+    /// Test that stage mismatch is now caught before Claude is called.
+    /// When professional master is detected and user selected Mix, analysis is blocked.
+    /// So parseClaudeResponse only handles valid stage selections — standard mix cap at 90.
+    func testMixScoring_StandardCap() {
+        // Mix cap at 90
+        let highScore = claudeService.parseClaudeResponse("SCORE: 98", isMastered: false)
+        XCTAssertEqual(highScore.score, 90, "Mix should cap at 90")
 
-        // Test floor at 85
-        let lowScore = claudeService.parseClaudeResponse("SCORE: 70", isMastered: false, professionalMasterOverride: true)
-        XCTAssertEqual(lowScore.score, 85, "Professional override should floor at 85")
+        // Low scores stay as-is (no floor)
+        let lowScore = claudeService.parseClaudeResponse("SCORE: 70", isMastered: false)
+        XCTAssertEqual(lowScore.score, 70, "Mix score 70 should stay 70")
 
-        // Test middle scores stay in range
-        let midScore = claudeService.parseClaudeResponse("SCORE: 88", isMastered: false, professionalMasterOverride: true)
-        XCTAssertEqual(midScore.score, 88, "Professional override should keep 88 unchanged")
+        // Mid scores within range
+        let midScore = claudeService.parseClaudeResponse("SCORE: 88", isMastered: false)
+        XCTAssertEqual(midScore.score, 88, "Mix score 88 should stay 88")
     }
 
     /// Test that standard mix (no override) caps at 90 with no floor
     func testStandardMix_ScoreCap() {
         // Test cap at 90
-        let highScore = claudeService.parseClaudeResponse("SCORE: 95", isMastered: false, professionalMasterOverride: false)
+        let highScore = claudeService.parseClaudeResponse("SCORE: 95", isMastered: false)
         XCTAssertEqual(highScore.score, 90, "Standard mix should cap at 90")
 
         // Test NO floor (scores can go below 75)
-        let lowScore = claudeService.parseClaudeResponse("SCORE: 60", isMastered: false, professionalMasterOverride: false)
+        let lowScore = claudeService.parseClaudeResponse("SCORE: 60", isMastered: false)
         XCTAssertEqual(lowScore.score, 60, "Standard mix should NOT have a floor (60 stays 60)")
 
         // Test very low scores stay low
-        let veryLowScore = claudeService.parseClaudeResponse("SCORE: 45", isMastered: false, professionalMasterOverride: false)
+        let veryLowScore = claudeService.parseClaudeResponse("SCORE: 45", isMastered: false)
         XCTAssertEqual(veryLowScore.score, 45, "Unmixed scores should remain very low (45 stays 45)")
     }
 
     /// Test that master scores cap at 100 with no floor
     func testMaster_ScoreCap() {
         // Test cap at 100
-        let highScore = claudeService.parseClaudeResponse("SCORE: 125", isMastered: true, professionalMasterOverride: false)
+        let highScore = claudeService.parseClaudeResponse("SCORE: 125", isMastered: true)
         XCTAssertEqual(highScore.score, 100, "Master should cap at 100")
 
         // Test no floor for masters
-        let lowScore = claudeService.parseClaudeResponse("SCORE: 70", isMastered: true, professionalMasterOverride: false)
+        let lowScore = claudeService.parseClaudeResponse("SCORE: 70", isMastered: true)
         XCTAssertEqual(lowScore.score, 70, "Master should NOT have a floor (70 stays 70)")
     }
 
@@ -235,7 +237,7 @@ final class ProfessionalMasterOverrideTests: XCTestCase {
     func testUnmixedOverride_MixStageWithUnmixedMetrics() {
         // When user selects Mix stage and metrics indicate unmixed,
         // the track should be scored as unmixed (no override)
-        let unmixedScore = claudeService.parseClaudeResponse("SCORE: 55", isMastered: false, professionalMasterOverride: false)
+        let unmixedScore = claudeService.parseClaudeResponse("SCORE: 55", isMastered: false)
         XCTAssertEqual(unmixedScore.score, 55, "Mix stage with unmixed metrics should score low")
     }
 
@@ -319,6 +321,7 @@ final class ProfessionalMasterOverrideTests: XCTestCase {
     // MARK: - Real-World Scenario Tests
 
     /// Test Korn "Twisted Transistor" scenario - user labels as Mix but it's a master
+    /// With stage mismatch detection, this is now caught before Claude is called.
     func testKornScenario_LabeledAsMix() {
         // Korn-level metrics
         let metrics = createMockMetrics(
@@ -334,9 +337,9 @@ final class ProfessionalMasterOverrideTests: XCTestCase {
         let isProMaster = claudeService.testDetectDefiniteProfessionalMaster(metrics)
         XCTAssertTrue(isProMaster, "Korn should be detected as professional master")
 
-        // With professional override, score should be in 85-92 range
-        let parsed = claudeService.parseClaudeResponse("SCORE: 88", isMastered: false, professionalMasterOverride: true)
-        XCTAssertTrue((85...92).contains(parsed.score), "Korn labeled as Mix should score 85-92 with override")
+        // Also detectable by detectMasteredTrack (used for stage mismatch)
+        let isMastered = claudeService.detectMasteredTrack(metrics)
+        XCTAssertTrue(isMastered, "Korn should be detected as mastered track")
     }
 
     /// Test Korn "Twisted Transistor" scenario - correctly labeled as Master
@@ -360,7 +363,7 @@ final class ProfessionalMasterOverrideTests: XCTestCase {
         XCTAssertFalse(isProMaster, "Amateur mix should NOT be detected as professional")
 
         // Amateur mix score should stay in low range (no floor)
-        let parsed = claudeService.parseClaudeResponse("SCORE: 72", isMastered: false, professionalMasterOverride: false)
+        let parsed = claudeService.parseClaudeResponse("SCORE: 72", isMastered: false)
         XCTAssertEqual(parsed.score, 72, "Amateur mix should score 72")
     }
 

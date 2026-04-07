@@ -274,49 +274,61 @@ public class AudioKitService: ObservableObject {
                 isProUser: isProUser
             )
             
+            // ========================================
+            // STAGE MISMATCH DETECTION
+            // Check if user-selected stage matches the audio metrics.
+            // If mismatch, skip Claude API call and return early.
+            // ========================================
+            let isMasteredByMetrics = ClaudeAPIService.shared.detectMasteredTrack(metrics)
+            let userSelectedMix = mixStage == "mix"
+            let userSelectedMaster = mixStage?.contains("master") == true
+
+            if userSelectedMix && isMasteredByMetrics {
+                // User says Mix, but audio is clearly a mastered track
+                print("🚫 STAGE MISMATCH: User selected 'Mix' but metrics indicate mastered track — skipping Claude API")
+                result.stageMismatch = "master"
+                result.isProfessionallyMixed = true
+                result.overallScore = 0
+                result.aiSummary = nil
+                result.aiRecommendations = []
+                return result
+            }
+
+            if userSelectedMaster && !isMasteredByMetrics {
+                // User says Master, but audio is clearly a pre-master mix
+                print("🚫 STAGE MISMATCH: User selected 'Master' but metrics indicate pre-master mix — skipping Claude API")
+                result.stageMismatch = "mix"
+                result.isProfessionallyMixed = true
+                result.overallScore = 0
+                result.aiSummary = nil
+                result.aiRecommendations = []
+                return result
+            }
+
             // Claude API call - ensure it's off main thread
             // Pass user-selected genre and mixStage if available (passed through function chain)
             let claudeResponse = try await Task.detached(priority: .userInitiated) {
                 try await ClaudeAPIService.shared.analyzeAudioMetrics(metrics, userGenre: genre, mixStage: mixStage)
             }.value
-            
+
+            print("══════════════════════════════════════════════")
+            print("🤖 CLAUDE RESPONSE (mixStage: \(mixStage ?? "nil"), genre: \(genre ?? "nil"))")
+            print("  Score: \(claudeResponse.score)")
+            print("  Summary: \(claudeResponse.summary.prefix(200))")
+            print("  Ready for mastering: \(claudeResponse.isReadyForMastering)")
+            print("══════════════════════════════════════════════")
+
             // Update progress: Complete
             await MainActor.run {
                 AnalysisProgressTracker.shared.updateProgress(step: "Finalizing results...", progress: 0.95)
             }
-            
-            // ========================================
-            // SMART UNMIXED DETECTION
-            // Genre-aware + Stage-aware logic
-            // ========================================
+
+            // UNMIXED DETECTION
+            // Only show "Unmixed" when AudioKit's DSP detector explicitly says so.
             let isUnmixedByDetection = result.unmixedDetection!.isLikelyUnmixed
-            let isUnmixedByScore = claudeResponse.score < 70  // Lowered threshold - only very low scores indicate unmixed
+            result.isProfessionallyMixed = !isUnmixedByDetection
 
-            let genreLower = genre?.lowercased() ?? ""
-            let isJazzOrClassical = genreLower.contains("jazz") || genreLower.contains("classical") ||
-                                    genreLower.contains("blues") || genreLower.contains("acoustic") ||
-                                    genreLower.contains("orchestral") || genreLower.contains("live") ||
-                                    genreLower.contains("singer-songwriter") || genreLower.contains("singer") ||
-                                    genreLower.contains("acapella") || genreLower.contains("a capella")
-
-            // Genre-aware thresholds - Jazz/Classical/Live have naturally different characteristics
-            let minPhaseForGenre: Double = isJazzOrClassical ? 0.15 : 0.40
-            let maxDynamicRangeForGenre: Double = isJazzOrClassical ? 35.0 : 22.0
-
-            let hasSevereTechnicalIssues = (
-                result.phaseCoherence < minPhaseForGenre ||
-                (result.stereoWidthScore > 98 && result.monoCompatibility < 0.60) ||  // More lenient
-                result.dynamicRange > maxDynamicRangeForGenre
-            )
-
-            // Stage-aware: Both Mix and Master stages should use same threshold
-            // A score of 68+ indicates the track is processed (mixed), not raw/unmixed
-            let claudeOverride = claudeResponse.score >= 68  // Consistent threshold for all stages
-
-            // Final decision: Claude score can override, OR no unmixed indicators
-            result.isProfessionallyMixed = claudeOverride || !(isUnmixedByDetection || isUnmixedByScore || hasSevereTechnicalIssues)
-
-            print("🔍 UNMIXED CHECK: detection=\(isUnmixedByDetection), score<70=\(isUnmixedByScore), techIssues=\(hasSevereTechnicalIssues), claudeOverride=\(claudeOverride) → isPro=\(result.isProfessionallyMixed)")
+            print("🔍 UNMIXED CHECK: detection=\(isUnmixedByDetection) → isPro=\(result.isProfessionallyMixed)")
             result.aiSummary = claudeResponse.summary
             result.aiRecommendations = claudeResponse.recommendations
             result.isReadyForMastering = claudeResponse.isReadyForMastering
@@ -334,22 +346,8 @@ public class AudioKitService: ObservableObject {
                 print("❌ Analysis Error: \(error.localizedDescription)")
             }
             
-            // API failed - use genre-aware detection logic
-            let genreLowerFallback = genre?.lowercased() ?? ""
-            let isJazzOrClassicalFallback = genreLowerFallback.contains("jazz") || genreLowerFallback.contains("classical") ||
-                                            genreLowerFallback.contains("blues") || genreLowerFallback.contains("acoustic") ||
-                                            genreLowerFallback.contains("orchestral") || genreLowerFallback.contains("live") ||
-                                            genreLowerFallback.contains("singer-songwriter") || genreLowerFallback.contains("singer") ||
-                                            genreLowerFallback.contains("acapella") || genreLowerFallback.contains("a capella")
-            let minPhaseFallback: Double = isJazzOrClassicalFallback ? 0.15 : 0.40
-            let maxDRFallback: Double = isJazzOrClassicalFallback ? 35.0 : 22.0
-
-            let hasSevereTechnicalIssuesFallback = (
-                result.phaseCoherence < minPhaseFallback ||
-                (result.stereoWidthScore > 98 && result.monoCompatibility < 0.60) ||
-                result.dynamicRange > maxDRFallback
-            )
-            result.isProfessionallyMixed = !(result.unmixedDetection!.isLikelyUnmixed || hasSevereTechnicalIssuesFallback)
+            // API failed - rely solely on AudioKit's unmixed detector (same rule as success path)
+            result.isProfessionallyMixed = !result.unmixedDetection!.isLikelyUnmixed
             
             // Provide more specific error messages based on error type
             if let claudeError = error as? ClaudeAPIError {
@@ -2411,14 +2409,18 @@ enum AudioKitError: Error {
         let endBin = Int(highFreq / binWidth)
         let clampedStartBin = max(0, startBin)
         let clampedEndBin = min(magnitudes.count / 2, endBin)
-        
+
         guard clampedStartBin < clampedEndBin else { return 0.0 }
-        
+
+        // Use magnitude (not power/mag²) for perceptual frequency balance.
+        // Power (mag²) amplifies bass dominance: a 10x amplitude difference
+        // becomes 100x in power, giving unrealistic results like 87% low end
+        // for a balanced Metal track. Magnitude matches what spectrum analyzers show.
         let range = clampedStartBin..<clampedEndBin
         let energy = magnitudes[range].reduce(0.0) { sum, magnitude in
-            sum + Double(magnitude * magnitude)
+            sum + Double(abs(magnitude))
         }
-        
+
         return energy
     }
     
@@ -2563,37 +2565,31 @@ enum AudioKitError: Error {
         let sampleRate: Double = 44100.0
         let windowSize = 4096
         
-        // Use real audio data - find the loudest section for best frequency representation
-        
-        // Find the loudest window in the audio for best frequency analysis
-        var maxEnergy: Float = 0
-        var bestWindowStart = 0
-        
+        // Analyze multiple windows and AVERAGE their energy distribution.
+        // Using a single "loudest window" biases toward bass transients (kick drums, bass hits)
+        // which gives wildly inaccurate frequency balance (e.g., 95% low end for Metal).
+        // Averaging the top N loudest windows gives a representative picture of the full track.
+
         let stepSize = windowSize / 2 // 50% overlap
+        var windowEnergies: [(start: Int, energy: Float)] = []
+
         var currentStart = 0
         while currentStart < frameCount - windowSize {
             let windowSamples = Array(samples[currentStart..<min(currentStart + windowSize, frameCount)])
             let energy = windowSamples.reduce(0.0) { $0 + abs($1) }
-            if energy > maxEnergy {
-                maxEnergy = energy
-                bestWindowStart = currentStart
-            }
+            windowEnergies.append((start: currentStart, energy: energy))
             currentStart += stepSize
         }
-        
-        let windowSamples = Array(samples[bestWindowStart..<min(bestWindowStart + windowSize, frameCount)])
 
-        // Get FFT from real audio
-        let magnitudes = performFFTAnalysis(windowSamples)
+        // Sort by energy descending and take top 16 windows (or all if fewer)
+        let topWindows = windowEnergies.sorted { $0.energy > $1.energy }.prefix(16)
 
-        // Guard against empty FFT result (too-short file, all-silence, or vDSP setup failure)
-        guard !magnitudes.isEmpty else {
-            print("⚠️ analyzeSpectralBalance: FFT returned empty magnitudes — returning default spectral balance")
+        guard !topWindows.isEmpty else {
+            print("⚠️ analyzeSpectralBalance: No valid windows found — returning default spectral balance")
             return SpectralBalanceResult()
         }
 
         let nyquist = sampleRate / 2.0
-        let binWidth = nyquist / Double(magnitudes.count / 2)
 
         // Professional mastering frequency bands
         let subBassRange = (20.0, 60.0)        // Sub-bass
@@ -2604,25 +2600,55 @@ enum AudioKitError: Error {
         let presenceRange = (6000.0, 12000.0)  // Presence
         let airRange = (12000.0, 20000.0)      // Air
 
-        // Calculate energy in each band as PERCENTAGES
-        let totalEnergy = magnitudes.prefix(magnitudes.count / 2).reduce(0.0) { sum, mag in
-            sum + Double(mag * mag)
+        // Accumulate energy percentages across all top windows
+        var accSubBass = 0.0, accBass = 0.0, accLowMid = 0.0, accMid = 0.0
+        var accHighMid = 0.0, accPresence = 0.0, accAir = 0.0
+        var validWindowCount = 0
+        var lastMagnitudes: [Float] = []
+
+        for window in topWindows {
+            let windowSamples = Array(samples[window.start..<min(window.start + windowSize, frameCount)])
+            let magnitudes = performFFTAnalysis(windowSamples)
+
+            guard !magnitudes.isEmpty else { continue }
+
+            let binWidth = nyquist / Double(magnitudes.count / 2)
+            let totalEnergy = magnitudes.prefix(magnitudes.count / 2).reduce(0.0) { sum, mag in
+                sum + Double(abs(mag))
+            }
+
+            guard totalEnergy > 0.0 else { continue }
+
+            accSubBass += (calculateBandEnergyForRange(magnitudes, lowFreq: subBassRange.0, highFreq: subBassRange.1, binWidth: binWidth) / totalEnergy) * 100.0
+            accBass += (calculateBandEnergyForRange(magnitudes, lowFreq: bassRange.0, highFreq: bassRange.1, binWidth: binWidth) / totalEnergy) * 100.0
+            accLowMid += (calculateBandEnergyForRange(magnitudes, lowFreq: lowMidRange.0, highFreq: lowMidRange.1, binWidth: binWidth) / totalEnergy) * 100.0
+            accMid += (calculateBandEnergyForRange(magnitudes, lowFreq: midRange.0, highFreq: midRange.1, binWidth: binWidth) / totalEnergy) * 100.0
+            accHighMid += (calculateBandEnergyForRange(magnitudes, lowFreq: highMidRange.0, highFreq: highMidRange.1, binWidth: binWidth) / totalEnergy) * 100.0
+            accPresence += (calculateBandEnergyForRange(magnitudes, lowFreq: presenceRange.0, highFreq: presenceRange.1, binWidth: binWidth) / totalEnergy) * 100.0
+            accAir += (calculateBandEnergyForRange(magnitudes, lowFreq: airRange.0, highFreq: airRange.1, binWidth: binWidth) / totalEnergy) * 100.0
+            validWindowCount += 1
+            lastMagnitudes = magnitudes
         }
 
-        // Guard against zero total energy (all-silent window) to prevent NaN from 0/0 division
-        guard totalEnergy > 0.0 else {
-            print("⚠️ analyzeSpectralBalance: totalEnergy is zero (silent audio window) — returning default spectral balance")
+        guard validWindowCount > 0 else {
+            print("⚠️ analyzeSpectralBalance: No valid FFT windows — returning default spectral balance")
             return SpectralBalanceResult()
         }
 
-        // FIXED: Convert to percentages by multiplying by 100
-        let subBassEnergy = (calculateBandEnergyForRange(magnitudes, lowFreq: subBassRange.0, highFreq: subBassRange.1, binWidth: binWidth) / totalEnergy) * 100.0
-        let bassEnergy = (calculateBandEnergyForRange(magnitudes, lowFreq: bassRange.0, highFreq: bassRange.1, binWidth: binWidth) / totalEnergy) * 100.0
-        let lowMidEnergy = (calculateBandEnergyForRange(magnitudes, lowFreq: lowMidRange.0, highFreq: lowMidRange.1, binWidth: binWidth) / totalEnergy) * 100.0
-        let midEnergy = (calculateBandEnergyForRange(magnitudes, lowFreq: midRange.0, highFreq: midRange.1, binWidth: binWidth) / totalEnergy) * 100.0
-        let highMidEnergy = (calculateBandEnergyForRange(magnitudes, lowFreq: highMidRange.0, highFreq: highMidRange.1, binWidth: binWidth) / totalEnergy) * 100.0
-        let presenceEnergy = (calculateBandEnergyForRange(magnitudes, lowFreq: presenceRange.0, highFreq: presenceRange.1, binWidth: binWidth) / totalEnergy) * 100.0
-        let airEnergy = (calculateBandEnergyForRange(magnitudes, lowFreq: airRange.0, highFreq: airRange.1, binWidth: binWidth) / totalEnergy) * 100.0
+        let magnitudes = lastMagnitudes // Keep for spectrum display
+        let binWidth = nyquist / Double(magnitudes.count / 2)
+        let count = Double(validWindowCount)
+
+        // Average the energy percentages across all analyzed windows
+        let subBassEnergy = accSubBass / count
+        let bassEnergy = accBass / count
+        let lowMidEnergy = accLowMid / count
+        let midEnergy = accMid / count
+        let highMidEnergy = accHighMid / count
+        let presenceEnergy = accPresence / count
+        let airEnergy = accAir / count
+
+        print("📊 Spectral balance averaged over \(validWindowCount) windows (was: single loudest window)")
         
         // Calculate spectral tilt (brightness measure)
         let lowTotal = subBassEnergy + bassEnergy + lowMidEnergy

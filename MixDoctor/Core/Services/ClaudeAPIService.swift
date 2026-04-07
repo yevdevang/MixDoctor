@@ -129,10 +129,32 @@ class ClaudeAPIService {
     /// Send audio analysis metrics to Claude and get AI insights
     func analyzeAudioMetrics(_ metrics: AudioMetricsForClaude, userGenre: String? = nil, mixStage: String? = nil) async throws -> ClaudeAnalysisResponse {
         
-        // Debug: verify all frequency values are non-zero before sending to Claude
-        print("🎵 FREQUENCY DATA SENT TO CLAUDE:")
-        print("  5-band: Low End \(String(format: "%.1f", metrics.lowEnd))%, Low Mid \(String(format: "%.1f", metrics.lowMid))%, Mid \(String(format: "%.1f", metrics.mid))%, High Mid \(String(format: "%.1f", metrics.highMid))%, High \(String(format: "%.1f", metrics.high))%")
+        // Debug: print ALL key metrics sent to Claude for scoring diagnosis
+        print("══════════════════════════════════════════════")
+        print("📊 FULL METRICS SENT TO CLAUDE (mixStage: \(mixStage ?? "nil"))")
+        print("══════════════════════════════════════════════")
+        print("  🔊 Loudness (LUFS):     \(String(format: "%.1f", metrics.loudness))")
+        print("  📊 Peak Level (dBFS):    \(String(format: "%.1f", metrics.peakLevel))")
+        print("  📈 RMS Level (dB):       \(String(format: "%.1f", metrics.rmsLevel))")
+        print("  🎚️ Dynamic Range (dB):   \(String(format: "%.1f", metrics.dynamicRange))")
+        print("  📉 Crest Factor (dB):    \(String(format: "%.1f", metrics.truePeakLevel - metrics.rmsLevel))")
+        print("  🔝 True Peak (dBFS):     \(String(format: "%.1f", metrics.truePeakLevel))")
+        print("  📏 Integrated LUFS:      \(String(format: "%.1f", metrics.integratedLoudness))")
+        print("  🎚️ Stereo Width:         \(String(format: "%.1f", metrics.stereoWidth))%")
+        print("  🎭 Phase Coherence:      \(String(format: "%.3f", metrics.phaseCoherence)) (\(String(format: "%.1f", metrics.phaseCoherence * 100))%)")
+        print("  🔊 Mono Compatibility:   \(String(format: "%.1f", metrics.monoCompatibility * 100))%")
+        print("  🏷️ Genre:                \(metrics.genre ?? "nil")")
+        print("  🚨 Issue Flags:")
+        print("     Clipping:             \(metrics.hasClipping)")
+        print("     Phase Issues:         \(metrics.hasPhaseIssues)")
+        print("     Stereo Issues:        \(metrics.hasStereoIssues)")
+        print("     Freq Imbalance:       \(metrics.hasFrequencyImbalance)")
+        print("     DR Issues:            \(metrics.hasDynamicRangeIssues)")
+        print("     Likely Unmixed:       \(metrics.isLikelyUnmixed)")
+        print("  🎵 Frequency Balance:")
+        print("     Low End:  \(String(format: "%.1f", metrics.lowEnd))%  |  Low Mid: \(String(format: "%.1f", metrics.lowMid))%  |  Mid: \(String(format: "%.1f", metrics.mid))%  |  High Mid: \(String(format: "%.1f", metrics.highMid))%  |  High: \(String(format: "%.1f", metrics.high))%")
         print("  7-band: SubBass \(String(format: "%.1f", metrics.subBassEnergy))%, Bass \(String(format: "%.1f", metrics.bassEnergy))%, LowMid \(String(format: "%.1f", metrics.lowMidEnergy))%, Mid \(String(format: "%.1f", metrics.midEnergy))%, HighMid \(String(format: "%.1f", metrics.highMidEnergy))%, Presence \(String(format: "%.1f", metrics.presenceEnergy))%, Air \(String(format: "%.1f", metrics.airEnergy))%")
+        print("══════════════════════════════════════════════")
         let frequencyTotal = metrics.lowEnd + metrics.lowMid + metrics.mid + metrics.highMid + metrics.high
         if frequencyTotal < 1.0 {
             print("⚠️ WARNING: All frequency bands are near zero — AnalysisResult may not be fully populated")
@@ -142,56 +164,34 @@ class ClaudeAPIService {
         try validateMetrics(metrics)
 
         // Detect track type and genre
-        // User-selected stage takes PRIORITY over metrics detection
+        // Stage mismatches (user says Mix but it's a Master, or vice versa) are caught
+        // BEFORE this function is called — AudioKitService returns early without calling Claude.
+        // By the time we get here, the user-selected stage is trusted.
         let stageLower = mixStage?.lowercased() ?? ""
         let isMasteredByStage = stageLower.contains("master")
-        let isMixStage = stageLower == "mix"  // Exact match only - don't match "master_streaming"!
+        let isMixStage = stageLower == "mix"
         let isMasteredByMetrics = detectMasteredTrack(metrics)
-        let isDefinitelyProfessionalMaster = detectDefiniteProfessionalMaster(metrics)
 
-        // INTELLIGENT OVERRIDE: Even if user says "Mix", if metrics STRONGLY indicate
-        // a professional master (Korn, Green Day, etc.), we should score it appropriately
         let isMastered: Bool
-        var professionalMasterOverride = false  // Used for scoring adjustment
         if isMixStage {
-            // Check if metrics STRONGLY indicate this is actually a professional master
-            if isDefinitelyProfessionalMaster {
-                print("🎯 PROFESSIONAL OVERRIDE: User labeled as 'Mix' but metrics indicate professional master")
-                print("   - Will use hybrid scoring: Mix prompts but professional-friendly score ranges")
-                isMastered = false  // Keep using mix prompts for context
-                professionalMasterOverride = true  // Flag for score adjustment
-            } else {
-                isMastered = false  // User said it's a Mix - respect that
-            }
+            isMastered = false
         } else if isMasteredByStage {
-            isMastered = true   // User said it's a Master - respect that!
+            isMastered = true
         } else {
             isMastered = isMasteredByMetrics  // Auto-detect from metrics
         }
-        
+
         if let stage = mixStage {
             print("🎚️ USER-SELECTED STAGE: \(stage) - isMastered: \(isMastered) (Mix='\(isMixStage)', Master='\(isMasteredByStage)')")
         }
         // Prioritize genre from metrics (user-selected), then userGenre parameter, then auto-detect
         let genre = metrics.genre ?? userGenre ?? detectGenre(metrics)
 
-        // CRITICAL: Override unmixed detection based on user selection
-        // If user explicitly selected a Master stage, it's NOT unmixed regardless of metrics
-        // If user selected Mix, use metrics detection
-        // If professional master override is active, it's NOT unmixed
+        // Unmixed detection
         let isUnmixed: Bool
         if isMasteredByStage {
-            // User said it's a Master - NEVER treat as unmixed
             isUnmixed = false
-            if metrics.isLikelyUnmixed {
-                print("🎯 MASTER OVERRIDE: User selected Master stage - ignoring unmixed detection")
-            }
-        } else if professionalMasterOverride {
-            // Professional master detected even though labeled as Mix - NOT unmixed
-            isUnmixed = false
-            print("🎯 PROFESSIONAL OVERRIDE: Metrics indicate professional master - ignoring unmixed detection")
         } else {
-            // Use metrics detection
             isUnmixed = metrics.isLikelyUnmixed
         }
 
@@ -209,7 +209,7 @@ class ClaudeAPIService {
         
         // Get separated prompts for caching
         // CACHE VERSION: Update this number when scoring rules change to bust the cache
-        let cacheVersion = "v11.0-MANDATORY-RECOMMENDATIONS"  // Force Claude to always generate recommendations when issues exist
+        let cacheVersion = "v12.0-METAL-GENRE-OVERRIDE"  // Metal/Hard Rock streaming scoring fixed
         let systemPrompt = getSystemPrompt(isMastered: isMastered, isUnmixed: isUnmixed, genre: genre, mixStage: mixStage) + "\n\n[Scoring Rules Version: \(cacheVersion)]"
         let userMessage = getUserMessage(metrics: metrics, genre: genre, isMastered: isMastered)
         
@@ -276,7 +276,7 @@ class ClaudeAPIService {
             print("📥 CLAUDE API RAW JSON RESPONSE:\n\(jsonString.prefix(500))\n")
         }
         
-        return try parseClaudeResponse(data, isMastered: isMastered, professionalMasterOverride: professionalMasterOverride)
+        return try parseClaudeResponse(data, isMastered: isMastered)
     }
 
     private func determineModel(isProUser: Bool) -> String {
@@ -285,7 +285,7 @@ class ClaudeAPIService {
         return isProUser ? "claude-sonnet-4-5-20250929" : "claude-haiku-4-5-20251001"
     }
     
-    private func detectMasteredTrack(_ metrics: AudioMetricsForClaude) -> Bool {
+    func detectMasteredTrack(_ metrics: AudioMetricsForClaude) -> Bool {
         // If detected as unmixed, it's definitely NOT mastered
         if metrics.isLikelyUnmixed {
             print("🚨 UNMIXED TRACK DETECTED - not mastered")
@@ -361,10 +361,10 @@ class ClaudeAPIService {
     /// This is used to override user "Mix" label when metrics clearly indicate mastered audio
     /// Amateur mixes cannot achieve these characteristics - they require professional mastering
     private func detectDefiniteProfessionalMaster(_ metrics: AudioMetricsForClaude) -> Bool {
-        // Skip if detected as unmixed - unmixed tracks are never professional masters
-        if metrics.isLikelyUnmixed {
-            return false
-        }
+        // NOTE: We intentionally do NOT short-circuit on isLikelyUnmixed here.
+        // AudioKit's unmixed detector can be wrong, especially for live/remix tracks.
+        // If the hard metrics (loudness, peaks, dynamics) all pass the strict professional
+        // thresholds below, that is a stronger signal than the unmixed heuristic.
 
         // STRICT CRITERIA - Only override if indicators STRONGLY point to professional master
         // These are characteristics that amateur mixes simply cannot achieve
@@ -774,17 +774,20 @@ class ClaudeAPIService {
             📈 RMS/LOUDNESS:
             • Standard: LUFS (ITU-R BS.1770-4)
             • Display: LUFS/dB
-            • Warning Thresholds: <-14 LUFS (streaming), >-6 LUFS (too loud)
-            
+            • Warning Thresholds: <-14 LUFS (streaming), >-6 LUFS (too loud for Pop/Rock)
+            • Genre exceptions: Metal/Hard Rock -5 to -9 LUFS is NORMAL; EDM -5 to -8 LUFS is NORMAL
+
             🎚️ DYNAMIC RANGE:
             • Calculation: DR = peak - RMS OR PLR
             • Display: dB or DR units
-            • Warning Threshold: <6 DR (over-compressed)
-            
+            • Warning Threshold: <6 DR (over-compressed for Pop/Rock/Classical)
+            • Genre exceptions: Metal/Hard Rock DR4-6 is INTENTIONAL (industry standard); EDM DR4-6 is NORMAL
+
             📉 CREST FACTOR:
             • Calculation: 20×log₁₀(peak/rms)
             • Display: dB
-            • Warning Threshold: <6 dB (crushed dynamics)
+            • Warning Threshold: <6 dB (crushed dynamics for Pop/Rock)
+            • Genre exceptions: Metal/Hard Rock crest 4-6 dB is NORMAL for the genre
             
             🎵 FREQUENCY BALANCE:
             • Low End (20-200Hz)
@@ -793,363 +796,157 @@ class ClaudeAPIService {
             • High Mid (3-8kHz)
             • High (8-20kHz)
             
-            🎯 SCORING RULES (0-100 scale) - GENRE-AWARE ANALYSIS:
-            
-            ⚠️ CRITICAL: GENRE-SPECIFIC ANALYSIS REQUIRED
-            The user has selected the genre: **\(genre)**
-            You MUST analyze this track according to \(genre) genre standards and expectations.
-            Genre-specific frequency characteristics are INTENTIONAL and CORRECT - do NOT penalize for genre-appropriate frequency balance.
-            Only penalize for technical defects that would be problematic regardless of genre.
-            Use genre-specific frequency guidelines for \(genre) when evaluating frequency balance.
-            
-            \(isLiveRecording ? """
-            ⚠️ LIVE RECORDING SCORING PHILOSOPHY:
-            • Live recordings should be scored using LIVE MIXING standards, not studio mastering standards
-            • Higher dynamic range (10-18dB) is NORMAL and EXPECTED for live recordings
-            • Room acoustics, audience noise, and natural reverb are part of the live experience
-            • Frequency balance will vary based on venue acoustics - this is NORMAL
-            • Less compression is typical - live mixes preserve performance dynamics
-            • Scoring should reflect the quality of LIVE MIXING, not studio production polish
-            • Excellent live mixes score 80-90 points (preserving performance energy while maintaining clarity)
-            • Good live mixes score 70-79 points (decent balance, some room issues acceptable)
-            • Acceptable live mixes score 60-69 points (workable, but needs improvement)
-            
-            """ : "")
-            ⚠️ SCORING PHILOSOPHY FOR \(isLiveRecording ? "LIVE RECORDING MIXES" : "MASTERED TRACKS"):
-            • Commercial mastered tracks (Korn, Green Day, etc.) should score 88-95 points
-            • Start at 100 points and subtract ONLY for actual technical defects
-            • Genre characteristics (bass-heavy Rock, compressed EDM) are CORRECT, not problems
-            • Frequency distribution is ARTISTIC - only penalize if truly broken (>85% in one band)
-            
-            SCORING CALCULATION FOR MASTERED TRACKS:
-            1. Start at 100 points
-            2. Subtract penalties ONLY for technical problems (see below)
-            3. Professional commercial masters should score 88-95 (only -5 to -12 points total)
-            4. Minimum acceptable mastered track: 85 points
-            
-            ⚠️ LOUDNESS-BASED SCORE CAPS (CRITICAL):
-            If loudness is extremely low, the track may be unmixed or unmastered. Apply these HARD CAPS:
-            • Loudness < -30 LUFS: Maximum score = 60 (raw recording)
-            • Loudness -30 to -25 LUFS: Maximum score = 70 (needs mastering)
-            • Loudness -25 to -20 LUFS: Maximum score = 80 (pre-master mix)
-            • Loudness -20 to -16 LUFS: Maximum score = 90 (conservative master)
-            • Loudness > -16 LUFS: No cap (modern mastering)
-            
-            When applying a cap, you MUST:
-            1. Use the capped score (do not exceed the maximum)
-            2. Add to insights: "⚠️ Score capped at [X] due to very low loudness ([Y] LUFS) - this may be an unmixed or unmastered track"
-            3. Add to recommendations: "This track needs mixing and mastering to reach commercial loudness levels"
-            
-            GENRE-SPECIFIC FREQUENCY EXPECTATIONS (DO NOT PENALIZE):
-            
-            ⚠️ CONSISTENCY REMINDER: Genre provides CONTEXT, not different scoring thresholds!
-            - Same track analyzed as Rock vs Pop should score within ±2 points
-            - Genre-specific frequency balance is INTENTIONAL - acknowledge it but don't penalize
-            - Only penalize SEVERE technical issues (>85% in one band) consistently across all genres
-            
-            ⚠️ CURRENT TRACK GENRE: **\(genre)**
-            Apply the following genre-specific expectations for \(genre). These characteristics are INTENTIONAL and CORRECT for this genre.
-            REMEMBER: These are EXPECTATIONS for context, not PENALTIES. The same track should score similarly regardless of genre selection.
-            
-            POP:
-            • Bass 20-35%: Balanced foundation (no penalty)
-            • Low-Mid 18-28%: Warmth and body (no penalty)
-            • Mid 28-45%: Vocal clarity CRITICAL (no penalty)
-            • High-Mid 15-25%: Vocal presence (no penalty)
-            • High 8-15%: Bright and airy (no penalty)
-            
-            ROCK/INDIE:
-            • Bass 20-35%: Balanced foundation (no penalty)
-            • Low-Mid 18-28%: Guitar warmth (no penalty)
-            • Mid 25-40%: Vocal and instrument clarity (no penalty)
-            • High-Mid 15-25%: Presence and articulation (no penalty)
-            • High 8-18%: Air and sparkle (no penalty)
-            
-            HIP-HOP/R&B:
-            • Bass 30-50%: NORMAL for 808s and sub-bass (no penalty)
-            • Low-Mid 20-35%: Vocal warmth and 808 body (no penalty)
-            • Mid 20-35%: Vocal clarity (no penalty)
-            • High-Mid 8-20%: Vocal presence (no penalty)
-            • High 2-12%: Intentionally warm/dark (no penalty)
-            
-            EDM/ELECTRONIC:
-            • Bass 35-60%: NORMAL for bass-heavy genres (no penalty)
-            • Low-Mid 15-25%: Synth body (no penalty)
-            • Mid 15-30%: Vocal presence (no penalty)
-            • High-Mid 10-20%: Synth clarity (no penalty)
-            • High 8-18%: Synthetic sparkle and FX (no penalty)
-            ⚠️ EDM/ELECTRONIC CHARACTERISTICS (ALL NORMAL):
-            • Dynamic range 4-14dB: WIDE RANGE depending on subgenre (no penalty)
-            • Brickwall EDM (4-6dB DR): INTENTIONAL for club play (no penalty)
-            • Streaming EDM (8-14dB DR): CORRECT for modern streaming (no penalty)
-            • Loudness -6 to -16 LUFS: Depends on target platform (no penalty)
-            • Club masters (-6 to -10 LUFS): INTENTIONAL competitive loudness (no penalty)
-            • Streaming masters (-12 to -16 LUFS): CORRECT for normalization (no penalty)
-            • Wide stereo (60-90%): NORMAL for stereo FX and synths (no penalty)
-            
-            JAZZ (includes Big Band, Vocal Jazz, Bebop, Swing):
-            • Bass 15-30%: Controlled foundation (no penalty)
-            • Low-Mid 20-30%: Instrument warmth (no penalty)
-            • Mid 25-40%: Instrument clarity (no penalty)
-            • High-Mid 12-22%: Presence (no penalty)
-            • High 8-18%: Air and detail (no penalty)
-            ⚠️ BIG BAND/VOCAL JAZZ CHARACTERISTICS (ALL NORMAL):
-            • Higher dynamic range (14-26dB): EXPECTED for brass sections (no penalty)
-            • Wider stereo image: NORMAL for large ensemble (no penalty)
-            • Lower phase coherence (35-60%): NORMAL for multi-mic live recording (no penalty)
-            • Quieter masters (-18 to -26 LUFS): INTENTIONAL dynamic preservation (no penalty)
-            • High crest factor (14-24dB): NORMAL brass transients (no penalty)
-            
-            CLASSICAL/ORCHESTRAL:
-            • Bass 10-25%: Natural orchestral balance (no penalty)
-            • Low-Mid 20-30%: Instrument body (no penalty)
-            • Mid 30-45%: Instrument clarity (no penalty)
-            • High-Mid 8-18%: Natural presence (no penalty)
-            • High 5-15%: Air and detail (no penalty)
-            
-            METAL:
-            • Bass 40-60%: Heavy foundation (no penalty)
-            • Low-Mid 18-28%: Guitar body (no penalty)
-            • Mid 20-35%: Vocal/guitar presence (no penalty)
-            • High-Mid 10-20%: Guitar bite (no penalty)
-            • High 5-15%: Cymbal presence (no penalty)
-            
-            ACOUSTIC/SINGER-SONGWRITER:
-            • Bass 12-25%: Natural foundation (no penalty)
-            • Low-Mid 22-32%: Warmth and body (no penalty)
-            • Mid 25-40%: Vocal clarity (no penalty)
-            • High-Mid 10-20%: Presence (no penalty)
-            • High 6-15%: Natural air (no penalty)
-            ⚠️ ACOUSTIC/SINGER-SONGWRITER CHARACTERISTICS (ALL NORMAL):
-            • Higher dynamic range (10-22dB): EXPECTED for natural acoustic sound (no penalty)
-            • Quieter masters (-16 to -22 LUFS): INTENTIONAL for intimacy (no penalty)
-            • Higher crest factor (10-20dB): NATURAL acoustic transients (no penalty)
-            • Warmer/darker tone (low high frequencies): INTENTIONAL artistic choice (no penalty)
-            • Intimate stereo image (30-50%): NORMAL for solo performer (no penalty)
+            🎯 SCORING RULES (0-100 scale) — GENRE-AWARE MASTERED TRACK
 
-            ACAPELLA (Vocal-Only):
-            • Bass 0-10%: MINIMAL BY DESIGN - NO PENALTY! Vocals have limited bass content
-            • Low-Mid 15-35%: Vocal warmth and body (no penalty)
-            • Mid 35-60%: VOCAL CLARITY IS CRITICAL - main content here (no penalty)
-            • High-Mid 15-30%: Vocal presence and articulation (no penalty)
-            • High 5-20%: Vocal air and breathiness (no penalty)
-            ⚠️ ACAPELLA CHARACTERISTICS (ALL NORMAL - DO NOT PENALIZE):
-            • NO/LIMITED BASS: CORRECT for vocal-only content! (0 penalty)
-            • High dynamic range (8-24dB): NATURAL vocal dynamics (no penalty)
-            • Quieter levels (-16 to -26 LUFS): Often for mixing use (no penalty)
-            • High crest factor (10-22dB): NATURAL vocal transients (no penalty)
-            • Mid-focused frequency balance: CORRECT for vocals (no penalty)
-            • Mono or narrow stereo: NORMAL for single vocal source (no penalty)
+            ════════════════════════════════════════════════
+            STEP 1 — IDENTIFY GENRE GROUP
+            ════════════════════════════════════════════════
+            Genre selected: **\(genre)**
 
-            LIVE:
-            • Bass 15-30%: Natural balance, room dependent (no penalty)
-            • Low-Mid 18-30%: Room acoustics (no penalty)
-            • Mid 25-40%: Audience/vocal presence (no penalty)
-            • High-Mid 12-25%: Crowd energy/presence (no penalty)
-            • High 5-15%: Natural air, room dependent (no penalty)
-            ⚠️ LIVE RECORDING CHARACTERISTICS (ALL NORMAL):
-            • Higher dynamic range (10-18dB): EXPECTED and CORRECT (no penalty)
-            • Room reverb and ambience: INTENTIONAL part of live sound (no penalty)
-            • Audience noise and crowd energy: NATURAL part of live recording (no penalty)
-            • Frequency variations based on venue: NORMAL (no penalty)
-            • Less compression than studio: PRESERVES PERFORMANCE ENERGY (no penalty)
-            
-            ROCK/METAL (Korn, Green Day, etc.):
-            • Bass 45-65%: NORMAL for heavy guitars and bass (no penalty)
-            • Low-Mid 15-25%: Guitar body (no penalty)
-            • Mid 15-30%: Vocal/guitar presence (no penalty)
-            • High-Mid 2-10%: Cymbal presence (no penalty)
-            • High 0-5%: Intentionally dark/warm mastering (no penalty)
-            
-            OTHER:
-            • Use general professional standards
-            • Bass 15-30%: Balanced (no penalty)
-            • Mid 25-40%: Clarity (no penalty)
-            • High 8-18%: Air and sparkle (no penalty)
-            
-            TECHNICAL PENALTIES (Subtract from 100):
-            
-            STEREO WIDTH (GENRE-AWARE - VERY LENIENT):
-            • 25-85%: Perfect (0 penalty) + BONUS +1 if 30-60%
-            • 85-95%: Excellent for Metal/Rock (0 penalty) + BONUS +1 if mono >75%
-            • 95-100% with mono >70%: Professional metal (0 penalty) + BONUS +1
-            • 95-100% with mono 60-70%: Acceptable (0 penalty) - common in metal
-            • 95-100% with mono <60%: Risky (-2 points) - only if severe mono collapse
-            • 20-25%: Acceptable (0 penalty)
-            • 15-20%: Narrow (-1 point)
-            • <15%: Too narrow (-3 points)
-            
-            PHASE CORRELATION (LENIENT):
-            • ≥0.7 (70%): Excellent (0 penalty) + BONUS +2
-            • 0.5-0.7 (50-70%): Very good (0 penalty) + BONUS +1
-            • 0.4-0.5 (40-50%): Good (0 penalty)
-            • 0.35-0.4 (35-40%): Acceptable (0 penalty) - common in rock/metal
-            • 0.3-0.35 (30-35%): Minor issue (-2 points)
-            • <0.3 (30%): Significant issues (-4 points)
-            
-            MONO COMPATIBILITY (GENRE-AWARE - LENIENT):
-            ⚠️ Rock/Metal/EDM with stereo guitars/synths = 45-75% is NORMAL!
-            • ≥85%: Excellent (0 penalty) + BONUS +2
-            • 75-85%: Very good (0 penalty) + BONUS +1
-            • 60-75%: Good (0 penalty) + BONUS +1 (normal for rock/metal)
-            • 45-60%: ACCEPTABLE for Rock/Metal/EDM (0 penalty) - very common!
-            • 35-45%: Weak (-2 points)
-            • <35%: Severe (-5 points)
-            
-            PEAK LEVEL (Mastered Track Standards):
-            ⚠️ CRITICAL: Commercial masters hit exactly 0.0 dBFS - this is PROFESSIONAL!
-            • -1.0 to 0.0 dBFS: Perfect modern master (0 points) + BONUS +2
-            • -2.0 to -1.0 dBFS: Very good (0 points) + BONUS +1
-            • -3.0 to -2.0 dBFS: Conservative but good (0 points penalty)
-            • -4.0 to -3.0 dBFS: Too conservative (-2 points)
-            • <-4.0 dBFS: Insufficient optimization (-4 points)
-            • >+0.1 dBFS: Clipping risk (-6 points)
-            
-            LOUDNESS (Mastering Type-Aware):
-            \(mixStage?.lowercased().contains("streaming") == true ? """
-            ⚠️ STREAMING MASTER - Target: -14 to -16 LUFS (streaming normalization)
-            • -14 to -16 LUFS: PERFECT for streaming (0 penalty) + BONUS +2
-            • -12 to -14 LUFS: Very good (0 penalty) + BONUS +1
-            • -16 to -18 LUFS: Acceptable (0 penalty)
-            • -18 to -20 LUFS: Too quiet (-2)
-            • <-20 LUFS: Unmastered (-4)
-            • >-12 LUFS: Too loud for streaming (-2)
-            """ : mixStage?.lowercased().contains("cd") == true || mixStage?.lowercased().contains("loud") == true ? """
-            ⚠️ CD/LOUD MASTER - Target: -6 to -9 LUFS (competitive loudness)
-            • -6 to -9 LUFS: PERFECT for competitive (0 penalty) + BONUS +2
-            • -9 to -10 LUFS: Very good (0 penalty) + BONUS +1
-            • -10 to -12 LUFS: Good (0 penalty)
-            • -12 to -14 LUFS: Acceptable but quiet (-2)
-            • <-14 LUFS: Too quiet for competitive (-4)
-            • >-5 LUFS: Clipping risk (-4)
-            """ : """
-            ⚠️ GENERAL MASTER - Flexible loudness targets
-            • -6 to -5 LUFS (Metal/EDM): Professional loud (0 penalty) + BONUS +2
-            • -8 to -6 LUFS (Rock/Pop): Perfect (0 penalty) + BONUS +2
-            • -10 to -8 LUFS: Excellent (0 penalty) + BONUS +1
-            • -12 to -10 LUFS: Very good (0 penalty) + BONUS +1
-            • -14 to -12 LUFS: Good (0 penalty)
-            • -16 to -14 LUFS: Quieter (-2)
-            • -18 to -16 LUFS: Quiet (-4)
-            • <-20 LUFS: Unmastered (-8)
-            • >-5 LUFS: Clipping risk (-4)
-            """)
-            
-            DYNAMIC RANGE (Mastering Type-Aware):
-            \(mixStage?.lowercased().contains("streaming") == true ? """
-            ⚠️ STREAMING MASTER - Target: 8-12 dB (preserves musicality)
-            • 10-14 DR: Excellent (0 penalty) + BONUS +2
-            • 8-10 DR: Perfect for streaming (0 penalty) + BONUS +1
-            • 6-8 DR: Good (0 penalty)
-            • 4-6 DR: Acceptable but compressed (-2)
-            • <4 DR: Over-compressed for streaming (-4)
-            • >14 DR: Too dynamic for streaming (-2)
-            """ : mixStage?.lowercased().contains("cd") == true || mixStage?.lowercased().contains("loud") == true ? """
-            ⚠️ CD/LOUD MASTER - Target: 4-6 dB (aggressive compression)
-            • 4-6 DR: PERFECT for competitive (0 penalty) + BONUS +2
-            • 6-8 DR: Very good (0 penalty) + BONUS +1
-            • 3-4 DR: Acceptable (0 penalty)
-            • 2-3 DR: Over-compressed (-2)
-            • <2 DR: Destroyed (-4)
-            • >8 DR: Too dynamic for competitive (-2)
-            """ : """
-            ⚠️ GENERAL MASTER - Flexible DR targets
-            • 10-14 DR (Jazz/Classical): Excellent (0 penalty) + BONUS +1
-            • 8-10 DR (Dynamic Rock/Pop): Excellent (0 penalty) + BONUS +1
-            • 6-8 DR (Modern Rock/Pop): Very good (0 penalty) + BONUS +1
-            • 5-6 DR (Competitive): Good (0 penalty)
-            • 4-5 DR (Metal/EDM): Professional (0 penalty)
-            • 3-4 DR (Extreme): Borderline (-2)
-            • 2-3 DR: Over-compressed (-4)
-            • <2 DR: Destroyed (-8)
-            • >16 DR mastered: Unoptimized (-2)
-            """)
-            
-            FREQUENCY BALANCE (VERY LENIENT FOR MASTERED TRACKS):
-            ⚠️ CRITICAL: Metal/Rock is intentionally bass-heavy (30-50% low end) - THIS IS NORMAL!
-            ⚠️ Well-balanced spectrum gets BONUS points!
-            • Excellent balance (all bands within ideal ranges): BONUS +3
-            • Good balance (minor deviation): BONUS +1
-            • Any single band >95%: Severe imbalance (-10 points)
-            • Any single band >90%: Major imbalance (-5 points)
-            • Any single band >85%: Minor issue (-2 points)
-            • Any single band 80-85%: ACCEPTABLE for genre (0 penalty) - common in professional masters
-            • Bass + Low-Mid combined >98%: Extreme mud (-6 points)
-            • Bass + Low-Mid combined >95%: Heavy imbalance (-3 points)
-            • Bass + Low-Mid combined 90-95%: ACCEPTABLE for metal/rock (0 penalty)
-            • All highs <0.05% total: No high frequency content (-4 points)
-            • All highs <0.3% total: Dull/dark (-2 points)
-            
-            ⚠️ BONUS POINTS FOR EXCEPTIONAL MASTERS:
-            Truly exceptional masters earn significant bonuses. Maximum +10 points total:
-            • Perfect peak level (-1 to 0 dBFS): +2
-            • Strong loudness (genre-appropriate): +2
-            • Excellent phase (>70%): +2
-            • Excellent mono (>85%): +2
-            • Excellent frequency balance: +3
-            • Good dynamic range (genre-appropriate): +2
-            • Professional stereo width (30-60% OR 95%+ with good mono): +2
-            
-            Maximum possible score: 110 + 10 bonuses = 120, but CAP AT 100
-            
-            ⚠️ FINAL SCORE CALCULATION FOR MASTERED TRACKS:
-            START AT 120 POINTS (100 base + 20 mastered bonus) - MANDATORY!
-            
-            ⚠️⚠️⚠️ MASTERING TYPE DIFFERENCES ⚠️⚠️⚠️
-            
-            MASTER(STREAMING) - Optimized for Spotify, Apple Music, etc.:
-            • Target loudness: -14 to -16 LUFS (streaming normalization)
-            • More dynamic range: 8-12 dB (preserves musicality)
-            • Less aggressive compression
-            • DO NOT penalize for being quieter (-14 to -16 LUFS) - this is CORRECT!
-            • DO NOT penalize for higher DR (8-12 dB) - this is INTENTIONAL!
-            • Reward: +3 bonus for proper streaming loudness (-14 to -16 LUFS)
-            
-            MASTER(CD/LOUD) - Competitive loud mastering:
-            • Target loudness: -6 to -9 LUFS (very loud, competitive)
-            • Less dynamic range: 4-6 dB (aggressive compression)
-            • More aggressive limiting
-            • DO NOT penalize for being very loud (-6 to -9 LUFS) - this is INTENTIONAL!
-            • DO NOT penalize for low DR (4-6 dB) - this is STANDARD for loud masters!
-            • Reward: +3 bonus for competitive loudness (-6 to -9 LUFS)
-            
-            ⚠️⚠️⚠️ SCORING GUIDANCE FOR MASTERED TRACKS ⚠️⚠️⚠️
-            FOR ALL MASTERED TRACKS - BE REALISTIC BUT GENEROUS:
-            • Starting score: 120 points (100 base + 20 mastered bonus)
-            • Apply penalties realistically (don't cap too aggressively)
-            • Apply bonuses realistically (don't force minimum)
-            • Professional commercial masters (Korn, Metallica) should score 95-100
-            • Good professional masters should score 90-94
-            • Decent masters should score 85-89
-            • Allow natural variation - not all masters are identical!
-            
-            ⚠️⚠️⚠️ CRITICAL - DO NOT PENALIZE GENRE CHARACTERISTICS:
-            - Metal/Rock bass-heavy (low end 30-50%): INTENTIONAL - DO NOT PENALIZE!
-            - Metal extreme stereo (95-100% with mono >60%): PROFESSIONAL - DO NOT PENALIZE!
-            - Streaming masters (-14 to -16 LUFS): CORRECT for streaming - DO NOT PENALIZE!
-            - Loud masters (-6 to -9 LUFS): CORRECT for competitive - DO NOT PENALIZE!
-            - Only penalize when something is TECHNICALLY WRONG, not genre-appropriate!
-            
-            ⚠️ PROFESSIONAL COMMERCIAL MASTERS (Korn, Metallica, Slipknot) MUST SCORE 95-100!
-            If a known professional master scores less than 95, you're being TOO HARSH!
-            
-            EXAMPLES - START AT 120, DIFFERENTIATE:
-            • Exceptional (Korn): 120 - 5 + 10 = 125 → 100 (capped)
-            • Excellent commercial: 120 - 8 + 8 = 120 → 98
-            • Very good: 120 - 12 + 6 = 114 → 92
-            • Good (some issues): 120 - 18 + 4 = 106 → 88
-            • Amateur master: 120 - 25 + 2 = 97 → 82
-            • Poor master: 120 - 35 + 0 = 85 → 75
-            
-            SCORE RANGES FOR MASTERED TRACKS - ALLOW VARIATION:
-            • 96-100: Exceptional commercial master (Korn, Metallica, Abbey Road)
-            • 92-95: Excellent professional master
-            • 88-91: Very good professional master - minor imperfections
-            • 85-87: Good master - some issues but solid
-            • 75-84: Amateur or flawed master - needs improvement
-            • 65-74: Poor mastering - significant problems
-            • Below 65: Severely flawed or unmixed
-            
+            Match to one of these groups by keyword:
+            METAL     → metal, hard rock, metalcore, heavy metal, death metal, thrash, doom
+            EDM       → electronic, edm, house, techno, dubstep, dnb, drum and bass, bass music
+            HIP-HOP   → hip-hop, hip hop, trap, rap, drill, r&b, rnb, boom bap
+            POP       → pop, synth-pop, dance-pop, k-pop, indie pop
+            ROCK      → rock, indie, indie rock, alternative, grunge, punk, garage rock
+            CLASSICAL → classical, orchestral, orchestra, symphony, chamber, opera, baroque
+            ACAPPELLA → acapella, a cappella, vocal, choir, choral, barbershop
+            JAZZ      → jazz, bebop, swing, fusion, blues jazz
+            LIVE      → live, concert, live recording, live album
+
+            ════════════════════════════════════════════════
+            STEP 2 — GENRE THRESHOLD TABLES
+            DO NOT penalize metrics in Excellent or Acceptable range.
+            ONLY penalize metrics that fall in the Penalize column.
+            ════════════════════════════════════════════════
+
+            METAL / HARD ROCK
+            Loudness:        Excellent -7 to -10 LUFS  | Acceptable -6 to -12 LUFS  | Penalize quieter than -14 LUFS
+            True Peak:       Excellent ≤-1.0 dBTP      | Acceptable ≤0.0 dBTP       | Penalize >0.0 dBTP
+            Dynamic Range:   Excellent DR 6-8           | Acceptable DR 4-10         | Penalize DR < 4
+            Crest Factor:    Excellent 8-10 dB          | Acceptable 6-12 dB         | Penalize < 6 dB
+            Stereo Width:    Excellent 65-80%           | Acceptable 50-90%          | Penalize <30% or >95%
+            Phase Coherence: Excellent >0.4             | Acceptable >0.3            | Penalize <0.3
+            Mono Compat.:    Excellent ≤3 dB loss       | Acceptable ≤5 dB loss      | Penalize >5 dB loss
+            Low End %:       Excellent 25-35%           | Acceptable 20-45%          | Penalize >55%
+            NOTE: DR 4-6 is INDUSTRY STANDARD for Metal — NEVER penalize. -6 to -8 LUFS is competitive Metal loudness — NEVER penalize.
+
+            ELECTRONIC / EDM
+            Loudness:        Excellent -9 to -6 LUFS   | Acceptable -5 to -12 LUFS  | Penalize quieter than -16 LUFS
+            True Peak:       Excellent ≤-1.0 dBTP      | Acceptable ≤0.0 dBTP       | Penalize >0.0 dBTP
+            Dynamic Range:   Excellent DR 5-8           | Acceptable DR 3-10         | Penalize DR < 3
+            Crest Factor:    Excellent 5-8 dB           | Acceptable 3-10 dB         | Penalize < 3 dB
+            Stereo Width:    Excellent 70-90%           | Acceptable 50-100%         | Penalize <40%
+            Phase Coherence: Excellent >0.3             | Acceptable >0.2            | Penalize sustained <0
+            Low End %:       Excellent 30-40%           | Acceptable 25-50%          | Penalize >60%
+            NOTE: Sub-bass below 120 Hz should be mono — if wide sub detected, note it with small penalty only. DR 4-6 and -5 to -7 LUFS are NORMAL for club EDM.
+
+            HIP-HOP / TRAP / R&B
+            Loudness:        Excellent -9 to -6 LUFS   | Acceptable -5 to -12 LUFS  | Penalize quieter than -16 LUFS
+            True Peak:       Excellent ≤-1.0 dBTP      | Acceptable ≤0.0 dBTP       | Penalize >0.0 dBTP
+            Dynamic Range:   Excellent DR 5-8           | Acceptable DR 3-10         | Penalize DR < 3
+            Crest Factor:    Excellent 5-8 dB           | Acceptable 3-9 dB          | Penalize < 3 dB
+            Stereo Width:    Excellent 50-75%           | Acceptable 40-85%          | Penalize <25% or >90%
+            Phase Coherence: Excellent >0.4             | Acceptable >0.3            | Penalize <0.3
+            Low End %:       Excellent 35-45%           | Acceptable 30-55%          | Penalize >65%
+            NOTE: 808 sub-bass (35-60 Hz) must NOT cancel in mono — if it does, apply the -15 mono cancellation penalty.
+
+            POP
+            Loudness:        Excellent -9 to -7 LUFS   | Acceptable -6 to -12 LUFS  | Penalize quieter than -16 LUFS
+            True Peak:       Excellent ≤-1.0 dBTP      | Acceptable ≤0.0 dBTP       | Penalize >0.0 dBTP
+            Dynamic Range:   Excellent DR 6-8           | Acceptable DR 5-10         | Penalize DR < 4
+            Crest Factor:    Excellent 7-10 dB          | Acceptable 6-12 dB         | Penalize < 6 dB
+            Stereo Width:    Excellent 55-75%           | Acceptable 45-85%          | Penalize <30% or >90%
+            Phase Coherence: Excellent >0.3             | Acceptable >0.2            | Penalize sustained <0
+            Mono Compat.:    Excellent ≤2 dB loss       | Acceptable ≤3 dB loss      | Penalize >4 dB loss
+            Low End %:       Excellent 20-28%           | Acceptable 15-35%          | Penalize >50%
+
+            ROCK / INDIE ROCK
+            Loudness:        Excellent -10 to -12 LUFS | Acceptable -9 to -14 LUFS  | Penalize quieter than -18 LUFS
+            True Peak:       Excellent ≤-1.0 dBTP      | Acceptable ≤-0.5 dBTP      | Penalize >0.0 dBTP
+            Dynamic Range:   Excellent DR 8-12          | Acceptable DR 7-14         | Penalize DR < 6
+            Crest Factor:    Excellent 9-12 dB          | Acceptable 8-14 dB         | Penalize < 7 dB
+            Stereo Width:    Excellent 55-70%           | Acceptable 45-80%          | Penalize <30% or >90%
+            Phase Coherence: Excellent >0.4             | Acceptable >0.3            | Penalize <0.3
+            Mono Compat.:    Excellent ≤3 dB loss       | Acceptable ≤4 dB loss      | Penalize >5 dB loss
+            Low End %:       Excellent 20-28%           | Acceptable 15-35%          | Penalize >50%
+
+            CLASSICAL / ORCHESTRAL
+            Loudness:        Excellent -20 to -16 LUFS | Acceptable -24 to -14 LUFS | Penalize louder than -12 LUFS
+            True Peak:       Excellent ≤-2.0 dBTP      | Acceptable ≤-1.0 dBTP      | Penalize >-0.5 dBTP
+            Dynamic Range:   Excellent DR 13-16         | Acceptable DR 10-20        | Penalize DR < 8
+            Crest Factor:    Excellent 14-18 dB         | Acceptable 12-22 dB        | Penalize < 10 dB
+            Stereo Width:    Excellent 65-95%           | Acceptable 50-100%         | Penalize <30%
+            Phase Coherence: Excellent +0.3 to +0.8    | Acceptable +0.2 to +0.9    | Penalize sustained <0
+            Low End %:       Excellent 15-20%           | Acceptable 10-25%          | Penalize >35%
+            NOTE: -16 to -20 LUFS is CORRECT and INTENTIONAL for Classical. DR 13-16 is audiophile standard. NEVER apply mono low-end rules — stereo bass is intentional in orchestral recordings.
+
+            A CAPPELLA / VOCAL
+            Loudness:        Excellent -16 to -12 LUFS | Acceptable -18 to -10 LUFS | Penalize louder than -9 LUFS
+            True Peak:       Excellent ≤-1.0 dBTP      | Acceptable ≤-0.5 dBTP      | Penalize >0.0 dBTP
+            Dynamic Range:   Excellent DR 9-13          | Acceptable DR 7-16         | Penalize DR < 6
+            Crest Factor:    Excellent 9-13 dB          | Acceptable 8-15 dB         | Penalize < 7 dB
+            Stereo Width:    Excellent 45-65%           | Acceptable 35-75%          | Penalize <20% or >85%
+            Phase Coherence: Excellent +0.5 to +0.9    | Acceptable +0.4 to +0.9    | Penalize <0.3
+            Low End %:       Excellent 5-12%            | Acceptable 3-18%           | Penalize >25%
+            NOTE: Low bass (3-18%) is CORRECT for vocal content — do NOT flag as frequency imbalance.
+
+            JAZZ
+            Loudness:        Excellent -16 to -14 LUFS | Acceptable -18 to -12 LUFS | Penalize louder than -10 LUFS
+            True Peak:       Excellent ≤-1.0 dBTP      | Acceptable ≤-0.5 dBTP      | Penalize >0.0 dBTP
+            Dynamic Range:   Excellent DR 11-15         | Acceptable DR 9-18         | Penalize DR < 7
+            Crest Factor:    Excellent 10-14 dB         | Acceptable 8-16 dB         | Penalize < 7 dB
+            Stereo Width:    Excellent 45-75%           | Acceptable 35-85%          | Penalize <25%
+            Phase Coherence: Excellent +0.4 to +0.9    | Acceptable +0.3 to +0.9    | Penalize <0.3
+            Low End %:       Excellent 15-22%           | Acceptable 12-28%          | Penalize >38%
+            NOTE: Warm low-mids (22-28%) and dull high end are INTENTIONAL for Jazz — do NOT flag as frequency imbalance.
+
+            LIVE PERFORMANCE
+            Loudness:        Excellent -14 to -12 LUFS | Acceptable -16 to -10 LUFS | Penalize quieter than -20 LUFS
+            True Peak:       Excellent ≤-1.5 dBTP      | Acceptable ≤-1.0 dBTP      | Penalize >-0.5 dBTP
+            Dynamic Range:   Excellent DR 10-14         | Acceptable DR 8-18         | Penalize DR < 6
+            Crest Factor:    Excellent 10-14 dB         | Acceptable 9-16 dB         | Penalize < 8 dB
+            Stereo Width:    Excellent 55-85%           | Acceptable 45-90%          | Penalize <25%
+            Phase Coherence: Excellent +0.3 to +0.7    | Acceptable +0.2 to +0.8    | Penalize sustained <0
+            Low End %:       Excellent 18-25%           | Acceptable 15-30%          | Penalize >45%
+            NOTE: Wide stereo, moderate phase variation, crowd noise, and room ambience are ALL NORMAL for live. Crowd noise between songs may inflate LUFS reading — be generous.
+
+            ════════════════════════════════════════════════
+            STEP 3 — CALCULATE SCORE
+            ════════════════════════════════════════════════
+
+            BASE SCORE: 75 (mastered track baseline)
+
+            UNIVERSAL BONUSES — add if metric is in Excellent range for the genre:
+            +8 pts → No clipping AND loudness in Excellent range for genre
+            +5 pts → Phase coherence in Excellent range for genre
+            +3 pts → Mono compatibility in Excellent range for genre
+            +5 pts → Dynamic range in Excellent range for genre
+            Maximum total bonuses: +21
+
+            UNIVERSAL PENALTIES — apply regardless of genre:
+            -15 pts → Clipping (peak > 0 dBFS)
+            -10 pts → True peak > 0.0 dBTP
+            -12 pts → Phase coherence < 0.2
+            -15 pts → Mono cancellation of key element (lead bass, kick, lead vocal) detectable
+
+            GENRE-SPECIFIC PENALTIES — only if metric falls in the Penalize column above:
+            -5 pts per metric in the Penalize range
+
+            FINAL SCORE = min(100, max(0, 75 + bonuses - penalties))
+
+            ════════════════════════════════════════════════
+            SANITY CHECK — Reference Scores
+            ════════════════════════════════════════════════
+            Korn "Twisted Transistor" (Metal, Master):   87-93
+            Metallica "Enter Sandman" (Metal, Master):   82-88
+            Daft Punk "Get Lucky" (EDM/Pop, Master):     88-94
+            Billie Eilish "Bad Guy" (Pop, Master):       85-92
+            Bach Cello Suite No.1 (Classical, Master):   90-96
+            Miles Davis "Kind of Blue" (Jazz, Master):   88-94
+            Amateur master with clipping:                35-55
+            If your calculated score falls outside these ranges for these reference tracks, recalibrate your penalties and bonuses.
+
             📝 RESPONSE FORMAT (CRITICAL - FOLLOW EXACTLY):
             
             ⚠️⚠️⚠️ MANDATORY: ALL MASTERED TRACKS START AT 120 POINTS (100 base + 20 mastered bonus) ⚠️⚠️⚠️
@@ -1303,121 +1100,111 @@ class ClaudeAPIService {
             • High-Mid (3-8kHz): Ideal 12-22%, Acceptable 8-32%, Problem >35% or <5%
             • High (8-20kHz): Ideal 8-18%, Acceptable 4-25%, Problem >30% or <3%
             
-            PRE-MASTER MIX SCORING (REALISTIC DIFFERENTIATION):
+            PRE-MASTER MIX SCORING — GENRE-AWARE
+            Stage: PRE-MASTER / MIX | Maximum score: 90 (mixes NEVER exceed 90 — masters score 90-100)
 
-            ⚠️ PROFESSIONAL QUALITY OVERRIDE - DETECT MISLABELED MASTERS:
-            If a track labeled as "Mix" has ALL of these characteristics, it's likely a mislabeled professional master:
-            - Loudness: -6 to -14 LUFS (professional mastering levels, NOT amateur mix levels)
-            - Peak Level: -1.5 to 0 dBFS (optimized peaks, not raw headroom)
-            - Dynamic Range: 4-14 dB (controlled, not raw uncompressed audio)
-            - Crest Factor: 4-14 dB (processed transients, not wild peaks)
+            ════════════════════════════════════════════════
+            PRE-MASTER TARGET RANGES BY GENRE
+            A good pre-master mix leaves headroom for the mastering engineer.
+            ════════════════════════════════════════════════
 
-            For such tracks:
-            - This is likely Korn, Metallica, or another commercial release mislabeled as "Mix"
-            - Start at 90 points instead of 85 (recognizing professional quality)
-            - Allow maximum score of 92 (instead of 90 cap for regular mixes)
-            - In analysis: Mention "This track appears to have professional mastering characteristics"
-            - In recommendations: Suggest user re-label as "Master" if it's a commercial release
+            METAL / HARD ROCK MIX
+            Loudness target: -16 to -18 LUFS | Acceptable: -14 to -20 LUFS
+            Peak: -3 to -6 dBFS | Acceptable: -1 to -8 dBFS
+            Dynamic Range: DR 10-14 (target) | DR 8-16 (acceptable)
+            Stereo Width: 60-80% | Acceptable: 50-85%
 
-            • Start at 85 points (professional mix baseline)
-            • ASSESS OVERALL QUALITY FIRST - Different mixes should get DIFFERENT scores!
-            • PENALTIES for mix issues (LENIENT - DIFFERENTIATE between songs):
-              - Peak >0dB (clipping): -10 points
-              - Peak >-1dB: -1 point
-              - Phase Coherence <30%: -8 points
-              - Phase Coherence 30-40%: -4 points
-              - Phase Coherence 40-60%: -1 point
-              - Mono Compatibility <30%: -8 points
-              - Mono Compatibility 30-50%: -4 points
-              - Mono Compatibility 50-70%: -1 point
-              - Low End >70%: -5 points
-              - Low End 60-70%: -3 points
-              - Low End 50-60%: -1 point
-              - Frequency Imbalance (severe): -3 points
-              - Dynamic Range <6dB: -2 points
-              ⚠️ Apply penalties honestly - don't artificially floor scores!
-            • BONUSES for mix excellence (BE SELECTIVE - DIFFERENTIATE):
-              - Peak level -3 to -6dB: +3 points
-              \(isLiveRecording ? """
-              - Good dynamic range for live (10-18dB): +3 points
-              - Excellent dynamic range for live (>15dB): +5 points
-              """ : """
-              - Good dynamic range (>12dB): +3 points
-              """)
-              - Balanced frequency spectrum: +3 points
-              - Excellent phase coherence (>70%): +3 points
-              - Excellent stereo width (25-45%): +2 points
-              - Good mono compatibility (>70%): +2 points
-              \(isLiveRecording ? """
-              - Natural room ambience preserved: +2 points
-              - Clear audience presence without overwhelming mix: +1 point
-              """ : "")
-            
-            ⚠️⚠️⚠️ CRITICAL SCORING RULES - DIFFERENTIATION IS MANDATORY:
-            • DIFFERENT SONGS MUST GET DIFFERENT SCORES!
-            • Korn's "Twisted Transistor" should NOT score the same as an amateur mix!
-            • Professional mixes (Korn, major artists) should score 85-90
-            • Good amateur mixes should score 75-84
-            • Poor/unmixed tracks should score 50-74
-            • BE HONEST: If it sounds professional, score it 85-90. If it needs work, score it 70-80.
-            • Real-world scoring:
-              - Professional commercial mix (ready for mastering): 85-90 (MAXIMUM 90!)
-              - Strong amateur mix (good but needs polish): 78-84
-              - Decent mix (needs significant work): 68-77
-              - Weak/unmixed (major issues): 50-67
-            • ⚠️ Maximum cap: 90 (mixes don't score 91+)
-            • ⚠️ NO artificial floor - let scores vary naturally!
-            
-            ⚠️⚠️⚠️ ABSOLUTE RULE: Pre-master mixes MUST be capped at 90 maximum! ⚠️⚠️⚠️
-            ⚠️ If you calculate 91, 92, 93, 94, 95, or higher → WRITE 90 INSTEAD!
-            ⚠️ Masters score 95-100, mixes score 80-90 (NEVER above 90)!
-            
-            Format response as:
-            SCORE: [CALCULATE HONESTLY - DIFFERENTIATE BETWEEN SONGS:
-            1. Start at 85 points
-            2. Add bonuses for excellence (max +15 realistic)
-            3. Subtract penalties for issues (be honest)
-            4. Final calculation: 85 + bonuses - penalties
-            5. If result > 90: Write 90 (cap for mixes)
-            6. Otherwise: Write the calculated number (NO FLOOR - let it vary naturally!)
-            
-            EXAMPLES - REALISTIC DIFFERENTIATION:
-            - Professional mix (Korn quality): 85 + 5 (bonuses) - 2 (minor issues) = 88 ✅
-            - Very good amateur mix: 85 + 3 (bonuses) - 5 (some issues) = 83 ✅
-            - Good mix with issues: 85 + 2 (bonuses) - 10 (issues) = 77 ✅
-            - Weak mix: 85 + 0 - 15 (significant issues) = 70 ✅
-            - Unmixed/raw: 85 + 0 - 25 (major issues) = 60 ✅
-            - If calculation gives 95 → Write 90 (maximum cap)
-            
-            ⚠️ ONLY ONE CAP: If score > 90, write 90. Otherwise write the calculated score.
-            ⚠️ NO FLOOR - Scores can go below 75 if quality is genuinely poor!
-            
-            ANALYSIS: [Write analysis based on score]
-            ⚠️ ANALYSIS FORMAT RULES — STRICTLY ENFORCED:
-            - Write EXACTLY 3-5 sentences as a single flowing paragraph. NO MORE.
-            - DO NOT use section headers (no "TECHNICAL METRICS", "FREQUENCY ANALYSIS", "STEREO", etc.)
-            - DO NOT list or repeat individual metric values (no "Stereo Width: 89.5%", no dB/LUFS/% numbers) — those are shown in the app's UI cards
-            - Write a HOLISTIC SUMMARY: overall sound quality, vibe, key strengths, and at most 1 specific concern
-            - Sound like a human engineer talking, NOT a data report
+            ELECTRONIC / EDM MIX
+            Loudness target: -24 to -18 LUFS | Acceptable: -20 to -28 LUFS
+            Peak: -6 to -3 dBFS | Acceptable: -3 to -9 dBFS
+            Dynamic Range: DR 8-14 (target) | DR 6-18 (acceptable)
+            Stereo Width: 50-80% | Acceptable: 40-90%
 
-            ⚠️ CRITICAL ANALYSIS TONE RULES:
-            - If score is 85+: Write PURELY CELEBRATORY analysis (2-3 sentences). This is PROFESSIONAL QUALITY - celebrate it ONLY, NO improvements or suggestions!
-              ✅ REQUIRED phrases for 85+: "Professional quality mix", "Ready for mastering", "Excellent work", "Solid professional mix", "This mix hits hard", "Well-balanced and professional", "Great mix that translates well"
-              ✅ Tone: Pure celebration and acknowledgment. Like: "This is a professional quality mix ready for mastering. Excellent work - it hits hard and translates well across systems."
-              ❌ ABSOLUTELY FORBIDDEN for 85+:
-                - NO improvements: "could use", "should consider", "might benefit from", "would benefit from"
-                - NO suggestions: "could be", "might want to", "consider", "try"
-                - NO negative phrases: "needs improvements", "needs mixing", "needs work", "to reach professional standards"
-                - NO recommendations in analysis section - save those for RECOMMENDATIONS section only
-              ⚠️ REMEMBER: Score 85+ = PROFESSIONAL QUALITY. Analysis section = PURE PRAISE ONLY. Zero improvements, zero suggestions, zero critiques. Just celebrate the achievement.
-            - If score is 70-84: 3-4 sentences — acknowledge the main strength and mention ONE key area for polish
-            - If score is below 70: 4-5 sentences — direct, honest feedback in plain engineer language about what's holding it back
-            
-            RECOMMENDATIONS: [Write recommendations based on score]
-            ⚠️ CRITICAL RECOMMENDATIONS RULES:
-            - If score is 85+: Write ONLY celebration - "Ready for mastering" or "This mix is ready - ship it!" NO improvements, NO suggestions, NO critiques. Pure celebration only.
-            - If score is 70-84: 1-2 specific improvements if needed
-            - If score is below 70: 3-5 direct, honest fixes
+            HIP-HOP / TRAP / R&B MIX
+            Loudness target: -24 to -18 LUFS | Acceptable: -20 to -28 LUFS
+            Peak: -6 to -3 dBFS | Acceptable: -3 to -9 dBFS
+            Dynamic Range: DR 8-14 (target) | DR 6-16 (acceptable)
+            Stereo Width: 40-70% | Acceptable: 30-80%
+
+            POP MIX
+            Loudness target: -24 to -18 LUFS | Acceptable: -20 to -28 LUFS
+            Peak: -6 to -3 dBFS | Acceptable: -3 to -9 dBFS
+            Dynamic Range: DR 10-14 (target) | DR 8-16 (acceptable)
+            Stereo Width: 50-80% | Acceptable: 40-85%
+
+            ROCK / INDIE MIX
+            Loudness target: -16 to -20 LUFS | Acceptable: -14 to -22 LUFS
+            Peak: -3 to -6 dBFS | Acceptable: -1 to -8 dBFS
+            Dynamic Range: DR 10-14 (target) | DR 8-16 (acceptable)
+            Stereo Width: 50-70% | Acceptable: 40-80%
+
+            CLASSICAL / ORCHESTRAL MIX
+            Loudness target: -24 to -18 LUFS | Acceptable: -28 to -16 LUFS
+            Peak: -6 to -3 dBFS | Acceptable: -3 to -9 dBFS
+            Dynamic Range: DR 12-18 (target) | DR 10-22 (acceptable)
+            Stereo Width: 60-100% | Acceptable: 50-100%
+
+            A CAPPELLA / VOCAL MIX
+            Loudness target: -24 to -18 LUFS | Acceptable: -20 to -28 LUFS
+            Peak: -6 to -3 dBFS | Acceptable: -3 to -9 dBFS
+            Dynamic Range: DR 12-18 (target) | DR 10-20 (acceptable)
+            Stereo Width: 35-60% | Acceptable: 25-70%
+
+            JAZZ MIX
+            Loudness target: -22 to -16 LUFS | Acceptable: -18 to -26 LUFS
+            Peak: -6 to -3 dBFS | Acceptable: -3 to -9 dBFS
+            Dynamic Range: DR 10-16 (target) | DR 8-20 (acceptable)
+            Stereo Width: 40-80% | Acceptable: 30-85%
+
+            LIVE MIX
+            Loudness target: -22 to -16 LUFS | Acceptable: -18 to -26 LUFS
+            Peak: -6 to -3 dBFS | Acceptable: -3 to -9 dBFS
+            Dynamic Range: DR 10-16 (target) | DR 8-20 (acceptable)
+            Stereo Width: 50-90% | Acceptable: 40-95%
+
+            ════════════════════════════════════════════════
+            SCORE CALCULATION
+            ════════════════════════════════════════════════
+
+            BASE SCORE: 65 (pre-master baseline)
+
+            UNIVERSAL BONUSES (add if metric is in target/excellent range for genre):
+            +8 pts → No clipping AND loudness in target range for genre
+            +5 pts → Phase coherence > 0.4 (well-controlled)
+            +3 pts → Mono compatibility ≤ 3 dB loss
+            +5 pts → Dynamic range in target range for genre
+            Maximum total bonuses: +21
+
+            UNIVERSAL PENALTIES:
+            -10 pts → Clipping (peak > 0 dBFS)
+            -8 pts  → Phase coherence < 0.2
+            -8 pts  → Mono cancellation of key element
+            -5 pts  → Loudness outside acceptable range for genre
+            -5 pts  → Severe frequency imbalance (genre-inappropriate — see genre notes in master tables above)
+            -3 pts  → Dynamic range outside acceptable range for genre
+
+            FINAL SCORE = min(90, max(0, 65 + bonuses - penalties))
+            ⚠️ HARD CAP: Pre-master/Mix tracks NEVER score above 90. Masters score 90-100.
+            ⚠️ NO FLOOR — let scores vary naturally based on actual quality.
+
+            ════════════════════════════════════════════════
+            SANITY CHECK — Reference Scores (Pre-master)
+            ════════════════════════════════════════════════
+            Professional rock pre-master (ready to master): 82-88
+            Good amateur pop pre-master (needs polish):     72-80
+            Mix with real problems:                         55-70
+            Raw unmixed recording:                          40-55
+            Amateur mix with clipping:                      35-55
+            ════════════════════════════════════════════════
+
+            SCORE: [CALCULATE: min(90, max(0, 65 + bonuses - penalties))]
+            ⚠️ If result > 90: write 90. Otherwise write the calculated score.
+
+            ANALYSIS: [Write based on score — see analysis tone rules above]
+            RECOMMENDATIONS: [Based on score]
+            ⚠️ Score 85-90: "Ready for mastering" ONLY. Pure celebration. No suggestions.
+            ⚠️ Score 70-84: 1-2 specific polishing suggestions.
+            ⚠️ Score below 70: 3-5 direct, honest fixes.
             """
         }
     }
@@ -1435,17 +1222,26 @@ class ClaudeAPIService {
             """
         
         if isMastered {
+            // Determine genre-specific thresholds for issue detection
+            let genreLower = finalGenre.lowercased()
+            let isMetalGenre = genreLower.contains("metal") || genreLower.contains("hard rock") || genreLower.contains("metalcore")
+            let isEDMGenre = genreLower.contains("edm") || genreLower.contains("electronic") || genreLower.contains("techno") || genreLower.contains("house") || genreLower.contains("trap") || genreLower.contains("dubstep")
+            let isLoudGenre = isMetalGenre || isEDMGenre
+
             // Count detected issues for mastered tracks
             var issueCount = 0
             var issuesList: [String] = []
             if metrics.hasClipping { issueCount += 1; issuesList.append("Clipping") }
             if metrics.hasPhaseIssues { issueCount += 1; issuesList.append("Phase Issues") }
             if metrics.hasStereoIssues { issueCount += 1; issuesList.append("Stereo Issues") }
-            if metrics.hasFrequencyImbalance { issueCount += 1; issuesList.append("Frequency Imbalance") }
-            if metrics.hasDynamicRangeIssues { issueCount += 1; issuesList.append("Dynamic Range Issues") }
+            // Only flag frequency imbalance if not a genre where bass-heavy is normal
+            if metrics.hasFrequencyImbalance && !isMetalGenre { issueCount += 1; issuesList.append("Frequency Imbalance") }
+            // Only flag dynamic range issues if not a genre where heavy compression is intentional
+            if metrics.hasDynamicRangeIssues && !isLoudGenre { issueCount += 1; issuesList.append("Dynamic Range Issues") }
 
-            // Check for frequency extremes
-            if metrics.lowEnd > 50 { issueCount += 1; issuesList.append("Bass at \(Int(metrics.lowEnd))%") }
+            // Check for frequency extremes — use genre-aware thresholds
+            let lowEndIssueThreshold: Double = isMetalGenre ? 70.0 : 50.0  // Metal: 40-60% is NORMAL, only flag >70%
+            if metrics.lowEnd > lowEndIssueThreshold { issueCount += 1; issuesList.append("Bass at \(Int(metrics.lowEnd))%") }
             if metrics.high > 25 { issueCount += 1; issuesList.append("Highs at \(Int(metrics.high))%") }
 
             let issuesInstruction = issueCount > 0 ? """
@@ -1474,8 +1270,8 @@ class ClaudeAPIService {
             • Clipping: \(metrics.hasClipping ? "❌ YES - MUST ADDRESS IN RECOMMENDATIONS" : "✅ No")
             • Phase Issues: \(metrics.hasPhaseIssues ? "❌ YES - MUST ADDRESS IN RECOMMENDATIONS" : "✅ No")
             • Stereo Issues: \(metrics.hasStereoIssues ? "❌ YES - MUST ADDRESS IN RECOMMENDATIONS" : "✅ No")
-            • Frequency Imbalance: \(metrics.hasFrequencyImbalance ? "❌ YES - MUST ADDRESS IN RECOMMENDATIONS" : "✅ No")
-            • Dynamic Range Issues: \(metrics.hasDynamicRangeIssues ? "❌ YES - MUST ADDRESS IN RECOMMENDATIONS" : "✅ No")
+            • Frequency Imbalance: \(metrics.hasFrequencyImbalance ? (isMetalGenre ? "ℹ️ Bass-heavy (GENRE NORMAL for Metal — do NOT penalize)" : "❌ YES - MUST ADDRESS IN RECOMMENDATIONS") : "✅ No")
+            • Dynamic Range Issues: \(metrics.hasDynamicRangeIssues ? (isLoudGenre ? "ℹ️ Heavily compressed (GENRE NORMAL for \(finalGenre) — do NOT penalize)" : "❌ YES - MUST ADDRESS IN RECOMMENDATIONS") : "✅ No")
             \(issuesInstruction)
             """
         } else {
@@ -1545,7 +1341,7 @@ class ClaudeAPIService {
         guard (-60.0...0.0).contains(metrics.peakLevel) else {
             throw AudioAnalysisError.invalidPeakLevel(metrics.peakLevel)
         }
-        guard (0.0...100.0).contains(metrics.stereoWidth) else {
+        guard (0.0...150.0).contains(metrics.stereoWidth) else {
             throw AudioAnalysisError.invalidStereoWidth(metrics.stereoWidth)
         }
         guard (-1.0...1.0).contains(metrics.phaseCoherence) else {
@@ -1625,14 +1421,26 @@ class ClaudeAPIService {
         GENRE-SPECIFIC SCORING ADJUSTMENTS (apply BEFORE penalties):
         The selected genre is: \(genre)
 
+        Metal/Hard Rock/Metalcore/Heavy Metal:
+        (keywords: metal, hard rock, metalcore, death metal, heavy metal)
+        • Loudness -10 to -5 LUFS: NORMAL for genre — no loudness deduction, do NOT apply the >-6 penalty
+        • Dynamic Range 4-8 dB: NORMAL (heavy compression is intentional for impact) — no DR penalty for DR4-8
+        • Crest Factor 4-6 dB: NORMAL for genre — no crest factor penalty
+        • Low End 30-55%: NORMAL (heavy guitars and bass are genre characteristics) — no frequency penalty
+        • WHY: Metal masters are intentionally loud and compressed for maximum impact. DR4-6 is industry
+          standard (e.g., Korn, Metallica, Slipknot). Penalizing these would incorrectly score professional
+          commercial masters below 80 despite being technically correct for the genre.
+
         Electronic/EDM/Hip-Hop/Trap:
+        (keywords: electronic, edm, techno, house, trap, dubstep, hip-hop, hip hop)
         • Low End 40-60%: NORMAL — no frequency penalty
-        • Loudness -8 to -6 LUFS: NORMAL for club/streaming masters — no loudness deduction
+        • Loudness -8 to -5 LUFS: NORMAL for club/streaming masters — no loudness deduction, do NOT apply the >-6 penalty
         • Dynamic Range 4-8 dB: NORMAL (brickwall limiting is intentional) — no DR penalty
 
-        Acoustic/Classical/Jazz/Singer-Songwriter:
+        Acoustic/Classical/Jazz/Orchestral:
+        (keywords: classical, jazz, acoustic, orchestral, orchestra, singer-songwriter)
         • Low End 12-25%: NORMAL — no frequency penalty
-        • Loudness -20 to -16 LUFS: NORMAL for natural dynamics — no loudness deduction
+        • Loudness -20 to -14 LUFS: NORMAL for natural dynamics — no loudness deduction, do NOT apply the <-16 or <-20 penalties
         • Dynamic Range 10-22 dB: EXPECTED — no DR penalty
 
         Rock/Pop (default baseline):
@@ -1662,17 +1470,18 @@ class ClaudeAPIService {
         • >0 dBFS: Clipping (-15 points)
 
         LOUDNESS (apply genre-specific norms from above first):
+        • -10 to -5 LUFS: NORMAL for Metal/Hard Rock (+10 points) [Metal/Hard Rock only]
         • -10 to -6 LUFS: Modern streaming master (+10 points)
         • -16 to -10 LUFS: Professional master (+5 points)
-        • -20 to -16 LUFS: Acceptable (-2 points) [waived for Acoustic/Classical/Jazz]
-        • <-20 LUFS: Too quiet (-5 points) [waived for Acoustic/Classical/Jazz]
-        • >-6 LUFS: Too loud (-8 points) [waived for Electronic/EDM/Hip-Hop]
+        • -20 to -14 LUFS: Acceptable (no penalty) [waived for Acoustic/Classical/Jazz/Orchestral]
+        • <-20 LUFS: Too quiet (-5 points) [waived for Acoustic/Classical/Jazz/Orchestral]
+        • >-6 LUFS: Too loud (-8 points) [waived for Electronic/EDM/Hip-Hop/Trap AND Metal/Hard Rock]
 
         DYNAMIC RANGE (apply genre-specific norms from above first):
         • ≥8 DR: Good (+5 points)
         • 6-8 DR: Acceptable (no change)
-        • 4-6 DR: Compressed (-5 points) [waived for Electronic/EDM/Hip-Hop/Trap]
-        • <4 DR: Over-compressed (-10 points) [waived for Electronic/EDM/Hip-Hop/Trap]
+        • 4-6 DR: Compressed (-5 points) [waived for Electronic/EDM/Hip-Hop/Trap AND Metal/Hard Rock]
+        • <4 DR: Over-compressed (-10 points) [waived for Electronic/EDM/Hip-Hop/Trap AND Metal/Hard Rock]
 
         CREST FACTOR:
         • ≥8 dB: Excellent dynamics (+5 points)
@@ -1904,7 +1713,7 @@ class ClaudeAPIService {
         return showAsRecommendation.contains(where: { lowercased.contains($0) })
     }
     
-    private func parseClaudeResponse(_ data: Data, isMastered: Bool, professionalMasterOverride: Bool = false) throws -> ClaudeAnalysisResponse {
+    private func parseClaudeResponse(_ data: Data, isMastered: Bool) throws -> ClaudeAnalysisResponse {
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         
         guard let content = json?["content"] as? [[String: Any]],
@@ -2073,29 +1882,14 @@ class ClaudeAPIService {
         // Enforce score caps and floors based on track type
         var finalScore = score ?? 50
         if !isMastered {
-            if professionalMasterOverride {
-                // PROFESSIONAL MASTER mislabeled as "Mix" - use wider scoring range
-                // These are commercial releases like Korn that user incorrectly labeled as Mix
-                if finalScore > 92 {
-                    print("🎯 PROFESSIONAL OVERRIDE: Capping score from \(finalScore) to 92 (professional track mislabeled as mix)")
-                    finalScore = 92
-                }
-                if finalScore < 85 {
-                    // Don't let professional masters score too low - they're clearly high quality
-                    print("🎯 PROFESSIONAL OVERRIDE: Raising score from \(finalScore) to 85 (professional floor for mislabeled master)")
-                    finalScore = 85
-                }
-                print("🎯 PROFESSIONAL MASTER (labeled as Mix): \(finalScore)")
-            } else {
-                // Standard pre-master mix cap at 90 maximum (mixes don't score 91+)
-                if finalScore > 90 {
-                    print("⚠️ PRE-MASTER MIX SCORE CAP: Capping score from \(finalScore) to 90 (pre-master mixes max at 90)")
-                    finalScore = 90
-                }
-                // NO FLOOR - let scores vary naturally to differentiate between songs
-                // Professional mixes should score 85-90, amateur 70-84, weak/unmixed 50-69
-                print("✅ MIX SCORE (no floor): \(finalScore)")
+            // Standard pre-master mix cap at 90 maximum (mixes don't score 91+)
+            if finalScore > 90 {
+                print("⚠️ PRE-MASTER MIX SCORE CAP: Capping score from \(finalScore) to 90 (pre-master mixes max at 90)")
+                finalScore = 90
             }
+            // NO FLOOR - let scores vary naturally to differentiate between songs
+            // Professional mixes should score 85-90, amateur 70-84, weak/unmixed 50-69
+            print("✅ MIX SCORE (no floor): \(finalScore)")
         }
         
         // Check for contradictory analysis: if score is 85+ but analysis contains negative phrases, use fallback
@@ -2139,9 +1933,8 @@ class ClaudeAPIService {
     /// - Parameters:
     ///   - responseText: The raw response text to parse
     ///   - isMastered: Whether the track is mastered
-    ///   - professionalMasterOverride: Whether professional master override is active
     /// - Returns: Parsed response with score and analysis
-    func parseClaudeResponse(_ responseText: String, isMastered: Bool, professionalMasterOverride: Bool = false) -> (score: Int, summary: String, recommendations: [String]) {
+    func parseClaudeResponse(_ responseText: String, isMastered: Bool) -> (score: Int, summary: String, recommendations: [String]) {
         // Extract score using same patterns as real parser
         var score: Int? = nil
 
@@ -2167,15 +1960,8 @@ class ClaudeAPIService {
         // Apply enforcement logic (same as in real parseClaudeResponse)
         var finalScore = score ?? 50
         if !isMastered {
-            if professionalMasterOverride {
-                // Professional master mislabeled as Mix - wider range 85-92
-                if finalScore > 92 { finalScore = 92 }
-                if finalScore < 85 { finalScore = 85 }
-            } else {
-                // Standard mix cap at 90
-                if finalScore > 90 { finalScore = 90 }
-                // NO FLOOR - let scores vary naturally
-            }
+            // Standard mix cap at 90
+            if finalScore > 90 { finalScore = 90 }
         }
 
         // Cap masters at 100
@@ -2213,7 +1999,7 @@ enum AudioAnalysisError: Error, LocalizedError {
         case .invalidPeakLevel(let v):
             return "Invalid peak level: \(String(format: "%.1f", v)) dBFS (expected -60 to 0)"
         case .invalidStereoWidth(let v):
-            return "Invalid stereo width: \(String(format: "%.1f", v))% (expected 0 to 100)"
+            return "Invalid stereo width: \(String(format: "%.1f", v))% (expected 0 to 150)"
         case .invalidPhaseCoherence(let v):
             return "Invalid phase coherence: \(String(format: "%.2f", v)) (expected -1.0 to 1.0)"
         case .invalidDynamicRange(let v):

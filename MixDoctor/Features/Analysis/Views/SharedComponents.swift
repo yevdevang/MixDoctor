@@ -292,7 +292,19 @@ struct AudioFileRow: View {
                 }
                 .padding(.trailing, 8)
             } else if let result = audioFile.analysisResult {
-                if result.isProfessionallyMixed {
+                if result.stageMismatch != nil {
+                    // Stage mismatch indicator
+                    let label = result.stageMismatch == "master" ? "Master" : "Mix"
+                    VStack(spacing: 2) {
+                        Image(systemName: "exclamationmark.arrow.trianglehead.2.clockwise.rotate.90")
+                            .font(.title3)
+                            .foregroundColor(Color(red: 0.435, green: 0.173, blue: 0.871))
+
+                        Text(label)
+                            .font(.caption2)
+                            .foregroundStyle(Color(red: 0.435, green: 0.173, blue: 0.871))
+                    }
+                } else if result.isProfessionallyMixed {
                     VStack(spacing: 2) {
                         Text("\(Int(result.overallScore))")
                             .font(.title3)
@@ -364,6 +376,9 @@ struct AudioFileRow: View {
 
     private var statusColor: Color {
         if let result = audioFile.analysisResult {
+            if result.stageMismatch != nil {
+                return Color(red: 0.435, green: 0.173, blue: 0.871)
+            }
             return Color.scoreColor(for: result.overallScore)
         }
         return .gray

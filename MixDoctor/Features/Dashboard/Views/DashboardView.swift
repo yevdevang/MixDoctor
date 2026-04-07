@@ -51,10 +51,9 @@ struct DashboardView: View {
     @State private var cachedIssuesCount: Int = 0
     @State private var cachedAverageScore: Double = 0.0
     @State private var isInitialLoad = true // Track if we're still loading files initially
-#if targetEnvironment(macCatalyst)
     @State private var fileToDelete: AudioFile?
     @State private var showDeleteConfirmation = false
-#endif
+    @State private var pendingDeleteOffsets: IndexSet?
     
     enum FilterOption: String, CaseIterable {
         case all = "All"
@@ -202,24 +201,26 @@ struct DashboardView: View {
     private var contentStack: some View {
         NavigationStack {
             dashboardContent
-#if targetEnvironment(macCatalyst)
                 .alert("Delete File", isPresented: $showDeleteConfirmation) {
                     Button("Cancel", role: .cancel) {
                         fileToDelete = nil
+                        pendingDeleteOffsets = nil
                     }
                     Button("Delete", role: .destructive) {
-                        if let file = fileToDelete,
+                        if let offsets = pendingDeleteOffsets {
+                            deleteFiles(at: offsets)
+                        } else if let file = fileToDelete,
                            let index = filteredFiles.firstIndex(where: { $0.id == file.id }) {
                             deleteFiles(at: IndexSet(integer: index))
                         }
                         fileToDelete = nil
+                        pendingDeleteOffsets = nil
                     }
                 } message: {
                     if let file = fileToDelete {
-                        Text("Are you sure you want to delete '\(file.fileName)'? This will remove it from all your devices.")
+                        Text("Are you sure you want to delete '\(file.fileName)'? This action cannot be undone.")
                     }
                 }
-#endif
         }
     }
     
@@ -234,7 +235,7 @@ struct DashboardView: View {
         let results = files.compactMap { $0.analysisResult }
         cachedIssuesCount = results.filter { hasActualIssues(result: $0) }.count
         
-        let scores = results.compactMap { $0.overallScore }
+        let scores = results.filter { $0.stageMismatch == nil }.compactMap { $0.overallScore }
         cachedAverageScore = scores.isEmpty ? 0.0 : scores.reduce(0, +) / Double(scores.count)
     }
 
@@ -629,14 +630,8 @@ struct DashboardView: View {
                         audioFile: file,
                         index: index + 1,
                         onDelete: file.isDemoFile ? nil : {
-#if targetEnvironment(macCatalyst)
                             fileToDelete = file
                             showDeleteConfirmation = true
-#else
-                            if let index = filteredFiles.firstIndex(where: { $0.id == file.id }) {
-                                deleteFiles(at: IndexSet(integer: index))
-                            }
-#endif
                         },
                         isAnalyzing: isAnalyzing && analyzingFile?.id == file.id
                     )
@@ -648,7 +643,13 @@ struct DashboardView: View {
                 .listRowBackground(Color.clear)
 #endif
             }
-            .onDelete(perform: deleteFiles)
+            .onDelete { offsets in
+                pendingDeleteOffsets = offsets
+                if let firstIndex = offsets.first, firstIndex < filteredFiles.count {
+                    fileToDelete = filteredFiles[firstIndex]
+                }
+                showDeleteConfirmation = true
+            }
         }
 #if targetEnvironment(macCatalyst)
         .scrollContentBackground(.hidden)

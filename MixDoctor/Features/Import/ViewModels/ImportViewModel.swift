@@ -74,22 +74,45 @@ final class ImportViewModel {
             var insertedCount = 0
             
             for file in files {
-                if !isDuplicate(file) {
+                if let existingFile = findExistingFile(file) {
+                    // Same audio file already exists
+                    let stageChanged = (existingFile.mixStage ?? "") != (file.mixStage ?? "")
+                    let genreChanged = (existingFile.genre ?? "") != (file.genre ?? "")
+
+                    if stageChanged || genreChanged {
+                        // Update the existing file's stage/genre and clear old analysis
+                        print("🔄 Updating existing file with new settings:")
+                        print("   Existing: \(existingFile.fileName), New: \(file.fileName)")
+                        if stageChanged { print("   Stage: \(existingFile.mixStage ?? "nil") → \(file.mixStage ?? "nil")") }
+                        if genreChanged { print("   Genre: \(existingFile.genre ?? "nil") → \(file.genre ?? "nil")") }
+                        existingFile.mixStage = file.mixStage
+                        existingFile.genre = file.genre
+                        AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: existingFile.fileName, isDemo: existingFile.isDemoFile)
+                        existingFile.analysisResult = nil
+                        insertedCount += 1  // Count as "imported" since settings changed
+                        infoMessage = "Updated \(existingFile.fileName) to \(mixStageLabel(file.mixStage)) stage"
+                        showInfo = true
+                    } else {
+                        duplicateCount += 1
+                    }
+
+                    // Remove the physical duplicate file — but ONLY if the new file
+                    // has a different filename. If same filename, the import overwrote
+                    // the existing physical file and we must NOT delete it.
+                    if file.fileName != existingFile.fileName {
+                        let fileURL = file.fileURL
+                        do {
+                            try iCloudStorageService.shared.deleteAudioFile(at: fileURL)
+                        } catch {
+                        }
+                    }
+                } else {
                     print("📝 Inserting file into database:")
                     print("   Filename: \(file.fileName)")
                     print("   Genre: \(file.genre ?? "nil")")
                     print("   MixStage: \(file.mixStage ?? "nil")")
                     modelContext.insert(file)
                     insertedCount += 1
-                } else {
-                    duplicateCount += 1
-                    
-                    // Remove the physical file since it's a duplicate
-                    let fileURL = file.fileURL
-                    do {
-                        try iCloudStorageService.shared.deleteAudioFile(at: fileURL)
-                    } catch {
-                    }
                 }
             }
 
@@ -149,49 +172,41 @@ final class ImportViewModel {
     }
     // MARK: - Duplicate Detection
     
-    /// Check if a file is a duplicate based on fileName, fileSize, duration, genre, and mixStage
-    /// Also verifies that the existing file physically exists before treating as duplicate
-    /// Allows same file with different genre/stage combinations
-    private func isDuplicate(_ file: AudioFile) -> Bool {
+    /// Find an existing file with the same audio content.
+    /// Matches by fileSize + duration (within 1s tolerance) — catches the same audio
+    /// imported under different filenames (e.g. "Song - Mix.mp3" vs "Song - Master.mp3").
+    /// Returns the existing file regardless of name/genre/stage, or nil if no match.
+    private func findExistingFile(_ file: AudioFile) -> AudioFile? {
         let descriptor = FetchDescriptor<AudioFile>()
         guard let allFiles = try? modelContext.fetch(descriptor) else {
-            return false
+            return nil
         }
-        
-        
-        // Check for exact match on fileName, fileSize, duration, genre, AND mixStage
-        // Duration check within 1 second tolerance (for encoding variations)
+
         for existingFile in allFiles {
-            // Skip comparing the file to itself (same object ID)
-            if existingFile.id == file.id {
-                continue
-            }
-            
-            let sameFileName = existingFile.fileName == file.fileName
+            if existingFile.id == file.id { continue }
+
             let sameFileSize = existingFile.fileSize == file.fileSize
             let similarDuration = abs(existingFile.duration - file.duration) < 1.0
-            let sameGenre = (existingFile.genre ?? "") == (file.genre ?? "")
-            let sameStage = (existingFile.mixStage ?? "") == (file.mixStage ?? "")
-            
-            // Only consider duplicate if ALL match: file, genre, AND stage
-            if sameFileName && sameFileSize && similarDuration && sameGenre && sameStage {
-                // Before treating as duplicate, verify the existing file actually exists
+
+            if sameFileSize && similarDuration {
                 let existingFileURL = existingFile.fileURL
-                let fileExists = FileManager.default.fileExists(atPath: existingFileURL.path)
-                
-                
-                if !fileExists {
-                    // File record exists but file is missing - remove the stale record
+                if !FileManager.default.fileExists(atPath: existingFileURL.path) {
                     modelContext.delete(existingFile)
                     try? modelContext.save()
-                    return false // Not a duplicate since existing file is gone
+                    return nil
                 }
-                
-                return true // It's a real duplicate (same file, genre, AND stage)
+                return existingFile
             }
         }
-        
-        return false
+        return nil
+    }
+
+    private func mixStageLabel(_ stage: String?) -> String {
+        switch stage {
+        case "master_streaming": return "Master (Streaming)"
+        case "master_cd": return "Master (CD)"
+        default: return "Mix"
+        }
     }
 
     func removeImportedFile(_ file: AudioFile) {
@@ -412,8 +427,7 @@ final class ImportViewModel {
                     
                     // Insert imported files into database
                     for file in importedFiles {
-                        // Check for duplicates before inserting
-                        if !isDuplicate(file) {
+                        if findExistingFile(file) == nil {
                             modelContext.insert(file)
                         } else {
                             // Remove duplicate file

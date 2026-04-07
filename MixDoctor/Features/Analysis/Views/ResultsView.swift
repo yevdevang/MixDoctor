@@ -17,6 +17,7 @@ struct ResultsView: View {
     @State private var errorMessage = ""
     @State private var showPaywall = false
     @State private var showScoreGuide = false
+    @State private var showDeleteConfirmation = false
     // MARK: - Production - Access shared instance directly
     private var subscriptionService: SubscriptionService { SubscriptionService.shared }
 
@@ -73,6 +74,14 @@ struct ResultsView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(errorMessage)
+        }
+        .alert("Delete File", isPresented: $showDeleteConfirmation) {
+            Button("Delete", role: .destructive) {
+                deleteFile()
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Are you sure you want to delete this file? This action cannot be undone.")
         }
         .sheet(isPresented: $showScoreGuide) {
             ScoreGuideView()
@@ -143,36 +152,41 @@ struct ResultsView: View {
             // Overall Score Card - always show
             overallScoreCard(result: result)
 
-            // Unmixed Track Warning Banner (if detected)
-            if !result.isProfessionallyMixed {
-                unmixedTrackWarningBanner(result: result)
-            }
+            if let mismatch = result.stageMismatch {
+                // Stage mismatch banner
+                stageMismatchBanner(detectedStage: mismatch)
+            } else {
+                // Unmixed Track Warning Banner (if detected)
+                if !result.isProfessionallyMixed {
+                    unmixedTrackWarningBanner(result: result)
+                }
 
-            // Individual Metrics
-            VStack(spacing: 16) {
-                stereoWidthCard(result: result)
-                phaseCoherenceCard(result: result)
-                monoCompatibilityCard(result: result)
-                // PAZ-style frequency analyzer
-                PAZFrequencyAnalyzer(result: result)
-                dynamicRangeCard(result: result)
-            }
-            
-            // Issues Section
-            let detectedIssues = calculateActualIssues(result: result)
-            if !detectedIssues.isEmpty {
-                modernIssuesSection(issues: detectedIssues)
-            }
-            
-            // Analysis Section - ALWAYS show for all tracks
-            if let aiSummary = result.aiSummary, !aiSummary.isEmpty {
-                modernAnalysisOnlySection(result: result)
-            }
+                // Individual Metrics
+                VStack(spacing: 16) {
+                    stereoWidthCard(result: result)
+                    phaseCoherenceCard(result: result)
+                    monoCompatibilityCard(result: result)
+                    // PAZ-style frequency analyzer
+                    PAZFrequencyAnalyzer(result: result)
+                    dynamicRangeCard(result: result)
+                }
 
-            // Recommendations Section - Show when there are AI recommendations OR detected issues
-            let allRecommendations = generateAllRecommendations(result: result, detectedIssues: detectedIssues)
-            if !allRecommendations.isEmpty && (!result.isProfessionallyMixed || result.overallScore < 85 || !detectedIssues.isEmpty) {
-                modernRecommendationsOnlySectionWithIssues(result: result, recommendations: allRecommendations)
+                // Issues Section
+                let detectedIssues = calculateActualIssues(result: result)
+                if !detectedIssues.isEmpty {
+                    modernIssuesSection(issues: detectedIssues)
+                }
+
+                // Analysis Section - ALWAYS show for all tracks
+                if let aiSummary = result.aiSummary, !aiSummary.isEmpty {
+                    modernAnalysisOnlySection(result: result)
+                }
+
+                // Recommendations Section - Show when there are AI recommendations OR detected issues
+                let allRecommendations = generateAllRecommendations(result: result, detectedIssues: detectedIssues)
+                if !allRecommendations.isEmpty && (!result.isProfessionallyMixed || result.overallScore < 85 || !detectedIssues.isEmpty) {
+                    modernRecommendationsOnlySectionWithIssues(result: result, recommendations: allRecommendations)
+                }
             }
 
             // Action Buttons
@@ -329,20 +343,42 @@ struct ResultsView: View {
                         .cornerRadius(8)
                 }
                 
-                // Mix Stage Display (read-only)
+                // Mix Stage Display — editable when stage mismatch detected
                 HStack {
                     Text("Stage:")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .frame(width: 80, alignment: .leading)
-                    
-                    Text(mixStageDisplayName(audioFile.mixStage))
-                        .foregroundStyle(.primary)
+
+                    if audioFile.analysisResult?.stageMismatch != nil {
+                        Picker("", selection: Binding(
+                            get: { audioFile.mixStage ?? "mix" },
+                            set: { audioFile.mixStage = $0 }
+                        )) {
+                            Text("Mix (Pre-Master)").tag("mix")
+                            Text("Master (Streaming)").tag("master_streaming")
+                            Text("Master (CD)").tag("master_cd")
+                        }
+                        .pickerStyle(.menu)
+                        .tint(Color(red: 0.435, green: 0.173, blue: 0.871))
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Color.gray.opacity(0.05))
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 4)
+                        .background(Color(red: 0.435, green: 0.173, blue: 0.871).opacity(0.08))
                         .cornerRadius(8)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color(red: 0.435, green: 0.173, blue: 0.871).opacity(0.3), lineWidth: 1)
+                        )
+                    } else {
+                        Text(mixStageDisplayName(audioFile.mixStage))
+                            .foregroundStyle(.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.gray.opacity(0.05))
+                            .cornerRadius(8)
+                    }
                 }
             }
         }
@@ -386,7 +422,29 @@ struct ResultsView: View {
             }
             
             // Score Circle with Modern Design
-            if result.isProfessionallyMixed {
+            if let mismatch = result.stageMismatch {
+                // Stage mismatch — show info indicator instead of score
+                let detectedLabel = mismatch == "master" ? "Detected as Master" : "Detected as Mix"
+                ZStack {
+                    Circle()
+                        .stroke(Color(red: 0.435, green: 0.173, blue: 0.871).opacity(0.3), lineWidth: 12)
+                        .frame(width: 160, height: 160)
+
+                    VStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.arrow.trianglehead.2.clockwise.rotate.90")
+                            .font(.system(size: 32))
+                            .foregroundColor(Color(red: 0.435, green: 0.173, blue: 0.871))
+
+                        Text(detectedLabel)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(Color(red: 0.435, green: 0.173, blue: 0.871))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .padding(.horizontal, 8)
+                    }
+                    .frame(width: 140)
+                }
+            } else if result.isProfessionallyMixed {
                 ZStack {
                     // Background Circle
                     Circle()
@@ -439,15 +497,17 @@ struct ResultsView: View {
                     }
                 }
             }
-            
+
             // Score Description with Status
             VStack(spacing: 8) {
-                Text(scoreDescription(result.overallScore, isProfessionallyMixed: result.isProfessionallyMixed, mixStage: audioFile.mixStage))
+                Text(scoreDescription(result.overallScore, isProfessionallyMixed: result.isProfessionallyMixed, mixStage: audioFile.mixStage, stageMismatch: result.stageMismatch))
                     .font(.title3)
                     .fontWeight(.medium)
                     .multilineTextAlignment(.center)
 
-                modernIssuesSummary(result: result)
+                if result.stageMismatch == nil {
+                    modernIssuesSummary(result: result)
+                }
             }
         }
         .padding(24)
@@ -515,8 +575,8 @@ struct ResultsView: View {
         // Metal with good mono compatibility can use 95-100% professionally
         if result.stereoWidthScore < 10 {
             issues.append("Mono or very narrow stereo")
-        } else if result.stereoWidthScore > 100 {
-            issues.append("Impossible stereo width value")
+        } else if result.stereoWidthScore > 120 {
+            issues.append("Excessively wide stereo image")
         }
         
         // Frequency balance - use FFT data if available, otherwise use old values
@@ -799,6 +859,41 @@ struct ResultsView: View {
             RoundedRectangle(cornerRadius: 16)
                 .fill(Color.backgroundSecondary)
                 .shadow(color: Color.black.opacity(0.05), radius: 10, x: 0, y: 2)
+        )
+    }
+
+    // MARK: - Stage Mismatch Banner
+
+    private func stageMismatchBanner(detectedStage: String) -> some View {
+        let isMaster = detectedStage == "master"
+        let title = isMaster ? "This Track Appears to Be a Master" : "This Track Appears to Be a Mix"
+        let description = isMaster
+            ? "The audio metrics (loudness, peak level, dynamics) indicate this is a mastered track. Please select a Master stage in Analysis Settings and re-analyze for accurate scoring."
+            : "The audio metrics indicate this is a pre-master mix, not a mastered track. Please select Mix (Pre-Master) stage in Analysis Settings and re-analyze for accurate scoring."
+
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .foregroundStyle(Color(red: 0.435, green: 0.173, blue: 0.871))
+                    .font(.title2)
+
+                Text(title)
+                    .font(.headline)
+                    .fontWeight(.bold)
+            }
+
+            Text(description)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .padding(20)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color(red: 0.435, green: 0.173, blue: 0.871).opacity(0.08))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color(red: 0.435, green: 0.173, blue: 0.871).opacity(0.3), lineWidth: 1)
+                )
         )
     }
 
@@ -1481,9 +1576,18 @@ struct ResultsView: View {
         return strengths
     }
 
-    private func scoreDescription(_ score: Double, isProfessionallyMixed: Bool, mixStage: String?) -> String {
+    private func scoreDescription(_ score: Double, isProfessionallyMixed: Bool, mixStage: String?, stageMismatch: String? = nil) -> String {
         let isMaster = mixStage == "master_streaming" || mixStage == "master_cd"
         let qualityType = isMaster ? "Master" : "Mix"
+
+        // Stage mismatch — tell the user what was detected
+        if let mismatch = stageMismatch {
+            if mismatch == "master" {
+                return "Select Master stage and re-analyze"
+            } else {
+                return "Select Mix stage and re-analyze"
+            }
+        }
 
         // If unmixed, don't show positive quality labels
         if !isProfessionallyMixed {
@@ -1873,8 +1977,20 @@ struct ResultsView: View {
 
     private func actionButtons(result: AnalysisResult) -> some View {
         VStack(spacing: 12) {
-            Button(role: .destructive, action: { 
-                deleteFile()
+            if result.stageMismatch != nil {
+                Button(action: {
+                    Task { await performAnalysis() }
+                }) {
+                    Label("Analyze", systemImage: "waveform.badge.magnifyingglass")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Color(red: 0.435, green: 0.173, blue: 0.871))
+                .disabled(isAnalyzing)
+            }
+
+            Button(role: .destructive, action: {
+                showDeleteConfirmation = true
             }) {
                 Label("Delete File", systemImage: "trash")
                     .frame(maxWidth: .infinity)
@@ -2368,13 +2484,13 @@ struct ScoreGuideView: View {
                             .padding(.horizontal)
 
                         VStack(spacing: 12) {
-                            scoreFactorRow(icon: "speaker.wave.3.fill", title: "Loudness (LUFS)", description: "Streaming: -14 to -16 LUFS. CD/Loud: -6 to -9 LUFS")
-                            scoreFactorRow(icon: "waveform.path.ecg", title: "Dynamic Range", description: "Streaming: 8-12 dB. CD/Loud: 4-6 dB. Mix: 8-15 dB")
-                            scoreFactorRow(icon: "gauge.with.dots.needle.67percent", title: "Peak Levels", description: "Optimal: -1 to 0 dB. Clipping heavily penalized")
-                            scoreFactorRow(icon: "waveform", title: "Frequency Balance", description: "Genre-appropriate distribution across spectrum")
-                            scoreFactorRow(icon: "circle.lefthalf.filled", title: "Stereo Width", description: "25-85% typical. Metal/Rock can use 95%+ with good mono")
-                            scoreFactorRow(icon: "waveform.path", title: "Phase Coherence", description: "EDM: 50%+, Pop: 45%+, Rock: 40%+, Jazz: 30%+")
-                            scoreFactorRow(icon: "speaker.wave.1", title: "Mono Compatibility", description: "Good: 60%+. Metal/EDM: 45%+ acceptable")
+                            scoreFactorRow(icon: "speaker.wave.3.fill", title: "Loudness (LUFS)", description: "Varies by genre: Metal -7 to -10, Pop -9 to -7, Classical -20 to -16")
+                            scoreFactorRow(icon: "waveform.path.ecg", title: "Dynamic Range", description: "Varies by genre: Metal DR 6-8, Pop DR 6-8, Classical DR 13-16")
+                            scoreFactorRow(icon: "gauge.with.dots.needle.67percent", title: "Peak Levels", description: "True peak ≤ -1.0 dBTP ideal. Clipping (> 0 dBFS) heavily penalized")
+                            scoreFactorRow(icon: "waveform", title: "Frequency Balance", description: "Genre-appropriate distribution. Metal allows heavier bass, Classical expects even spread")
+                            scoreFactorRow(icon: "circle.lefthalf.filled", title: "Stereo Width", description: "Varies by genre: Metal 65-80%, Pop 55-75%, Classical 65-95%")
+                            scoreFactorRow(icon: "waveform.path", title: "Phase Coherence", description: "Excellent: > 0.4 for most genres. Classical/Live: > 0.3 acceptable")
+                            scoreFactorRow(icon: "speaker.wave.1", title: "Mono Compatibility", description: "≤ 3 dB loss ideal. Critical for Hip-Hop (808 bass) and Pop playback")
                         }
                         .padding(.horizontal)
                     }
@@ -2389,7 +2505,7 @@ struct ScoreGuideView: View {
                                 .font(.subheadline.bold())
                         }
 
-                        Text("Commercial masters (Korn, Metallica, etc.) typically score 96-100. They have optimized loudness, controlled dynamics, excellent stereo imaging, and genre-appropriate frequency balance.")
+                        Text("Commercial masters (Korn, Daft Punk, Miles Davis, etc.) typically score 87-96. Scores are genre-aware: Metal, EDM, Classical, Jazz, and others each have their own thresholds for loudness, dynamics, and frequency balance.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
@@ -2439,49 +2555,49 @@ struct ScoreGuideView: View {
     private var masterScoreRanges: some View {
         VStack(spacing: 16) {
             scoreRangeCard(
-                range: "96-100",
-                title: "Exceptional Commercial Master",
-                description: "Commercial release quality (Korn, Metallica, Abbey Road). Optimal loudness, perfect dynamics, excellent stereo imaging.",
+                range: "90-96",
+                title: "Exceptional Master",
+                description: "Top-tier commercial quality (Korn, Daft Punk, Bach). All metrics in the excellent range for the genre with no technical defects.",
                 color: .green,
                 icon: "checkmark.seal.fill"
             )
 
             scoreRangeCard(
-                range: "92-95",
-                title: "Excellent Professional Master",
-                description: "High-quality professional mastering. Ready for release with minor refinements possible.",
+                range: "85-89",
+                title: "Professional Master",
+                description: "Release-ready professional mastering. Strong metrics with only minor areas for polish.",
                 color: Color(red: 0.3, green: 0.8, blue: 0.3),
                 icon: "star.fill"
             )
 
             scoreRangeCard(
-                range: "88-91",
-                title: "Very Good Professional Master",
-                description: "Professional quality with small imperfections. Suitable for release.",
+                range: "78-84",
+                title: "Good Master",
+                description: "Solid mastering work. Some metrics outside the ideal range for the genre but suitable for release.",
                 color: Color(red: 0.4, green: 0.7, blue: 0.4),
                 icon: "star.leadinghalf.filled"
             )
 
             scoreRangeCard(
-                range: "85-87",
-                title: "Good Master",
-                description: "Solid mastering work with some areas for improvement. Ready for release.",
+                range: "65-77",
+                title: "Amateur Master",
+                description: "Needs mastering polish. May have issues with loudness, dynamics, or frequency balance for the genre.",
                 color: .orange,
                 icon: "waveform.circle.fill"
             )
 
             scoreRangeCard(
-                range: "75-84",
-                title: "Amateur/Flawed Master",
-                description: "Needs mastering polish. May have issues with loudness, dynamics, or balance.",
+                range: "50-64",
+                title: "Flawed Master",
+                description: "Significant technical problems. Clipping, phase issues, or severe frequency imbalance detected.",
                 color: Color(red: 1.0, green: 0.5, blue: 0.0),
                 icon: "exclamationmark.triangle.fill"
             )
 
             scoreRangeCard(
-                range: "Below 75",
-                title: "Poor Mastering",
-                description: "Significant problems requiring re-mastering or professional help.",
+                range: "Below 50",
+                title: "Critical Issues",
+                description: "Multiple severe defects requiring re-mastering or professional help.",
                 color: .red,
                 icon: "xmark.circle.fill"
             )
@@ -2502,39 +2618,39 @@ struct ScoreGuideView: View {
             .padding(.horizontal)
 
             scoreRangeCard(
-                range: "85-90",
+                range: "82-90",
                 title: "Professional Mix",
-                description: "Ready for mastering. Clean, balanced, and well-prepared. This is the best a pre-master mix can achieve.",
+                description: "Ready for mastering. Clean, balanced, and well-prepared with genre-appropriate levels and headroom.",
                 color: .green,
                 icon: "checkmark.seal.fill"
             )
 
             scoreRangeCard(
-                range: "78-84",
-                title: "Strong Amateur Mix",
-                description: "Good quality but needs some polish before mastering. Minor balance or dynamics issues.",
+                range: "72-81",
+                title: "Good Mix",
+                description: "Solid work with some room for improvement. Minor balance or dynamics issues before mastering.",
                 color: Color(red: 0.4, green: 0.8, blue: 0.4),
                 icon: "star.fill"
             )
 
             scoreRangeCard(
-                range: "68-77",
-                title: "Decent Mix",
-                description: "Needs significant work before mastering. Review recommendations for improvements.",
+                range: "55-71",
+                title: "Needs Work",
+                description: "Noticeable issues with levels, balance, or frequency distribution. Review recommendations before mastering.",
                 color: .orange,
                 icon: "waveform.circle.fill"
             )
 
             scoreRangeCard(
-                range: "50-67",
-                title: "Weak Mix",
-                description: "Major issues requiring substantial mixing improvements. Not ready for mastering.",
+                range: "35-54",
+                title: "Significant Problems",
+                description: "Major mixing issues such as clipping, phase problems, or severe imbalance. Not ready for mastering.",
                 color: Color(red: 1.0, green: 0.5, blue: 0.0),
                 icon: "exclamationmark.triangle.fill"
             )
 
             scoreRangeCard(
-                range: "Below 50",
+                range: "Below 35",
                 title: "Critical Issues",
                 description: "Severe problems. May need re-recording or major repair work.",
                 color: .red,

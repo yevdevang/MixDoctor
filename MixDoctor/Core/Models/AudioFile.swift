@@ -175,6 +175,7 @@ public final class AnalysisResult {
     
     // Mixing Status
     var isProfessionallyMixed: Bool  // True if mixed, False if unmixed recording
+    var stageMismatch: String?       // nil = no mismatch, "master" = detected as master, "mix" = detected as mix
 
     // Full FFT Spectrum Data for professional analyzer visualization
     // FIXED: Use @Transient with Data backing to prevent SwiftData detachment crashes
@@ -264,6 +265,7 @@ public final class AnalysisResult {
         self.claudeScore = nil
         self.isReadyForMastering = false
         self.isProfessionallyMixed = true  // Assume mixed until proven otherwise
+        self.stageMismatch = nil
         
         // Initialize spectrum data backing storage
         self.frequencySpectrumData = nil
