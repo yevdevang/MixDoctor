@@ -7,6 +7,8 @@
 
 import SwiftUI
 import SwiftData
+import Charts
+import UniformTypeIdentifiers
 
 @MainActor
 struct ResultsView: View {
@@ -18,6 +20,7 @@ struct ResultsView: View {
     @State private var showPaywall = false
     @State private var showScoreGuide = false
     @State private var showDeleteConfirmation = false
+    @State private var showVersionPicker = false
     // MARK: - Production - Access shared instance directly
     private var subscriptionService: SubscriptionService { SubscriptionService.shared }
 
@@ -85,6 +88,15 @@ struct ResultsView: View {
         }
         .sheet(isPresented: $showScoreGuide) {
             ScoreGuideView()
+        }
+        .fileImporter(
+            isPresented: $showVersionPicker,
+            allowedContentTypes: [.audio],
+            allowsMultipleSelection: false
+        ) { result in
+            if case .success(let urls) = result, let url = urls.first {
+                Task { await replaceFile(with: url) }
+            }
         }
         .task {
             // Load existing result immediately (already in memory, no I/O)
@@ -188,6 +200,9 @@ struct ResultsView: View {
                     modernRecommendationsOnlySectionWithIssues(result: result, recommendations: allRecommendations)
                 }
             }
+
+            // Version History (shown after re-analysis)
+            AnalysisHistorySectionView(audioFile: audioFile)
 
             // Action Buttons
             actionButtons(result: result)
@@ -1989,6 +2004,14 @@ struct ResultsView: View {
                 .disabled(isAnalyzing)
             }
 
+            Button(action: { showVersionPicker = true }) {
+                Label("Upload New Version", systemImage: "arrow.triangle.2.circlepath")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .tint(Color(red: 0.435, green: 0.173, blue: 0.871))
+            .disabled(isAnalyzing || audioFile.isDemoFile)
+
             Button(role: .destructive, action: {
                 showDeleteConfirmation = true
             }) {
@@ -2198,6 +2221,37 @@ struct ResultsView: View {
         }
     }
     
+    private func replaceFile(with url: URL) async {
+        let didStart = url.startAccessingSecurityScopedResource()
+        defer { if didStart { url.stopAccessingSecurityScopedResource() } }
+
+        do {
+            let audioDir = iCloudStorageService.shared.getAudioFilesDirectory()
+            let destURL = audioDir.appendingPathComponent(url.lastPathComponent)
+
+            if FileManager.default.fileExists(atPath: destURL.path) {
+                try FileManager.default.removeItem(at: destURL)
+            }
+            try FileManager.default.copyItem(at: url, to: destURL)
+
+            // Archive current result to history before replacing
+            if let existing = audioFile.analysisResult {
+                audioFile.analysisHistory.append(existing)
+            }
+
+            // Point the AudioFile entity at the new file
+            audioFile.fileURL = destURL
+            audioFile.fileName = url.lastPathComponent
+            audioFile.analysisResult = nil
+            analysisResult = nil
+
+            await performAnalysis()
+        } catch {
+            errorMessage = "Could not replace file: \(error.localizedDescription)"
+            showError = true
+        }
+    }
+
     private func deleteFile() {
         
         // Delete the actual audio file from storage (iCloud or local)

@@ -1,4 +1,4 @@
-# Current Feature: Fix Mislabeled Master Shown as Unmixed
+# Current Feature: Mix Version History Timeline
 
 ## Status
 
@@ -6,18 +6,23 @@ Complete
 
 ## Goals
 
-- When user labels a track as "Mix" but metrics strongly indicate a professional master (`professionalMasterOverride = true`), show a clear message like **"Detected as Master"** in the Overall Score section instead of "Unmixed - Needs Processing"
-- The track should receive a proper master-level score (e.g. 85–92) rather than an "Unmixed" label
-- `scoreDescription()` in `ResultsView.swift` must be aware of the `professionalMasterOverride` case and return an appropriate label
-- The `AnalysisResult` model (or a computed property) must surface the `professionalMasterOverride` flag so the view can use it
+- Add a "History" section to `ResultsView` that appears when `audioFile.analysisHistory` is non-empty
+- Show a Swift Charts line chart of `overallScore` over time (x = `dateAnalyzed`, y = score 0–100)
+- Below the chart, list each past result as a row: date, score badge, mix stage label
+- Tapping a past result row opens a detail sheet showing that `AnalysisResult`'s full metrics (score, LUFS, dynamic range, stereo width, phase coherence, AI summary if stored)
+- Section is hidden entirely on first analysis (empty history) — no empty state needed
 
 ## Notes
 
-- The override flag is set in `ClaudeAPIService.swift` around line 184: `professionalMasterOverride = true`
-- Currently `isUnmixed = false` is already set when override is active (line 213), but `isProfessionallyMixed` may still be `false`, causing `scoreDescription()` to fall into the "Unmixed" branch at line 1489
-- `scoreDescription(_:isProfessionallyMixed:mixStage:)` in `ResultsView.swift:1484` — need to add a third signal for the mislabeled-master case
-- The fix must NOT change how a genuine "Mix" stage with truly unmixed metrics is handled
-- Check whether `AnalysisResult` already stores a flag like `detectedAsMaster` or if one needs to be added
+- `analysisHistory: [AnalysisResult]` is already in `AudioFile` (`AudioFile.swift:32-33`), cascade-deleted with parent
+- History is populated in `ResultsView.swift:2440-2446` — the existing result is appended before overwrite on re-analysis; **no changes to the append logic needed**
+- `AnalysisResult` key fields: `dateAnalyzed: Date`, `overallScore: Double`, `claudeScore: Int?`, `aiSummary: String?`, `mixStage` (from parent `AudioFile`), plus all DSP metrics
+- `Charts` is already imported in `PAZFrequencyAnalyzer.swift` — reuse the same import, no new dependency
+- Add the History section after the overall score card in `ResultsView` (~line 193 action buttons area) as a new `historySection` `@ViewBuilder`
+- Sort history by `dateAnalyzed` ascending for the chart (oldest → newest), descending for the list (newest first)
+- The detail sheet can be a new `AnalysisHistoryDetailView` — a lightweight read-only view (no re-analyze button), reusing metric card components already in `ResultsView`
+- Keep the section self-contained: `private var historySection: some View` + `AnalysisHistoryDetailView` in the same file or a new file under `Features/Analysis/Views/`
+- The mix stage label to display: map `audioFile.mixStage` string → human-readable ("Mix", "Master (Streaming)", "Master (CD)") using the existing helper if one exists, otherwise inline mapping
 
 ## History
 
@@ -32,3 +37,7 @@ Complete
 - **Fix Prompt & Scoring Issues** — Added `validateMetrics` guard, `AudioAnalysisError` enum, genre-aware scoring adjustments for electronic/acoustic/rock baselines, fixed scoring contradictions in mastered track and pre-master prompts.
 
 - **Fix Scoring System** — Replaced contradictory scoring rules with BaseScore + Bonuses − Penalties formula, 9 genre groups with per-metric thresholds, universal bonuses/penalties, Metal/Hard Rock scoring fix, pre-master cap at 90 / master cap at 100.
+
+- **Fix Mislabeled Master Shown as Unmixed** — When `professionalMasterOverride = true`, show "Detected as Master" label instead of "Unmixed - Needs Processing" in `scoreDescription()`, and assign a proper master-level score.
+
+- **Mix Version History Timeline** — Added `AnalysisHistoryView.swift` with `AnalysisHistorySectionView` (score timeline chart + tappable past-result rows) and `AnalysisHistoryDetailSheet` (read-only metrics + AI summary for a past result). History section appears automatically in `ResultsView` after any re-analysis. Added "Upload New Version" button that lets the user replace the underlying audio file (copies new file, archives current result to history, triggers re-analysis) — enabling score progression tracking across mix revisions.
