@@ -1,6 +1,6 @@
 # What's New
 
-## Version 1.2.3 (Unreleased)
+## Version 1.2.3
 
 ### New Features
 
