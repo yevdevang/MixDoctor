@@ -9,6 +9,7 @@ import SwiftUI
 import SwiftData
 import Charts
 import UniformTypeIdentifiers
+import AVFoundation
 
 @MainActor
 struct ResultsView: View {
@@ -21,6 +22,9 @@ struct ResultsView: View {
     @State private var showScoreGuide = false
     @State private var showDeleteConfirmation = false
     @State private var showVersionPicker = false
+    @State private var pendingVersionURL: URL? = nil
+    @State private var pendingVersionDuration: TimeInterval = 0
+    @State private var showDurationMismatchWarning = false
     // MARK: - Production - Access shared instance directly
     private var subscriptionService: SubscriptionService { SubscriptionService.shared }
 
@@ -95,8 +99,21 @@ struct ResultsView: View {
             allowsMultipleSelection: false
         ) { result in
             if case .success(let urls) = result, let url = urls.first {
-                Task { await replaceFile(with: url) }
+                Task { await checkAndReplaceFile(with: url) }
             }
+        }
+        .alert("Different Length File", isPresented: $showDurationMismatchWarning) {
+            Button("Upload Anyway", role: .destructive) {
+                if let url = pendingVersionURL {
+                    Task { await replaceFile(with: url) }
+                }
+                pendingVersionURL = nil
+            }
+            Button("Cancel", role: .cancel) {
+                pendingVersionURL = nil
+            }
+        } message: {
+            Text("The selected file (\(formatDuration(pendingVersionDuration))) is very different in length from the current version (\(formatDuration(audioFile.duration))).\n\nAre you sure this is the right file?")
         }
         .task {
             // Load existing result immediately (already in memory, no I/O)
@@ -2136,6 +2153,12 @@ struct ResultsView: View {
         }
     }
 
+    /// A result is a real, archivable "version" only if it was successfully scored.
+    /// Failed analyses (API error) and stage mismatches both yield overallScore == 0.
+    private func isArchivableVersion(_ result: AnalysisResult) -> Bool {
+        result.overallScore > 0 && result.stageMismatch == nil
+    }
+
     private func performAnalysis() async {
         // Check if user can perform analysis
         
@@ -2152,8 +2175,11 @@ struct ResultsView: View {
 
         do {
             
-            // Store existing result in history before overwriting (if re-analyzing)
-            if let existingResult = audioFile.analysisResult {
+            // Store existing result in history before overwriting (if re-analyzing).
+            // Only archive VALID, scored analyses — a failed API call or a stage
+            // mismatch produces overallScore == 0 with populated DSP metrics, which
+            // would show a misleading "0" badge in the timeline. Those aren't versions.
+            if let existingResult = audioFile.analysisResult, isArchivableVersion(existingResult) {
                 audioFile.analysisHistory.append(existingResult)
             }
             
@@ -2221,6 +2247,39 @@ struct ResultsView: View {
         }
     }
     
+    /// Checks duration similarity before replacing. If the new file differs by
+    /// more than 30 seconds, shows a warning alert instead of replacing immediately.
+    private func checkAndReplaceFile(with url: URL) async {
+        // Must hold security-scoped access while reading the asset duration.
+        let didStart = url.startAccessingSecurityScopedResource()
+        let newDuration = await audioDuration(of: url)
+        if didStart { url.stopAccessingSecurityScopedResource() }
+
+        let diff = abs(newDuration - audioFile.duration)
+        if diff > 30 {
+            pendingVersionURL = url
+            pendingVersionDuration = newDuration
+            showDurationMismatchWarning = true
+        } else {
+            await replaceFile(with: url)
+        }
+    }
+
+    /// Reads the duration of an audio file asynchronously via AVFoundation.
+    /// Uses the modern async `load(.duration)` API — the synchronous `.duration`
+    /// property returns 0 until the asset is loaded and is deprecated in iOS 16+.
+    private func audioDuration(of url: URL) async -> TimeInterval {
+        let asset = AVURLAsset(url: url)
+        guard let cmDuration = try? await asset.load(.duration) else { return 0 }
+        let seconds = cmDuration.seconds
+        return seconds.isFinite ? seconds : 0
+    }
+
+    private func formatDuration(_ seconds: TimeInterval) -> String {
+        let s = Int(seconds)
+        return String(format: "%d:%02d", s / 60, s % 60)
+    }
+
     private func replaceFile(with url: URL) async {
         let didStart = url.startAccessingSecurityScopedResource()
         defer { if didStart { url.stopAccessingSecurityScopedResource() } }
@@ -2234,8 +2293,8 @@ struct ResultsView: View {
             }
             try FileManager.default.copyItem(at: url, to: destURL)
 
-            // Archive current result to history before replacing
-            if let existing = audioFile.analysisResult {
+            // Archive current result to history before replacing (skip duds — see above)
+            if let existing = audioFile.analysisResult, isArchivableVersion(existing) {
                 audioFile.analysisHistory.append(existing)
             }
 

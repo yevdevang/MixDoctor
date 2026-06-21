@@ -13,11 +13,17 @@ struct AnalysisHistorySectionView: View {
     @State private var selectedHistoryResult: AnalysisResult?
 
     private var sortedHistory: [AnalysisResult] {
-        audioFile.analysisHistory.sorted { $0.dateAnalyzed < $1.dateAnalyzed }
+        // Hide non-versions: failed analyses (API error) and stage mismatches are
+        // saved with overallScore == 0 and must not appear as timeline entries.
+        // This also cleans up any 0-score entries archived before the fix.
+        let valid: [AnalysisResult] = audioFile.analysisHistory.filter { result in
+            result.overallScore > 0 && result.stageMismatch == nil
+        }
+        return valid.sorted { $0.dateAnalyzed < $1.dateAnalyzed }
     }
 
     var body: some View {
-        if !audioFile.analysisHistory.isEmpty {
+        if !sortedHistory.isEmpty {
             VStack(alignment: .leading, spacing: 16) {
                 HStack {
                     Image(systemName: "clock.arrow.circlepath")
@@ -27,7 +33,7 @@ struct AnalysisHistorySectionView: View {
                         .font(.title2)
                         .fontWeight(.semibold)
                     Spacer()
-                    let count = audioFile.analysisHistory.count
+                    let count = sortedHistory.count
                     Text("\(count) \(count == 1 ? "version" : "versions")")
                         .font(.caption)
                         .foregroundStyle(.secondary)
