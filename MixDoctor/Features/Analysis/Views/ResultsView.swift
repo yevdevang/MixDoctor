@@ -2220,6 +2220,7 @@ struct ResultsView: View {
             // Save to SwiftData and iCloud Drive on background thread to avoid freezing
             let fileName = audioFile.fileName
             let isDemo = audioFile.isDemoFile
+            let history = audioFile.analysisHistory
 
             // Save to SwiftData first (synchronously on main actor)
             do {
@@ -2231,7 +2232,7 @@ struct ResultsView: View {
             // Save to iCloud Drive as JSON for cross-device sync (background)
             Task.detached(priority: .utility) {
                 do {
-                    try AnalysisResultPersistence.shared.saveAnalysisResult(result, forAudioFile: fileName, isDemo: isDemo)
+                    try AnalysisResultPersistence.shared.saveAnalysisResult(result, forAudioFile: fileName, isDemo: isDemo, history: history)
                     print("✅ Successfully saved analysis result to JSON for \(fileName)")
                 } catch {
                     print("❌ Failed to save analysis result to JSON for \(fileName): \(error.localizedDescription)")
