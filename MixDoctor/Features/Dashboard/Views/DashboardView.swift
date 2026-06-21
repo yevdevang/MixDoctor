@@ -37,8 +37,6 @@ struct DashboardView: View {
     @State private var navigateToFile: AudioFile?
     @State private var hasPerformedInitialSync = false // Track if we've done initial sync
     @State private var isScanning = false // Prevent concurrent scans
-    @State private var cachedFilteredFiles: [AudioFile] = [] // Cache filtered results
-    @State private var lastFilterHash = 0 // Track filter state changes
     @State private var syncDebounceTask: Task<Void, Never>? // Debounce sync operations
     @State private var hasLoggedDashboardView = false // Track if dashboard view event has been logged
     @State private var showDeleteAllConfirmation = false // Confirmation for delete all
@@ -69,27 +67,12 @@ struct DashboardView: View {
     }
     
     var filteredFiles: [AudioFile] {
-        // Calculate hash of current filter state
-        var hasher = Hasher()
-        hasher.combine(searchText)
-        hasher.combine(filterOption)
-        hasher.combine(sortOption)
-        hasher.combine(audioFiles.count)
-        let currentHash = hasher.finalize()
-
-        // Use cached version if filters haven't changed
-        if currentHash == lastFilterHash && !cachedFilteredFiles.isEmpty {
-            return cachedFilteredFiles
-        }
-
         var files = audioFiles
 
-        // Apply search filter
         if !searchText.isEmpty {
             files = files.filter { $0.fileName.localizedCaseInsensitiveContains(searchText) }
         }
 
-        // Apply status filter
         switch filterOption {
         case .all:
             break
@@ -104,7 +87,6 @@ struct DashboardView: View {
             }
         }
 
-        // Apply sorting
         switch sortOption {
         case .date:
             files.sort { $0.dateImported > $1.dateImported }
@@ -118,16 +100,9 @@ struct DashboardView: View {
             }
         }
 
-        // Sort demo files to the bottom
         let userFiles = files.filter { !$0.isDemoFile }
         let demoFiles = files.filter { $0.isDemoFile }
-        files = userFiles + demoFiles
-
-        // Cache the result (non-blocking)
-        cachedFilteredFiles = files
-        lastFilterHash = currentHash
-
-        return files
+        return userFiles + demoFiles
     }
     
     var body: some View {
@@ -187,9 +162,6 @@ struct DashboardView: View {
             }
 #endif
             .onReceive(NotificationCenter.default.publisher(for: .analysisCleared)) { _ in
-                // Invalidate cached filtered files so the UI reflects cleared analysis
-                cachedFilteredFiles = []
-                lastFilterHash = 0
 #if targetEnvironment(macCatalyst)
                 reloadAudioFiles()
 #else
@@ -887,7 +859,6 @@ struct DashboardView: View {
             
             // Update UI
             audioFiles = files
-            cachedFilteredFiles = files
             isLoadingFiles = false
             
             // Mark initial load complete once files are loaded
@@ -965,6 +936,7 @@ struct DashboardView: View {
             let genre = audioFile.genre
             let mixStage = audioFile.mixStage
             let isDemo = audioFile.isDemoFile
+            let history = audioFile.analysisHistory
 
             do {
                 // Run analysis on low-priority background thread to keep UI responsive
@@ -1000,7 +972,7 @@ struct DashboardView: View {
                     // Save to iCloud Drive as JSON (background, but ensure it happens)
                     Task.detached(priority: .background) {
                         do {
-                            try AnalysisResultPersistence.shared.saveAnalysisResult(result, forAudioFile: fileName, isDemo: isDemo)
+                            try AnalysisResultPersistence.shared.saveAnalysisResult(result, forAudioFile: fileName, isDemo: isDemo, history: history)
                             print("✅ Successfully saved analysis result to JSON for \(fileName)")
                         } catch {
                             print("❌ Failed to save analysis result to JSON for \(fileName): \(error.localizedDescription)")
@@ -1091,6 +1063,7 @@ struct DashboardView: View {
             let genre = audioFile.genre
             let mixStage = audioFile.mixStage
             let isDemo = audioFile.isDemoFile
+            let history = audioFile.analysisHistory
 
             do {
                 // Construct fileURL inside background task to avoid blocking main thread
@@ -1125,7 +1098,7 @@ struct DashboardView: View {
                     // Save to iCloud Drive as JSON (background, but ensure it happens)
                     Task.detached(priority: .background) {
                         do {
-                            try AnalysisResultPersistence.shared.saveAnalysisResult(result, forAudioFile: fileName, isDemo: isDemo)
+                            try AnalysisResultPersistence.shared.saveAnalysisResult(result, forAudioFile: fileName, isDemo: isDemo, history: history)
                             print("✅ Successfully saved analysis result to JSON for \(fileName)")
                         } catch {
                             print("❌ Failed to save analysis result to JSON for \(fileName): \(error.localizedDescription)")
@@ -1563,14 +1536,16 @@ struct DashboardView: View {
                         if AnalysisResultPersistence.shared.isResultStale(analysisResult) {
                             AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: fileName, isDemo: audioFile.isDemoFile)
                         } else if verifyAnalysisResultMatchesFile(analysisResult: analysisResult, audioFile: audioFile) {
-                            // Verify the analysis result matches the current file by checking file size and duration
-                            // This prevents loading analysis from a previously deleted file with the same name
                             analysisResult.audioFile = audioFile
                             audioFile.analysisResult = analysisResult
                             audioFile.dateAnalyzed = analysisResult.dateAnalyzed
+                            let savedHistory = AnalysisResultPersistence.shared.loadAnalysisHistory(forAudioFile: fileName, isDemo: audioFile.isDemoFile)
+                            let existingIDs = Set(audioFile.analysisHistory.map { $0.id })
+                            for entry in savedHistory where !existingIDs.contains(entry.id) {
+                                audioFile.analysisHistory.append(entry)
+                            }
                             try? modelContext.save()
                         } else {
-                            // Analysis result doesn't match - delete the stale JSON file
                             AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: fileName, isDemo: audioFile.isDemoFile)
                         }
                     }
@@ -1592,11 +1567,6 @@ struct DashboardView: View {
             }
             
             if imported > 0 {
-                // Clear cached filtered files to force refresh with new imports
-                await MainActor.run {
-                    cachedFilteredFiles = []
-                    lastFilterHash = 0
-                }
                 
 #if !targetEnvironment(macCatalyst)
                 // Update statistics after importing new files
@@ -1697,6 +1667,11 @@ struct DashboardView: View {
                         analysisResult.audioFile = audioFile
                         audioFile.analysisResult = analysisResult
                         audioFile.dateAnalyzed = analysisResult.dateAnalyzed
+                        let savedHistory = AnalysisResultPersistence.shared.loadAnalysisHistory(forAudioFile: audioFile.fileName, isDemo: audioFile.isDemoFile)
+                        let existingIDs = Set(audioFile.analysisHistory.map { $0.id })
+                        for entry in savedHistory where !existingIDs.contains(entry.id) {
+                            audioFile.analysisHistory.append(entry)
+                        }
                         loadedCount += 1
                     } else {
                         print("   ⚠️ Analysis result doesn't match file verification")
@@ -1794,10 +1769,6 @@ struct DashboardView: View {
             } catch {
             }
             
-            // Clear cached filtered files to force refresh
-            cachedFilteredFiles = []
-            lastFilterHash = 0
-            
             // Update statistics after deletion
 #if targetEnvironment(macCatalyst)
             Task(priority: .utility) {
@@ -1853,10 +1824,6 @@ struct DashboardView: View {
             AnalyticsService.log(.allFilesDeleted, parameters: [
                 "count": String(allFiles.count)
             ])
-
-            // Clear cached filtered files
-            cachedFilteredFiles = []
-            lastFilterHash = 0
 
             // Update statistics after deletion
 #if targetEnvironment(macCatalyst)
