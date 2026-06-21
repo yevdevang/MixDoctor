@@ -37,3 +37,4 @@ playground.xcworkspace
 # Test Audio Files (if generated)
 TestAudioFiles/*.wav
 TestAudioFiles/*.mp3
+*.zip
