@@ -1,5 +1,21 @@
 # What's New
 
+## Version 1.2.3 (Unreleased)
+
+### New Features
+
+- **Mix Version History** — Watch your mix improve over time. Every time you re-analyze a track or upload a new bounce, MixDoctor saves a snapshot of that version so you can track your progress. A score timeline chart appears once you have two or more versions, and you can tap any version to review its full analysis.
+
+- **Upload New Version** — Working on a mix? Hit "Upload New Version" on the Results screen, pick your latest bounce, and MixDoctor automatically archives the previous analysis and scores the new one. No need to delete and re-import.
+
+- **Wrong File Protection** — If the file you're uploading is a very different length than the current version, MixDoctor warns you before replacing anything so you don't accidentally overwrite a good mix with the wrong file.
+
+### Bug Fixes
+
+- Score history no longer shows a "0" for analyses that failed due to a network error or a stage mismatch. Only real, successfully-scored versions appear in your timeline.
+
+---
+
 ## Version 1.2.2 (since 1.2.1)
 
 ### New Features
