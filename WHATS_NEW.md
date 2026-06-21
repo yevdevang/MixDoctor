@@ -13,6 +13,9 @@
 ### Bug Fixes
 
 - Score history no longer shows a "0" for analyses that failed due to a network error or a stage mismatch. Only real, successfully-scored versions appear in your timeline.
+- **Version history now survives reinstall and syncs across devices** — Previous analysis snapshots are saved alongside your audio file in iCloud so they're never lost if you reinstall the app or switch devices.
+- **Fixed app freezing / crashing on launch (Mac)** — The app could hang on startup while loading analysis data from iCloud, sometimes causing a crash. Loading now skips files that haven't finished downloading and resumes naturally once iCloud sync catches up.
+- **Fixed UI glitches on Mac Catalyst** — A state update bug could cause the file list to flicker or refresh in a tight loop. The list now updates cleanly without any visual artifacts.
 
 ---
 
