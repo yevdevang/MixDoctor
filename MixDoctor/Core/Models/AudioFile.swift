@@ -132,6 +132,9 @@ public final class AnalysisResult {
     var stereoWidthScore: Double
     var phaseCoherence: Double
     var monoCompatibility: Double
+    /// Raw stereo correlation coefficient, -1...1 (-1 = fully out of phase, 0 = decorrelated, 1 = mono/in phase).
+    /// Distinct from `phaseCoherence`, which stores its absolute value as a 0...1 score.
+    var correlationCoefficient: Double
     var spectralCentroid: Double
     var hasClipping: Bool
     var lowEndBalance: Double
@@ -203,6 +206,11 @@ public final class AnalysisResult {
     var frequencySpectrumData: Data?  // Backing storage for spectrum data
     var spectrumSampleRate: Double?  // Sample rate used for FFT
 
+    // Spectrogram image (time x frequency x magnitude), sent to Claude's vision API
+    // and displayed in place of the frequency chart. Plain PNG `Data` is CloudKit-safe
+    // on its own — no @Transient wrapper needed (that's only required for raw [Float]/struct arrays).
+    var spectrogramImageData: Data?
+
     // Unmixed Detection Result (stored as JSON data)
     @Transient
     var unmixedDetection: UnmixedDetectionResult? {
@@ -225,6 +233,7 @@ public final class AnalysisResult {
         self.stereoWidthScore = 0
         self.phaseCoherence = 0
         self.monoCompatibility = 1.0
+        self.correlationCoefficient = 1.0
         self.spectralCentroid = 0
         self.hasClipping = false
         self.lowEndBalance = 0

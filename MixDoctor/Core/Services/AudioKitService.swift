@@ -127,6 +127,7 @@ public class AudioKitService: ObservableObject {
         result.stereoWidthScore = analysisResult.stereoWidth * 100  // Convert to percentage (0-100)
         result.phaseCoherence = analysisResult.phaseCoherence
         result.monoCompatibility = analysisResult.monoCompatibility
+        result.correlationCoefficient = analysisResult.stereoCorrelation.correlationCoefficient
         result.spectralCentroid = analysisResult.spectralCentroid
         result.hasClipping = analysisResult.hasClipping
         
@@ -140,15 +141,22 @@ public class AudioKitService: ObservableObject {
         result.highMidBalance = analysisResult.spectralBalance.highMidEnergy
         result.highBalance = analysisResult.spectralBalance.presenceEnergy + analysisResult.spectralBalance.airEnergy
         
-        // Store full FFT spectrum for professional analyzer visualization
-        result.frequencySpectrum = analysisResult.spectralBalance.frequencySpectrum
+        // Store the spectrum for the Results UI's frequency curve + band breakdown.
+        // Prefer the spectrogram's own time-averaged spectrum so the numbers always match
+        // the heatmap on screen; fall back to the separate windowed-FFT average only if
+        // the spectrogram couldn't be generated (e.g. a very short file).
+        result.frequencySpectrum = analysisResult.spectrogramSpectrum ?? analysisResult.spectralBalance.frequencySpectrum
         result.spectrumSampleRate = actualSampleRate
+
+        // Store the rendered spectrogram image — sent to Claude's vision API below,
+        // and displayed in the Results screen in place of the frequency chart.
+        result.spectrogramImageData = analysisResult.spectrogramImageData
         
         result.dynamicRange = analysisResult.dynamicRange
         result.loudnessLUFS = analysisResult.loudness
         result.rmsLevel = analysisResult.rmsLevel
         result.peakLevel = analysisResult.peakLevel
-        
+
         // AudioKit issue detection
         result.hasPhaseIssues = analysisResult.phaseIssues
         result.hasStereoIssues = analysisResult.stereoIssues
@@ -307,8 +315,9 @@ public class AudioKitService: ObservableObject {
 
             // Claude API call - ensure it's off main thread
             // Pass user-selected genre and mixStage if available (passed through function chain)
+            let spectrogramImageData = result.spectrogramImageData
             let claudeResponse = try await Task.detached(priority: .userInitiated) {
-                try await ClaudeAPIService.shared.analyzeAudioMetrics(metrics, userGenre: genre, mixStage: mixStage)
+                try await ClaudeAPIService.shared.analyzeAudioMetrics(metrics, spectrogramImage: spectrogramImageData, userGenre: genre, mixStage: mixStage)
             }.value
 
             print("══════════════════════════════════════════════")
@@ -420,7 +429,12 @@ public class AudioKitService: ObservableObject {
         let stereoCorrelation = analyzeStereoCorrelation(leftData, rightData ?? leftData, frameCount: frameCount)
         let dynamicRangeAnalysis = analyzeDynamicRange(leftData, rightData ?? leftData, frameCount: frameCount)
         let peakToAverageRatio = analyzePeakToAverage(leftData, rightData ?? leftData, frameCount: frameCount)
-        
+
+        // MARK: - Spectrogram Image (for Claude vision input + Results UI display)
+        let spectrogramResult = SpectrogramGenerator.generate(samples: leftData, frameCount: frameCount, sampleRate: sampleRate)
+        let spectrogramImageData = spectrogramResult?.image.pngData()
+        let spectrogramSpectrum = spectrogramResult?.averageSpectrum
+
         // MARK: - Unmixed Detection Analysis (RE-ENABLED with CONSERVATIVE thresholds)
         // Using professional audio engineering standards to detect unmixed tracks
         // NOW GENRE-AWARE: Different genres have different dynamic range expectations
@@ -440,54 +454,24 @@ public class AudioKitService: ObservableObject {
             stereoBalance: stereoAnalysis.correlationCoefficient  // FIXED: was .balance - using correlation as balance proxy
         )
         
-        // MARK: - Genre-Aware Phase Coherence Check
-        // Determine if phase coherence is acceptable for this genre
-        // Based on professional standards from PHASE_COHERENCE_FIX.md
-        // 
+        // MARK: - Phase Coherence Check
         // IMPORTANT: Phase coherence is calculated as abs(correlationCoeff)
-        // Professional stereo mixes typically have correlation 0.3-0.8
         // Higher = more mono-compatible, Lower = wider stereo but phase risk
         //
-        // ADJUSTED THRESHOLDS (previously too high at 0.55-0.85):
-        let hasPhaseIssues: Bool
-        let minPhaseCoherenceForGenre: Double
+        // Universal mono-safety floor, per published mixing/mastering guidance (Sound On
+        // Sound, Production Expert): only a sustained low/negative correlation is an actual
+        // mono-cancellation problem. Genre changes how much stereo width is stylistically
+        // normal, not where the mono-safety line sits, so this is intentionally not
+        // genre-gated (previously required up to 0.50 for EDM/hip-hop, which flagged
+        // perfectly healthy wide mixes as "poor phase coherence").
+        let minPhaseCoherence = 0.20
+        let hasPhaseIssues = stereoAnalysis.phaseCoherence < minPhaseCoherence
 
-        // Use .contains() matching for genre strings like "Classical/Orchestral"
-        let genreLowerPhase = genre?.lowercased() ?? ""
-
-        if genreLowerPhase.contains("hip-hop") || genreLowerPhase.contains("hip hop") || genreLowerPhase.contains("rap") || genreLowerPhase.contains("trap") {
-            minPhaseCoherenceForGenre = 0.50  // 50% - High (sub-bass must be centered)
-        } else if genreLowerPhase.contains("electronic") || genreLowerPhase.contains("edm") || genreLowerPhase.contains("dance") ||
-                  genreLowerPhase.contains("house") || genreLowerPhase.contains("techno") || genreLowerPhase.contains("dubstep") {
-            minPhaseCoherenceForGenre = 0.50  // 50% - High (club systems need mono-compatible bass)
-        } else if genreLowerPhase.contains("pop") || genreLowerPhase.contains("r&b") || genreLowerPhase.contains("soul") {
-            minPhaseCoherenceForGenre = 0.45  // 45% - Moderate-High (radio-friendly)
-        } else if genreLowerPhase.contains("rock") || genreLowerPhase.contains("metal") || genreLowerPhase.contains("punk") {
-            minPhaseCoherenceForGenre = 0.40  // 40% - Moderate (wide guitars acceptable)
-        } else if genreLowerPhase.contains("country") || genreLowerPhase.contains("folk") {
-            minPhaseCoherenceForGenre = 0.40  // 40% - Moderate (natural acoustic spread)
-        } else if genreLowerPhase.contains("jazz") || genreLowerPhase.contains("blues") {
-            minPhaseCoherenceForGenre = 0.20  // 20% - Low (Big Band/ensemble room ambience)
-        } else if genreLowerPhase.contains("classical") || genreLowerPhase.contains("orchestral") {
-            minPhaseCoherenceForGenre = 0.20  // 20% - Low (wide stereo imaging essential)
-        } else if genreLowerPhase.contains("live") {
-            minPhaseCoherenceForGenre = 0.15  // 15% - Very Low (room mics, audience spread)
-        } else if genreLowerPhase.contains("ambient") || genreLowerPhase.contains("drone") || genreLowerPhase.contains("experimental") {
-            minPhaseCoherenceForGenre = 0.20  // 20% - Very Low (artistic wide stereo)
-        } else if genreLowerPhase.contains("acoustic") || genreLowerPhase.contains("singer-songwriter") {
-            minPhaseCoherenceForGenre = 0.25  // 25% - Low (intimate but natural)
-        } else if genreLowerPhase.contains("alternative") || genreLowerPhase.contains("indie") {
-            minPhaseCoherenceForGenre = 0.30  // 30% - Lower (character and width valued)
-        } else {
-            minPhaseCoherenceForGenre = 0.35  // 35% - Conservative default
-        }
-        hasPhaseIssues = stereoAnalysis.phaseCoherence < minPhaseCoherenceForGenre
-        
         // Log phase coherence check for debugging
         print("🌊 PHASE COHERENCE CHECK:")
         print("  Genre: \(genre ?? "unknown")")
-        print("  Measured: \(String(format: "%.1f", stereoAnalysis.phaseCoherence * 100))%")  // FIXED: was .coherence
-        print("  Min Required: \(String(format: "%.1f", minPhaseCoherenceForGenre * 100))%")
+        print("  Measured: \(String(format: "%.1f", stereoAnalysis.phaseCoherence * 100))%")
+        print("  Min Required: \(String(format: "%.1f", minPhaseCoherence * 100))%")
         print("  Has Issues: \(hasPhaseIssues)")
         
         // MARK: - Genre-Aware Stereo Width Check
@@ -591,7 +575,9 @@ public class AudioKitService: ObservableObject {
             stereoCorrelation: stereoCorrelation,
             dynamicRangeAnalysis: dynamicRangeAnalysis,
             peakToAverageRatio: peakToAverageRatio,
-            unmixedDetection: unmixedDetection
+            unmixedDetection: unmixedDetection,
+            spectrogramImageData: spectrogramImageData,
+            spectrogramSpectrum: spectrogramSpectrum
         )
     }
     
@@ -1806,7 +1792,11 @@ struct AudioKitAnalysisResult {
     let dynamicRangeAnalysis: DynamicRangeAnalysis
     let peakToAverageRatio: PeakToAverageResult
     let unmixedDetection: UnmixedDetectionResult
-    
+    let spectrogramImageData: Data?
+    /// Time-averaged per-bin spectrum from the same STFT that rendered the spectrogram image —
+    /// drives the frequency-band breakdown and curve in the Results UI so they match the heatmap.
+    let spectrogramSpectrum: [Float]?
+
     init() {
         self.stereoWidth = 0.0
         self.phaseCoherence = 1.0
@@ -1840,9 +1830,11 @@ struct AudioKitAnalysisResult {
         self.dynamicRangeAnalysis = DynamicRangeAnalysis()
         self.peakToAverageRatio = PeakToAverageResult()
         self.unmixedDetection = UnmixedDetectionResult()
+        self.spectrogramImageData = nil
+        self.spectrogramSpectrum = nil
     }
-    
-    init(stereoWidth: Double, phaseCoherence: Double, monoCompatibility: Double, spectralCentroid: Double, hasClipping: Bool, lowEnd: Double, lowMid: Double, mid: Double, highMid: Double, high: Double, dynamicRange: Double, loudness: Double, rmsLevel: Double, peakLevel: Double, phaseIssues: Bool, stereoIssues: Bool, frequencyImbalance: Bool, dynamicRangeIssues: Bool, instrumentBalance: InstrumentBalanceResult, recommendations: [String], spectralBalance: SpectralBalanceResult, stereoCorrelation: StereoCorrelationResult, dynamicRangeAnalysis: DynamicRangeAnalysis, peakToAverageRatio: PeakToAverageResult, unmixedDetection: UnmixedDetectionResult) {
+
+    init(stereoWidth: Double, phaseCoherence: Double, monoCompatibility: Double, spectralCentroid: Double, hasClipping: Bool, lowEnd: Double, lowMid: Double, mid: Double, highMid: Double, high: Double, dynamicRange: Double, loudness: Double, rmsLevel: Double, peakLevel: Double, phaseIssues: Bool, stereoIssues: Bool, frequencyImbalance: Bool, dynamicRangeIssues: Bool, instrumentBalance: InstrumentBalanceResult, recommendations: [String], spectralBalance: SpectralBalanceResult, stereoCorrelation: StereoCorrelationResult, dynamicRangeAnalysis: DynamicRangeAnalysis, peakToAverageRatio: PeakToAverageResult, unmixedDetection: UnmixedDetectionResult, spectrogramImageData: Data? = nil, spectrogramSpectrum: [Float]? = nil) {
         self.stereoWidth = stereoWidth
         self.phaseCoherence = phaseCoherence
         self.monoCompatibility = monoCompatibility
@@ -1868,6 +1860,8 @@ struct AudioKitAnalysisResult {
         self.dynamicRangeAnalysis = dynamicRangeAnalysis
         self.peakToAverageRatio = peakToAverageRatio
         self.unmixedDetection = unmixedDetection
+        self.spectrogramImageData = spectrogramImageData
+        self.spectrogramSpectrum = spectrogramSpectrum
     }
 }
 
@@ -2158,38 +2152,38 @@ enum AudioKitError: Error {
         
         var windowedSamples = actualSamples
         vDSP_vmul(actualSamples, 1, window, 1, &windowedSamples, 1, vDSP_Length(fftSize))
-        
-        // Prepare real and imaginary arrays
-        var realParts = windowedSamples
-        var imagParts = Array(repeating: Float(0.0), count: fftSize)
-        
+
         // Perform FFT
-        var mags = Array(repeating: Float(0.0), count: fftSize / 2)
-        
-        realParts.withUnsafeMutableBufferPointer { realPtr in
-            imagParts.withUnsafeMutableBufferPointer { imagPtr in
-                var splitComplex = DSPSplitComplex(realp: realPtr.baseAddress!, imagp: imagPtr.baseAddress!)
-                
-                // Forward FFT
-                vDSP_fft_zrip(fftSetup, &splitComplex, 1, log2n, FFTDirection(FFT_FORWARD))
-                
-                // Calculate magnitudes - SIMPLE raw calculation without excessive normalization
-                let nyquist = fftSize / 2
-                
-                for i in 0..<nyquist {
-                    let real = realPtr[i]
-                    let imag = imagPtr[i]
-                    
-                    // Simple magnitude
-                    let magnitude = sqrt(real * real + imag * imag)
-                    
-                    // Minimal scaling - just normalize by FFT size
-                    // Don't over-normalize which smooths out variation
-                    mags[i] = magnitude / Float(fftSize)
+        let halfSize = fftSize / 2
+        var realp = [Float](repeating: 0, count: halfSize)
+        var imagp = [Float](repeating: 0, count: halfSize)
+        var mags = Array(repeating: Float(0.0), count: halfSize)
+
+        windowedSamples.withUnsafeBufferPointer { windowedPtr in
+            windowedPtr.baseAddress!.withMemoryRebound(to: DSPComplex.self, capacity: halfSize) { complexPtr in
+                realp.withUnsafeMutableBufferPointer { realPtr in
+                    imagp.withUnsafeMutableBufferPointer { imagPtr in
+                        var splitComplex = DSPSplitComplex(realp: realPtr.baseAddress!, imagp: imagPtr.baseAddress!)
+                        // vDSP_fft_zrip's real-FFT trick requires samples pre-packed into interleaved
+                        // even/odd pairs via vDSP_ctoz first — without this, it silently transforms only
+                        // the first half of the window (real part only) instead of the real signal.
+                        vDSP_ctoz(complexPtr, 2, &splitComplex, 1, vDSP_Length(halfSize))
+
+                        // Forward FFT
+                        vDSP_fft_zrip(fftSetup, &splitComplex, 1, log2n, FFTDirection(FFT_FORWARD))
+
+                        for i in 0..<halfSize {
+                            let real = realPtr[i]
+                            // imagp[0] packs the Nyquist bin's value, not bin 0's imaginary part — bin 0 (DC) has none.
+                            let imag = i == 0 ? 0 : imagPtr[i]
+                            let magnitude = sqrt(real * real + imag * imag)
+                            mags[i] = magnitude / Float(fftSize) * 2
+                        }
+                    }
                 }
             }
         }
-        
+
         return mags
     }
     
@@ -2891,7 +2885,7 @@ enum AudioKitError: Error {
             recommendations: recommendations
         )
     }
-    
+
     /// Comprehensive dynamic range analysis for mastering
     nonisolated private func analyzeDynamicRange(_ leftData: UnsafePointer<Float>, _ rightData: UnsafePointer<Float>, frameCount: Int) -> DynamicRangeAnalysis {
         let leftSamples = Array(UnsafeBufferPointer(start: leftData, count: frameCount))

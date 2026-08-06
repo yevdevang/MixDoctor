@@ -149,8 +149,31 @@ final class AnalysisResultPersistence {
         print("✅ Successfully saved analysis result: \(jsonFileName)")
     }
     
+    // MARK: - Download
+
+    /// Ensures the analysis JSON file for `audioFileName` is downloaded from iCloud, if it exists there.
+    /// Mirrors `iCloudStorageService.ensureFileIsDownloaded` for the sibling `.analysis.json` file, since
+    /// analysis results otherwise stay stuck as undownloaded placeholders and `loadAnalysisResult`/
+    /// `loadAnalysisHistory` silently skip them.
+    @discardableResult
+    func ensureAnalysisResultDownloaded(forAudioFile audioFileName: String, isDemo: Bool = false) async -> Bool {
+        let service = iCloudStorageService.shared
+        let audioDir = service.getAudioFilesDirectory()
+        let jsonFileName = analysisFileName(for: audioFileName, isDemo: isDemo)
+        let jsonURL = audioDir.appendingPathComponent(jsonFileName)
+
+        guard FileManager.default.fileExists(atPath: jsonURL.path) else { return false }
+
+        do {
+            try await service.ensureFileIsDownloaded(at: jsonURL)
+            return true
+        } catch {
+            return false
+        }
+    }
+
     // MARK: - Load Analysis Result
-    
+
     /// Loads an analysis result from JSON file if it exists
     /// - Parameter audioFileName: The name of the audio file
     /// - Returns: The loaded analysis result, or nil if no saved result exists
@@ -244,7 +267,9 @@ final class AnalysisResultPersistence {
             "isProfessionallyMixed": result.isProfessionallyMixed,
             "stageMismatch": result.stageMismatch as Any,
             "monoCompatibility": result.monoCompatibility,
-            "unmixedDetectionData": result.unmixedDetectionData?.base64EncodedString() as Any
+            "correlationCoefficient": result.correlationCoefficient,
+            "unmixedDetectionData": result.unmixedDetectionData?.base64EncodedString() as Any,
+            "spectrogramImageData": result.spectrogramImageData?.base64EncodedString() as Any
         ]
     }
 
@@ -292,9 +317,14 @@ final class AnalysisResultPersistence {
         result.isProfessionallyMixed = data["isProfessionallyMixed"] as? Bool ?? true
         result.stageMismatch = data["stageMismatch"] as? String
         result.monoCompatibility = data["monoCompatibility"] as? Double ?? 1.0
+        result.correlationCoefficient = data["correlationCoefficient"] as? Double ?? 1.0
         if let base64String = data["unmixedDetectionData"] as? String,
            let decodedData = Data(base64Encoded: base64String) {
             result.unmixedDetectionData = decodedData
+        }
+        if let base64String = data["spectrogramImageData"] as? String,
+           let decodedData = Data(base64Encoded: base64String) {
+            result.spectrogramImageData = decodedData
         }
 
         return result

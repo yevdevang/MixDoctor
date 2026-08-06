@@ -72,6 +72,55 @@ struct MetricCard: View {
     }
 }
 
+// MARK: - Correlation Meter
+
+/// Horizontal stereo correlation gauge, -1 (out of phase) to +1 (mono/in phase),
+/// the classic mastering-desk meter for spotting mono-cancellation risk at a glance.
+struct CorrelationMeterView: View {
+    let value: Double // -1...1
+
+    private let barHeight: CGFloat = 14
+    private let knobSize: CGFloat = 20
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: barHeight / 2)
+                    .fill(
+                        LinearGradient(
+                            colors: [.red, .yellow, .green],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(height: barHeight)
+
+                // Zero-correlation center tick
+                Rectangle()
+                    .fill(Color.white.opacity(0.7))
+                    .frame(width: 1.5, height: barHeight + 6)
+                    .position(x: geometry.size.width / 2, y: barHeight / 2)
+
+                // Needle at the current value
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: knobSize, height: knobSize)
+                    .overlay(Circle().stroke(Color.black.opacity(0.25), lineWidth: 1))
+                    .shadow(color: .black.opacity(0.2), radius: 1.5, y: 1)
+                    .position(x: needleX(width: geometry.size.width), y: barHeight / 2)
+                    .animation(.easeOut(duration: 0.4), value: value)
+            }
+        }
+        .frame(height: knobSize)
+    }
+
+    private func needleX(width: CGFloat) -> CGFloat {
+        let clamped = min(max(value, -1), 1)
+        let t = (clamped + 1) / 2 // 0...1
+        return CGFloat(t) * width
+    }
+}
+
 // MARK: - Frequency Bar
 
 struct FrequencyBar: View {

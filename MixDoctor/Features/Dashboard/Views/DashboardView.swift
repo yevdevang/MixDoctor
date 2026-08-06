@@ -1530,7 +1530,10 @@ struct DashboardView: View {
 #endif
                     
                     // Try to load analysis result from iCloud Drive
+                    // Materialize the JSON first — it may exist only as an undownloaded iCloud
+                    // placeholder, which loadAnalysisResult would otherwise silently skip.
                     // IMPORTANT: Verify the analysis result matches this file to prevent loading stale results
+                    await AnalysisResultPersistence.shared.ensureAnalysisResultDownloaded(forAudioFile: fileName, isDemo: audioFile.isDemoFile)
                     if let analysisResult = AnalysisResultPersistence.shared.loadAnalysisResult(forAudioFile: fileName, isDemo: audioFile.isDemoFile) {
                         // Skip results that were cleared by the user (iCloud may re-sync the JSON)
                         if AnalysisResultPersistence.shared.isResultStale(analysisResult) {
@@ -1642,6 +1645,13 @@ struct DashboardView: View {
             // 2. Fallback: audioFile.fileName without isDemo (e.g. "Song 4 UNMIXED.analysis.json")
             // 3. Fallback: fileURL.lastPathComponent without isDemo (e.g. "Song 4 UNMIXED.wav.analysis.json")
             let storedName = audioFile.fileURL.lastPathComponent
+
+            // Materialize the JSON before attempting to read it — it may exist only as an
+            // undownloaded iCloud placeholder, which loadAnalysisResult would otherwise skip.
+            await AnalysisResultPersistence.shared.ensureAnalysisResultDownloaded(forAudioFile: audioFile.fileName, isDemo: audioFile.isDemoFile)
+            await AnalysisResultPersistence.shared.ensureAnalysisResultDownloaded(forAudioFile: audioFile.fileName, isDemo: false)
+            await AnalysisResultPersistence.shared.ensureAnalysisResultDownloaded(forAudioFile: storedName, isDemo: false)
+
             let analysisResult: AnalysisResult? =
                 AnalysisResultPersistence.shared.loadAnalysisResult(forAudioFile: audioFile.fileName, isDemo: audioFile.isDemoFile)
                 ?? AnalysisResultPersistence.shared.loadAnalysisResult(forAudioFile: audioFile.fileName, isDemo: false)

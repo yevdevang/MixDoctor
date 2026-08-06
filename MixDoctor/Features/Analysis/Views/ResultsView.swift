@@ -195,6 +195,7 @@ struct ResultsView: View {
                     stereoWidthCard(result: result)
                     phaseCoherenceCard(result: result)
                     monoCompatibilityCard(result: result)
+                    correlationMeterCard(result: result)
                     // PAZ-style frequency analyzer
                     PAZFrequencyAnalyzer(result: result)
                     dynamicRangeCard(result: result)
@@ -592,9 +593,11 @@ struct ResultsView: View {
             issues.append("Clipping detected")
         }
         
-        // Phase issues - flag if phase coherence is below 50% (professional standard for "Problems")
-        // Note: 50-70% is "Acceptable", 70%+ is "Excellent" per industry standards
-        if result.phaseCoherence < 0.50 {
+        // Phase issues - same universal mono-safety floor as the Phase Coherence and
+        // Correlation Meter cards (phaseCoherenceGoodFloor): only sustained low/negative
+        // correlation is an actual mono-cancellation risk, per published mixing/mastering
+        // guidance (Sound On Sound, Production Expert) - not genre-dependent.
+        if result.phaseCoherence < Self.phaseCoherenceGoodFloor {
             issues.append("Poor phase coherence")
         }
         
@@ -1658,46 +1661,24 @@ struct ResultsView: View {
         )
     }
 
+    /// Universal correlation / phase-coherence safety bands, per published mixing/mastering
+    /// guidance (Sound On Sound, Production Expert): only a sustained negative correlation is
+    /// an actual mono-cancellation problem; genre changes how much stereo width is stylistically
+    /// normal, not where the mono-safety line sits, so these are not genre-dependent.
+    /// Shared by `phaseCoherenceCard`, `correlationMeterCard`, and `phaseDescription`.
+    private static let phaseCoherenceWarningFloor = 0.0  // below this = real phase cancellation risk
+    private static let phaseCoherenceGoodFloor = 0.2     // industry rule-of-thumb "healthy" floor
+
     private func phaseCoherenceCard(result: AnalysisResult) -> some View {
-        // Genre-aware phase coherence status (aligned with AudioKitService.swift logic)
-        let minPhaseCoherenceForGenre: Double
-        let genreLower = audioFile.genre?.lowercased() ?? ""
-        
-        // FIXED: Handle compound genres like "EDM/Electronic", "Rock/Indie", etc.
-        if genreLower.contains("edm") || genreLower.contains("electronic") || genreLower.contains("hip") || genreLower.contains("rap") || genreLower.contains("trap") || genreLower.contains("dance") || genreLower.contains("techno") || genreLower.contains("dubstep") {
-            minPhaseCoherenceForGenre = 0.50  // 50% - Tight, centered mix
-        } else if genreLower.contains("pop") || genreLower.contains("r&b") || genreLower.contains("soul") {
-            minPhaseCoherenceForGenre = 0.45  // 45% - Balanced commercial width
-        } else if genreLower.contains("rock") || genreLower.contains("indie") || genreLower.contains("metal") || genreLower.contains("punk") || genreLower.contains("alternative") {
-            minPhaseCoherenceForGenre = 0.40  // 40% - Moderate (wide guitars acceptable)
-        } else if genreLower.contains("country") || genreLower.contains("folk") {
-            minPhaseCoherenceForGenre = 0.40  // 40% - Moderate (natural acoustic spread)
-        } else if genreLower.contains("jazz") || genreLower.contains("blues") {
-            minPhaseCoherenceForGenre = 0.30  // 30% - Lower (natural room ambience, wide soundstage)
-        } else if genreLower.contains("classical") || genreLower.contains("orchestral") {
-            minPhaseCoherenceForGenre = 0.25  // 25% - Low (wide stereo imaging is essential)
-        } else if genreLower.contains("ambient") || genreLower.contains("drone") || genreLower.contains("experimental") {
-            minPhaseCoherenceForGenre = 0.20  // 20% - Very Low (artistic wide stereo)
-        } else if genreLower.contains("acoustic") || genreLower.contains("singer") {
-            minPhaseCoherenceForGenre = 0.35  // 35% - Moderate (intimate but natural)
-        } else {
-            minPhaseCoherenceForGenre = 0.35  // 35% - Conservative default
-        }
-        
-        // Determine status based on genre-aware threshold
-        // ALIGNED WITH DESCRIPTION LOGIC:
-        // - Below minimum: Red error (severe issues)
-        // - Minimum to (minimum + 0.15): Green good ("Good phase coherence")
-        // - Above (minimum + 0.15): Green good ("Excellent phase coherence")
+        // phaseCoherence stores |correlationCoefficient| (always 0...1), so it can never reflect
+        // a negative correlation — only correlationMeterCard's raw value can.
         let status: MetricCard.Status
-        if result.phaseCoherence < minPhaseCoherenceForGenre {
-            status = .error  // Below minimum = severe phase issues
-        } else if result.phaseCoherence < (minPhaseCoherenceForGenre + 0.15) {
-            status = .good  // ✅ FIXED: "Good" description should show green checkmark!
+        if result.phaseCoherence < Self.phaseCoherenceGoodFloor {
+            status = .warning
         } else {
-            status = .good  // Excellent phase = green checkmark
+            status = .good
         }
-        
+
         return MetricCard(
             title: "Phase Coherence",
             icon: "waveform.path",
@@ -1722,6 +1703,63 @@ struct ResultsView: View {
             status: status,
             description: hideIssues ? "" : monoCompatibilityDescription(result.monoCompatibility)
         )
+    }
+
+    private func correlationMeterCard(result: AnalysisResult) -> some View {
+        let value = result.correlationCoefficient
+        // Same universal bands as phaseCoherenceCard (they describe the same measurement) —
+        // only a negative reading is a real mono-cancellation risk.
+        let status: MetricCard.Status
+        let description: String
+
+        if value < Self.phaseCoherenceWarningFloor {
+            status = .error
+            description = "Negative correlation — parts of the mix may cancel out in mono playback"
+        } else if value < Self.phaseCoherenceGoodFloor {
+            status = .warning
+            description = "Weak correlation — mono cancellation risk, especially on bass-heavy or club playback systems"
+        } else {
+            status = .good
+            description = "Healthy correlation — safe for mono playback"
+        }
+
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "waveform.path.ecg.rectangle")
+                    .foregroundStyle(.blue)
+
+                Text("Correlation Meter")
+                    .font(.headline)
+
+                Spacer()
+
+                Image(systemName: status.icon)
+                    .foregroundStyle(status.color)
+            }
+
+            Text(String(format: "%+.2f", value))
+                .font(.system(size: 32, weight: .bold))
+
+            CorrelationMeterView(value: value)
+                .padding(.vertical, 4)
+
+            HStack {
+                Text("-1 (out of phase)")
+                Spacer()
+                Text("0")
+                Spacer()
+                Text("+1 (mono)")
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+
+            Text(description)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .padding()
+        .background(Color.backgroundSecondary)
+        .cornerRadius(AppConstants.cornerRadius)
     }
 
     private func frequencyBalanceCard(result: AnalysisResult) -> some View {
@@ -2081,38 +2119,15 @@ struct ResultsView: View {
     }
 
     private func phaseDescription(_ coherence: Double, genre: String?) -> String {
-        // Genre-aware phase coherence descriptions
-        let minExpected: Double
         let genreName = genre ?? "this genre"
-        let genreLower = genre?.lowercased() ?? ""
-        
-        // FIXED: Handle compound genres like "EDM/Electronic", "Rock/Indie", etc.
-        if genreLower.contains("edm") || genreLower.contains("electronic") || genreLower.contains("hip") || genreLower.contains("rap") || genreLower.contains("trap") || genreLower.contains("dance") || genreLower.contains("techno") || genreLower.contains("dubstep") {
-            minExpected = 0.50  // 50% minimum
-        } else if genreLower.contains("pop") || genreLower.contains("r&b") || genreLower.contains("soul") {
-            minExpected = 0.45  // 45% minimum
-        } else if genreLower.contains("rock") || genreLower.contains("indie") || genreLower.contains("metal") || genreLower.contains("punk") || genreLower.contains("alternative") {
-            minExpected = 0.40  // 40% minimum
-        } else if genreLower.contains("country") || genreLower.contains("folk") {
-            minExpected = 0.40  // 40% minimum
-        } else if genreLower.contains("jazz") || genreLower.contains("blues") {
-            minExpected = 0.30  // 30% minimum - wide soundstage is normal
-        } else if genreLower.contains("classical") || genreLower.contains("orchestral") {
-            minExpected = 0.25  // 25% minimum - very wide is expected
-        } else if genreLower.contains("ambient") || genreLower.contains("drone") || genreLower.contains("experimental") {
-            minExpected = 0.20  // 20% minimum - artistic wide stereo
-        } else if genreLower.contains("acoustic") || genreLower.contains("singer") {
-            minExpected = 0.35  // 35% minimum
-        } else {
-            minExpected = 0.35  // 35% default
-        }
-        
-        // Generate description based on genre-specific threshold
-        if coherence < 0 {
+
+        // Universal bands (see phaseCoherenceWarningFloor/phaseCoherenceGoodFloor) — genre
+        // flavors the wording, not whether the reading counts as mono-safe.
+        if coherence < Self.phaseCoherenceWarningFloor {
             return "Severe phase cancellation"
-        } else if coherence < minExpected {
-            return "Poor phase coherence - mono cancellation risk"
-        } else if coherence < (minExpected + 0.15) {
+        } else if coherence < Self.phaseCoherenceGoodFloor {
+            return "Weak phase coherence - some mono cancellation risk"
+        } else if coherence < 0.5 {
             return "Good phase coherence for \(genreName)"
         } else if coherence < 0.8 {
             return "Excellent phase coherence for \(genreName)"
