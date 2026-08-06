@@ -245,6 +245,7 @@ class ClaudeAPIService {
         let requestBody: [String: Any] = [
             "model": determineModel(isProUser: metrics.isProUser),
             "max_tokens": 800,  // Balanced: enough for detailed responses but faster than 1000
+            "temperature": 0,  // Deterministic scoring — same input should yield the same score, not a creative rewrite each time
             "system": systemPrompt,  // DISABLED CACHING - use fresh prompt every time for accurate scoring
             "messages": [
                 [

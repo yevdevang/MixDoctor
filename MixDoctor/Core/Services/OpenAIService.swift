@@ -97,7 +97,8 @@ public final class OpenAIService {
                 .user(.init(content: .string(prompt)))
             ],
             model: modelToUse,
-            responseFormat: .jsonObject
+            responseFormat: .jsonObject,
+            temperature: 0  // Deterministic scoring — same input should yield the same score, not a creative rewrite each time
         )
         
         
