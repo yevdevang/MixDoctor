@@ -2207,8 +2207,11 @@ struct ResultsView: View {
             }.value
             
             
-            // Increment usage count for free users (back on main thread)
-            subscriptionService.incrementAnalysisCount()
+            // Increment usage count for free users (back on main thread) — skip for
+            // on-device analysis, which doesn't touch the Claude quota
+            if !result.usedLocalModel {
+                subscriptionService.incrementAnalysisCount()
+            }
             
             // Log free analysis count event
             let remainingFree = subscriptionService.remainingFreeAnalyses

@@ -180,6 +180,10 @@ public final class AnalysisResult {
     var isProfessionallyMixed: Bool  // True if mixed, False if unmixed recording
     var stageMismatch: String?       // nil = no mismatch, "master" = detected as master, "mix" = detected as mix
 
+    /// True if this analysis ran on-device (Lifetime Pro) rather than via Claude API —
+    /// callers use this to skip decrementing the Claude analysis quota.
+    var usedLocalModel: Bool = false
+
     // Full FFT Spectrum Data for professional analyzer visualization
     // FIXED: Use @Transient with Data backing to prevent SwiftData detachment crashes
     @Transient

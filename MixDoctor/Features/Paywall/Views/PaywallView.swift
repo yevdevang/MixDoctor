@@ -19,6 +19,8 @@ struct PaywallView: View {
     @State private var errorMessage = ""
     @State private var showTerms = false
     @State private var showPrivacy = false
+    @State private var isPurchasingLifetime = false
+    @State private var showActiveSubscriptionWarning = false
     
     let onPurchaseComplete: () -> Void
     let onDismiss: (() -> Void)?
@@ -51,7 +53,10 @@ struct PaywallView: View {
                         
                         // Restore button
                         restoreButton
-                        
+
+                        // Lifetime Pro one-time unlock
+                        lifetimeSection
+
                         // Footer
                         footerSection
                     }
@@ -82,6 +87,19 @@ struct PaywallView: View {
                 Button("OK", role: .cancel) { }
             } message: {
                 Text(errorMessage)
+            }
+            .alert("You Still Have an Active Subscription", isPresented: $showActiveSubscriptionWarning) {
+                Button("Manage Subscription") {
+                    if let url = URL(string: "https://apps.apple.com/account/subscriptions") {
+                        UIApplication.shared.open(url)
+                    }
+                    finishLifetimePurchase()
+                }
+                Button("OK", role: .cancel) {
+                    finishLifetimePurchase()
+                }
+            } message: {
+                Text("Lifetime Pro doesn't automatically cancel your existing subscription — you'll keep being charged for it unless you cancel it yourself.")
             }
             .task {
                 await loadOfferings()
@@ -164,10 +182,12 @@ struct PaywallView: View {
     // MARK: - Packages Section
     
     private func packagesSection(offering: Offering) -> some View {
-        let sortedPackages = offering.availablePackages.sorted { a, b in
-            let order: [PackageType: Int] = [.annual: 0, .monthly: 1, .weekly: 2]
-            return (order[a.packageType] ?? 3) < (order[b.packageType] ?? 3)
-        }
+        let sortedPackages = offering.availablePackages
+            .filter { $0.packageType != .lifetime }
+            .sorted { a, b in
+                let order: [PackageType: Int] = [.annual: 0, .monthly: 1, .weekly: 2]
+                return (order[a.packageType] ?? 3) < (order[b.packageType] ?? 3)
+            }
         return VStack(spacing: 16) {
             ForEach(sortedPackages, id: \.identifier) { package in
                 PackageCard(
@@ -258,11 +278,59 @@ struct PaywallView: View {
         .disabled(isRestoring)
     }
     
+    // MARK: - Lifetime Section
+
+    @ViewBuilder
+    private var lifetimeSection: some View {
+        if let lifetimePackage = subscriptionService.currentOffering?.lifetime {
+            VStack(spacing: 16) {
+                HStack {
+                    Divider()
+                    Text("OR")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.gray)
+                    Divider()
+                }
+
+                Button {
+                    AnalyticsService.log(.upgradeButtonTapped)
+                    Task {
+                        await purchaseLifetime(package: lifetimePackage)
+                    }
+                } label: {
+                    VStack(spacing: 6) {
+                        if isPurchasingLifetime {
+                            ProgressView()
+                                .tint(.white)
+                        } else {
+                            Text("Unlock Local Analysis — \(lifetimePackage.localizedPriceString) once")
+                                .font(.title3.weight(.semibold))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 18)
+                    .padding(.horizontal)
+                }
+                .background(Color.black.opacity(0.85))
+                .foregroundColor(.white)
+                .cornerRadius(14)
+                .disabled(isPurchasingLifetime)
+
+                Text("One-time purchase. Analyze on-device forever, with no monthly limit.")
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(.gray)
+                    .multilineTextAlignment(.center)
+            }
+        }
+    }
+
     // MARK: - Footer Section
-    
+
     private var footerSection: some View {
         VStack(spacing: 12) {
-            Text("Free users get 4 analyses per month and demo tracks. Upgrade to Pro for up to 50 AI analyses per month and premium features. Cancel anytime.")
+            Text("Free users get 4 analyses per month and demo tracks. Upgrade to Pro for up to 50 AI analyses per month and premium features, or unlock unlimited on-device analysis forever with Lifetime Pro. Cancel anytime.")
                 .font(.caption)
                 .foregroundColor(.gray)
                 .multilineTextAlignment(.center)
@@ -287,7 +355,7 @@ struct PaywallView: View {
             try await subscriptionService.fetchOfferings()
             // Auto-select annual package (best value)
             if let offering = subscriptionService.currentOffering {
-                selectedPackage = offering.annual ?? offering.availablePackages.first
+                selectedPackage = offering.annual ?? offering.availablePackages.first { $0.packageType != .lifetime }
             }
         } catch {
             errorMessage = "Failed to load subscription options: \(error.localizedDescription)"
@@ -301,9 +369,15 @@ struct PaywallView: View {
         isPurchasing = true
         
         do {
-            let customerInfo = try await subscriptionService.purchase(package: package)
-            
-            
+            let result = try await subscriptionService.purchase(package: package)
+            let customerInfo = result.customerInfo
+
+            // User dismissed the native payment sheet — not an error, nothing to report
+            if result.userCancelled {
+                await MainActor.run { isPurchasing = false }
+                return
+            }
+
             // Wait a bit for state to propagate (especially on MacCatalyst)
             try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
             
@@ -360,6 +434,62 @@ struct PaywallView: View {
         }
     }
     
+    private func purchaseLifetime(package: Package) async {
+        isPurchasingLifetime = true
+
+        do {
+            let result = try await subscriptionService.purchaseLifetime(package: package)
+
+            // User dismissed the native payment sheet — not an error, nothing to report
+            if result.userCancelled {
+                await MainActor.run { isPurchasingLifetime = false }
+                return
+            }
+
+            // Wait a bit for state to propagate (especially on MacCatalyst)
+            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+
+            // Force refresh customer info to ensure latest state
+            await subscriptionService.updateCustomerInfo()
+
+            try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+
+            await MainActor.run {
+                isPurchasingLifetime = false
+                guard subscriptionService.hasLifetimeAccess else {
+                    errorMessage = "Purchase completed but Lifetime access not activated. Please try restoring purchases."
+                    showError = true
+                    return
+                }
+                AnalyticsService.log(.purchaseCompleted)
+                if subscriptionService.isProUser {
+                    // Active subscription still running — warn them it won't auto-cancel
+                    showActiveSubscriptionWarning = true
+                } else {
+                    finishLifetimePurchase()
+                }
+            }
+        } catch {
+            AnalyticsService.log(.purchaseFailed, parameters: [
+                "error": error.localizedDescription
+            ])
+            await MainActor.run {
+                isPurchasingLifetime = false
+                errorMessage = "Purchase failed: \(error.localizedDescription)"
+                showError = true
+            }
+        }
+    }
+
+    private func finishLifetimePurchase() {
+        onPurchaseComplete()
+        #if targetEnvironment(macCatalyst)
+        onDismiss?()
+        #else
+        dismiss()
+        #endif
+    }
+
     private func restore() async {
         isRestoring = true
         

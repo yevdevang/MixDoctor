@@ -22,6 +22,7 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
     @Published var customerInfo: CustomerInfo?
     @Published var remainingProAnalyses: Int = 50
     @Published var isWeeklySubscriber: Bool = false
+    @Published var hasLifetimeAccess: Bool = false
 
     // Free tier limits
     private let freeAnalysisLimit = 4
@@ -110,7 +111,8 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
         do {
             let info = try await Purchases.shared.customerInfo()
             customerInfo = info
-            
+            hasLifetimeAccess = info.entitlements["lifetime"]?.isActive == true
+
             // Check if user has active pro entitlement
             let hasProEntitlement = info.entitlements["pro"]?.isActive == true
             print("✨ updateCustomerInfo - Has Pro: \(hasProEntitlement)")
@@ -159,11 +161,18 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
     
     // MARK: - Purchase
     
-    func purchase(package: Package) async throws -> CustomerInfo {
+    /// Note: RevenueCat's purchase call does NOT throw when the user cancels the payment
+    /// sheet — it returns normally with `userCancelled: true` — so callers must check that
+    /// before treating this as a real purchase attempt.
+    func purchase(package: Package) async throws -> PurchaseResultData {
         let result = try await Purchases.shared.purchase(package: package)
         customerInfo = result.customerInfo
 
         print("💳 Purchase result received")
+
+        guard !result.userCancelled else {
+            return result
+        }
 
         // Save subscription type based on package
         let isWeekly = package.packageType == .weekly
@@ -197,15 +206,27 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
             print("   - ⚠️ No valid entitlement detected!")
         }
 
-        return result.customerInfo
+        return result
     }
-    
+
+    /// Purchase the one-time Lifetime Pro unlock. Kept separate from `purchase(package:)`
+    /// since it's a non-consumable with no subscription type/renewal/quota to track.
+    /// Note: RevenueCat's purchase call does NOT throw when the user cancels the payment
+    /// sheet — it returns normally with `userCancelled: true` — so callers must check that.
+    func purchaseLifetime(package: Package) async throws -> PurchaseResultData {
+        let result = try await Purchases.shared.purchase(package: package)
+        customerInfo = result.customerInfo
+        hasLifetimeAccess = result.customerInfo.entitlements["lifetime"]?.isActive == true
+        return result
+    }
+
     // MARK: - Restore Purchases
     
     func restorePurchases() async throws {
         let info = try await Purchases.shared.restorePurchases()
         customerInfo = info
-        
+        hasLifetimeAccess = info.entitlements["lifetime"]?.isActive == true
+
         // Check if user has active pro entitlement
         let hasProEntitlement = info.entitlements["pro"]?.isActive == true
         
@@ -366,7 +387,8 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
             print("🔄 Delegate: Received updated customerInfo")
             print("⏰ Timestamp: \(Date())")
             self.customerInfo = customerInfo
-            
+            self.hasLifetimeAccess = customerInfo.entitlements["lifetime"]?.isActive == true
+
             // Check if user has active pro entitlement
             let hasProEntitlement = customerInfo.entitlements["pro"]?.isActive == true
             print("✨ Has Pro entitlement: \(hasProEntitlement)")

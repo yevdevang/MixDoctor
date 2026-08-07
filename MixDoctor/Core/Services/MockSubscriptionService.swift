@@ -27,6 +27,7 @@ final class MockSubscriptionService {
     var remainingProAnalyses: Int = 50
     var proAnalysisResetDate: Date?
     var isWeeklySubscriber: Bool = false
+    var hasLifetimeAccess: Bool = false
 
     private let freeAnalysisLimit = 4
     private let proMonthlyLimit = 50   // Monthly & Annual subscribers
@@ -50,6 +51,9 @@ final class MockSubscriptionService {
         MockPackage(id: "monthly", title: "Monthly", price: "$5.99", period: "per month"),
         MockPackage(id: "weekly", title: "Weekly", price: "$2.99", period: "per week")
     ]
+
+    // Placeholder price — real price is set in App Store Connect
+    var lifetimePackage = MockPackage(id: "lifetime", title: "Lifetime Pro", price: "$49.99", period: "one-time")
     
     // MARK: - Initialization
     
@@ -164,6 +168,15 @@ final class MockSubscriptionService {
         return success
     }
     
+    func mockPurchaseLifetime() async -> Bool {
+        // Simulate network delay
+        try? await Task.sleep(nanoseconds: 1_500_000_000) // 1.5 seconds
+
+        hasLifetimeAccess = true
+        saveState()
+        return true
+    }
+
     func mockPurchaseSkipTrial(packageId: String) async -> Bool {
         // Simulate network delay
         try? await Task.sleep(nanoseconds: 1_500_000_000) // 1.5 seconds
@@ -273,6 +286,7 @@ final class MockSubscriptionService {
         // Save to iCloud Key-Value Store for cross-device sync
         cloudStore.set(isProUser, forKey: "mock_isProUser")
         cloudStore.set(isInTrialPeriod, forKey: "mock_isInTrial")
+        cloudStore.set(hasLifetimeAccess, forKey: "mock_hasLifetimeAccess")
         cloudStore.set(Int64(remainingFreeAnalyses), forKey: "mock_remainingAnalyses")
         cloudStore.set(hasReachedFreeLimit, forKey: "mock_hasReachedLimit")
         cloudStore.set(Int64(remainingProAnalyses), forKey: "mock_remainingProAnalyses")
@@ -291,6 +305,7 @@ final class MockSubscriptionService {
     private func loadState() {
         isProUser = cloudStore.bool(forKey: "mock_isProUser")
         isInTrialPeriod = cloudStore.bool(forKey: "mock_isInTrial")
+        hasLifetimeAccess = cloudStore.bool(forKey: "mock_hasLifetimeAccess")
         trialStartDate = cloudStore.object(forKey: "mock_trialStartDate") as? Date
         proAnalysisResetDate = cloudStore.object(forKey: "mock_proAnalysisResetDate") as? Date
         

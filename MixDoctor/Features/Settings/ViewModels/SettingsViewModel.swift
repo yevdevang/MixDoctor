@@ -34,6 +34,21 @@ final class SettingsViewModel {
         }
     }
     
+    var isLocalModelAvailable: Bool {
+        if #available(iOS 26.0, *) {
+            return LocalModelAnalysisService.isAvailable
+        }
+        return false
+    }
+
+    /// Human-readable reason the local model can't run right now, or nil if it's available.
+    var localModelUnavailableReason: String? {
+        if #available(iOS 26.0, *) {
+            return LocalModelAnalysisService.unavailableReason
+        }
+        return "On-device analysis requires iOS 26 or later."
+    }
+
     var showResetConfirmation = false
     var showAbout = false
     

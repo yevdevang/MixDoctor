@@ -313,12 +313,22 @@ public class AudioKitService: ObservableObject {
                 return result
             }
 
-            // Claude API call - ensure it's off main thread
+            // AI analysis call - ensure it's off main thread
             // Pass user-selected genre and mixStage if available (passed through function chain)
+            // Lifetime Pro purchasers route to on-device Foundation Models instead of Claude
             let spectrogramImageData = result.spectrogramImageData
+            let hasLifetimeAccess = await SubscriptionService.shared.hasLifetimeAccess
+            var usedLocalModel = false
             let claudeResponse = try await Task.detached(priority: .userInitiated) {
-                try await ClaudeAPIService.shared.analyzeAudioMetrics(metrics, spectrogramImage: spectrogramImageData, userGenre: genre, mixStage: mixStage)
+                if hasLifetimeAccess, #available(iOS 26.0, *), LocalModelAnalysisService.isAvailable {
+                    return try await LocalModelAnalysisService.shared.analyzeAudioMetrics(metrics, userGenre: genre, mixStage: mixStage)
+                }
+                return try await ClaudeAPIService.shared.analyzeAudioMetrics(metrics, spectrogramImage: spectrogramImageData, userGenre: genre, mixStage: mixStage)
             }.value
+            if #available(iOS 26.0, *) {
+                usedLocalModel = hasLifetimeAccess && LocalModelAnalysisService.isAvailable
+            }
+            result.usedLocalModel = usedLocalModel
 
             print("══════════════════════════════════════════════")
             print("🤖 CLAUDE RESPONSE (mixStage: \(mixStage ?? "nil"), genre: \(genre ?? "nil"))")
