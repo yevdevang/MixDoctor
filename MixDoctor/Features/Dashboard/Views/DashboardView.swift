@@ -991,7 +991,8 @@ struct DashboardView: View {
                     
                     // Log analysis completed event
                     AnalyticsService.log(.analysisCompleted, parameters: [
-                        "overall_score": String(format: "%.1f", result.overallScore)
+                        "overall_score": String(format: "%.1f", result.overallScore),
+                        "backend": result.usedLocalModel ? "local" : "claude"
                     ])
 
                     // Reload the list and update statistics
@@ -1123,7 +1124,8 @@ struct DashboardView: View {
                         (4 - subscriptionSvc.remainingFreeAnalyses)
                     AnalyticsService.log(.analysisCompleted, parameters: [
                         "score": String(format: "%.1f", result.overallScore),
-                        "analysis_count": String(usedCount)
+                        "analysis_count": String(usedCount),
+                        "backend": result.usedLocalModel ? "local" : "claude"
                     ])
 
                     // Update statistics after analysis

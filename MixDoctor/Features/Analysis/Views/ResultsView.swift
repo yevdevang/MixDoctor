@@ -2250,7 +2250,8 @@ struct ResultsView: View {
                 (4 - subscriptionService.remainingFreeAnalyses)
             AnalyticsService.log(.analysisCompleted, parameters: [
                 "score": String(format: "%.1f", result.overallScore),
-                "analysis_count": String(usedCount)
+                "analysis_count": String(usedCount),
+                "backend": result.usedLocalModel ? "local" : "claude"
             ])
             
             // Save to SwiftData and iCloud Drive on background thread to avoid freezing

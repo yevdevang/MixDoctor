@@ -396,7 +396,9 @@ struct PaywallView: View {
             print("   - Will dismiss: \(hasActiveEntitlement || isProOrTrial)")
 
             if hasActiveEntitlement || isProOrTrial {
-                AnalyticsService.log(.purchaseCompleted)
+                AnalyticsService.log(.purchaseCompleted, parameters: [
+                    "type": subscriptionTypeLabel(for: package.packageType)
+                ])
 
                 // Ensure we're on main actor for UI updates
                 await MainActor.run {
@@ -424,7 +426,8 @@ struct PaywallView: View {
             }
         } catch {
             AnalyticsService.log(.purchaseFailed, parameters: [
-                "error": error.localizedDescription
+                "error": error.localizedDescription,
+                "type": subscriptionTypeLabel(for: package.packageType)
             ])
             await MainActor.run {
                 isPurchasing = false
@@ -433,7 +436,18 @@ struct PaywallView: View {
             }
         }
     }
-    
+
+    /// Human-readable package type for analytics parameters.
+    private func subscriptionTypeLabel(for packageType: PackageType) -> String {
+        switch packageType {
+        case .weekly: return "weekly"
+        case .monthly: return "monthly"
+        case .annual: return "annual"
+        case .lifetime: return "lifetime"
+        default: return "other"
+        }
+    }
+
     private func purchaseLifetime(package: Package) async {
         isPurchasingLifetime = true
 
@@ -461,7 +475,10 @@ struct PaywallView: View {
                     showError = true
                     return
                 }
-                AnalyticsService.log(.purchaseCompleted)
+                AnalyticsService.log(.purchaseCompleted, parameters: [
+                    "type": "lifetime",
+                    "had_active_subscription": subscriptionService.isProUser ? "true" : "false"
+                ])
                 if subscriptionService.isProUser {
                     // Active subscription still running — warn them it won't auto-cancel
                     showActiveSubscriptionWarning = true
@@ -471,7 +488,8 @@ struct PaywallView: View {
             }
         } catch {
             AnalyticsService.log(.purchaseFailed, parameters: [
-                "error": error.localizedDescription
+                "error": error.localizedDescription,
+                "type": "lifetime"
             ])
             await MainActor.run {
                 isPurchasingLifetime = false
@@ -505,8 +523,16 @@ struct PaywallView: View {
             // Wait for UI state to update
             try? await Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
             
-            if subscriptionService.isProUser || subscriptionService.isInTrialPeriod {
-                AnalyticsService.log(.restoreCompleted)
+            if subscriptionService.hasAnyPaidAccess || subscriptionService.isInTrialPeriod {
+                let type: String
+                if subscriptionService.hasLifetimeAccess {
+                    type = "lifetime"
+                } else if subscriptionService.isInTrialPeriod {
+                    type = "trial"
+                } else {
+                    type = "subscription"
+                }
+                AnalyticsService.log(.restoreCompleted, parameters: ["type": type])
 
                 await MainActor.run {
                     isRestoring = false

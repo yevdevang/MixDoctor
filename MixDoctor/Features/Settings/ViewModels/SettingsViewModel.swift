@@ -14,14 +14,16 @@ final class SettingsViewModel {
             guard !isInitializing else { return }
             cloudStore.set(selectedTheme, forKey: "theme")
             cloudStore.synchronize()
-            
+
             // Notify ContentView to update immediately
             NotificationCenter.default.post(name: NSNotification.Name("ThemeDidChange"), object: nil)
-            
+
+            AnalyticsService.log(.themeChanged, parameters: ["theme": selectedTheme])
+
             updatePreferences()
         }
     }
-    
+
     var iCloudSyncEnabled: Bool {
         get {
             // Default to true if not set (for better UX - CloudKit enabled by default)
@@ -29,6 +31,7 @@ final class SettingsViewModel {
         }
         set {
             UserDefaults.standard.set(newValue, forKey: "iCloudSyncEnabled")
+            AnalyticsService.log(.iCloudSyncToggled, parameters: ["enabled": newValue ? "true" : "false"])
             // Post notification to update model container
             NotificationCenter.default.post(name: .iCloudSyncToggled, object: nil)
         }
