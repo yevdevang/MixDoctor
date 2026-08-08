@@ -59,7 +59,15 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
     var hasReachedFreeLimit: Bool {
         !isProUser && remainingFreeAnalyses <= 0
     }
-    
+
+    /// True if the user has paid for access via either a recurring Pro subscription or
+    /// the one-time Lifetime purchase. Single source of truth for "has this user
+    /// purchased something" checks that must account for both — a prior bug treated a
+    /// successful Lifetime purchase as "no purchase" because it only checked `isProUser`.
+    var hasAnyPaidAccess: Bool {
+        isProUser || hasLifetimeAccess
+    }
+
     // MARK: - Initialization
     
     private override init() {

@@ -37,7 +37,14 @@ final class MockSubscriptionService {
     var currentProLimit: Int {
         isWeeklySubscriber ? weeklyProLimit : proMonthlyLimit
     }
-    
+
+    /// True if the user has paid for access via either a recurring Pro subscription or
+    /// the one-time Lifetime purchase. Single source of truth for "has this user
+    /// purchased something" checks that must account for both.
+    var hasAnyPaidAccess: Bool {
+        isProUser || hasLifetimeAccess
+    }
+
     // Mock packages for UI
     struct MockPackage {
         let id: String

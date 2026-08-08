@@ -49,6 +49,28 @@ final class SettingsViewModel {
         return "On-device analysis requires iOS 26 or later, or macOS Tahoe (26) or later on Mac."
     }
 
+    /// Which subscription-related action row Settings should show, given the user's
+    /// current purchase state. Pulled out as a pure function (rather than left as inline
+    /// view conditionals) so the three-way decision — manage / upgrade / neither — is
+    /// directly testable and can't silently drop the Lifetime case again.
+    enum SubscriptionActionButtonKind: Equatable {
+        case manageSubscription
+        case upgradeToPro
+        case none
+    }
+
+    static func subscriptionActionButton(isProUser: Bool, hasLifetimeAccess: Bool) -> SubscriptionActionButtonKind {
+        if isProUser {
+            // Has an active subscription (possibly alongside Lifetime) — let them manage/cancel it
+            return .manageSubscription
+        }
+        if hasLifetimeAccess {
+            // Lifetime already covers unlimited on-device analysis — no upsell needed
+            return .none
+        }
+        return .upgradeToPro
+    }
+
     var showResetConfirmation = false
     var showAbout = false
     

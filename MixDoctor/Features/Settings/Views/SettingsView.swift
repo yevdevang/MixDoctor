@@ -85,15 +85,17 @@ struct SettingsView: View {
                     }
                     .disabled(isRefreshingSubscription)
                     
-                    if subscriptionService.isProUser {
-                        // Also has an active subscription (possibly alongside Lifetime) — let them manage/cancel it
+                    switch SettingsViewModel.subscriptionActionButton(
+                        isProUser: subscriptionService.isProUser,
+                        hasLifetimeAccess: subscriptionService.hasLifetimeAccess
+                    ) {
+                    case .manageSubscription:
                         Button("Manage Subscription") {
                             if let url = URL(string: "https://apps.apple.com/account/subscriptions") {
                                 UIApplication.shared.open(url)
                             }
                         }
-                    } else if !subscriptionService.hasLifetimeAccess {
-                        // Lifetime already covers unlimited on-device analysis — no upsell needed
+                    case .upgradeToPro:
                         Button {
                             AnalyticsService.log(.upgradeButtonTapped)
                             showPaywall = true
@@ -107,6 +109,8 @@ struct SettingsView: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
+                    case .none:
+                        EmptyView()
                     }
                 } header: {
                     Text("Subscription")
@@ -295,6 +299,15 @@ struct SettingsView: View {
                     }
                     .foregroundStyle(.orange)
                     .disabled(isClearingAnalysis)
+
+                    // Local override only — reverts to the real RevenueCat entitlement on the
+                    // next updateCustomerInfo() refresh if you actually own/don't own Lifetime.
+                    Button {
+                        subscriptionService.hasLifetimeAccess.toggle()
+                    } label: {
+                        Text(subscriptionService.hasLifetimeAccess ? "Revoke Lifetime Access (Debug)" : "Grant Lifetime Access (Debug)")
+                    }
+                    .foregroundStyle(.purple)
                 }
                 #endif
             }

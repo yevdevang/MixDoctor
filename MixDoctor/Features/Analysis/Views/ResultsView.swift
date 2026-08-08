@@ -53,8 +53,8 @@ struct ResultsView: View {
             AnimatedGradientLoader(fileName: audioFile.fileName)
         }
         .sheet(isPresented: $showPaywall, onDismiss: {
-            // If paywall was dismissed without purchase, return to dashboard
-            if !subscriptionService.isProUser {
+            // If paywall was dismissed without purchase, return to dashboard.
+            if !subscriptionService.hasAnyPaidAccess {
                 dismiss()
             } else {
                 // Auto-analyze after successful purchase
