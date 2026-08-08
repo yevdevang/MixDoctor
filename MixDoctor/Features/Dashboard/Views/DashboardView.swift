@@ -37,8 +37,6 @@ struct DashboardView: View {
     @State private var navigateToFile: AudioFile?
     @State private var hasPerformedInitialSync = false // Track if we've done initial sync
     @State private var isScanning = false // Prevent concurrent scans
-    @State private var cachedFilteredFiles: [AudioFile] = [] // Cache filtered results
-    @State private var lastFilterHash = 0 // Track filter state changes
     @State private var syncDebounceTask: Task<Void, Never>? // Debounce sync operations
     @State private var hasLoggedDashboardView = false // Track if dashboard view event has been logged
     @State private var showDeleteAllConfirmation = false // Confirmation for delete all
@@ -69,27 +67,12 @@ struct DashboardView: View {
     }
     
     var filteredFiles: [AudioFile] {
-        // Calculate hash of current filter state
-        var hasher = Hasher()
-        hasher.combine(searchText)
-        hasher.combine(filterOption)
-        hasher.combine(sortOption)
-        hasher.combine(audioFiles.count)
-        let currentHash = hasher.finalize()
-
-        // Use cached version if filters haven't changed
-        if currentHash == lastFilterHash && !cachedFilteredFiles.isEmpty {
-            return cachedFilteredFiles
-        }
-
         var files = audioFiles
 
-        // Apply search filter
         if !searchText.isEmpty {
             files = files.filter { $0.fileName.localizedCaseInsensitiveContains(searchText) }
         }
 
-        // Apply status filter
         switch filterOption {
         case .all:
             break
@@ -104,7 +87,6 @@ struct DashboardView: View {
             }
         }
 
-        // Apply sorting
         switch sortOption {
         case .date:
             files.sort { $0.dateImported > $1.dateImported }
@@ -118,16 +100,9 @@ struct DashboardView: View {
             }
         }
 
-        // Sort demo files to the bottom
         let userFiles = files.filter { !$0.isDemoFile }
         let demoFiles = files.filter { $0.isDemoFile }
-        files = userFiles + demoFiles
-
-        // Cache the result (non-blocking)
-        cachedFilteredFiles = files
-        lastFilterHash = currentHash
-
-        return files
+        return userFiles + demoFiles
     }
     
     var body: some View {
@@ -187,9 +162,6 @@ struct DashboardView: View {
             }
 #endif
             .onReceive(NotificationCenter.default.publisher(for: .analysisCleared)) { _ in
-                // Invalidate cached filtered files so the UI reflects cleared analysis
-                cachedFilteredFiles = []
-                lastFilterHash = 0
 #if targetEnvironment(macCatalyst)
                 reloadAudioFiles()
 #else
@@ -245,7 +217,9 @@ struct DashboardView: View {
         syncDebounceTask?.cancel()
 
         // Schedule a new sync task with a short delay
-        syncDebounceTask = Task(priority: priority) {
+        // Detached so the FileManager/iCloud I/O inside doesn't run on the Main Actor
+        // (a plain Task{} here would inherit this view's MainActor context and block the UI)
+        syncDebounceTask = Task.detached(priority: priority) {
             // Wait a short period to debounce rapid notifications
             try? await Task.sleep(nanoseconds: 300_000_000) // 300ms
 
@@ -302,45 +276,51 @@ struct DashboardView: View {
     }
     
     private func performInitialSync() {
+        // Read @State on the Main Actor before handing off to detached tasks below —
+        // the detached closures must not touch `audioFiles` directly.
+        let hasFiles = !audioFiles.isEmpty
+
 #if targetEnvironment(macCatalyst)
-        Task(priority: .userInitiated) {
+        Task.detached(priority: .userInitiated) {
             await loadAudioFiles()
         }
 #endif
-        
-        Task(priority: .userInitiated) {
-            if !audioFiles.isEmpty {
+
+        // Detached so the FileManager/iCloud I/O these call doesn't run on the Main Actor
+        Task.detached(priority: .userInitiated) {
+            if hasFiles {
                 await checkAndDownloadMissingFiles()
             }
         }
-        
+
         guard !hasPerformedInitialSync else { return }
         hasPerformedInitialSync = true
-        
-        Task(priority: .utility) {
+
+        Task.detached(priority: .utility) {
             await removeDuplicateFiles()
-            
-            if !audioFiles.isEmpty {
+
+            if hasFiles {
 #if targetEnvironment(macCatalyst)
                 await checkAndDownloadMissingFiles()
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
 #endif
                 await checkAndDownloadMissingFiles()
             }
-            
+
             await scanAndImportFromiCloud()
-            
+
             // Wait a moment for SwiftData to finish loading files
             try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
-            
+
             // Load missing analysis results from JSON files
             await loadMissingAnalysisResults()
         }
     }
-    
+
     private func handleSyncStateChange(oldValue: Bool, newValue: Bool) {
         if oldValue == true && newValue == false {
-            Task(priority: .utility) {
+            // Detached so the FileManager/iCloud I/O these call doesn't run on the Main Actor
+            Task.detached(priority: .utility) {
                 await checkAndDownloadMissingFiles()
                 await scanAndImportFromiCloud()
                 await loadMissingAnalysisResults()
@@ -887,7 +867,6 @@ struct DashboardView: View {
             
             // Update UI
             audioFiles = files
-            cachedFilteredFiles = files
             isLoadingFiles = false
             
             // Mark initial load complete once files are loaded
@@ -965,6 +944,7 @@ struct DashboardView: View {
             let genre = audioFile.genre
             let mixStage = audioFile.mixStage
             let isDemo = audioFile.isDemoFile
+            let history = audioFile.analysisHistory
 
             do {
                 // Run analysis on low-priority background thread to keep UI responsive
@@ -977,8 +957,10 @@ struct DashboardView: View {
 
                 // Now update UI and SwiftData on main actor
                 await MainActor.run {
-                    // Increment usage count
-                    subscriptionSvc.incrementAnalysisCount()
+                    // Increment usage count — skip for on-device analysis, which doesn't touch the Claude quota
+                    if !result.usedLocalModel {
+                        subscriptionSvc.incrementAnalysisCount()
+                    }
 
                     // Log free analysis count event
                     let remainingFree = subscriptionSvc.remainingFreeAnalyses
@@ -1000,7 +982,7 @@ struct DashboardView: View {
                     // Save to iCloud Drive as JSON (background, but ensure it happens)
                     Task.detached(priority: .background) {
                         do {
-                            try AnalysisResultPersistence.shared.saveAnalysisResult(result, forAudioFile: fileName, isDemo: isDemo)
+                            try AnalysisResultPersistence.shared.saveAnalysisResult(result, forAudioFile: fileName, isDemo: isDemo, history: history)
                             print("✅ Successfully saved analysis result to JSON for \(fileName)")
                         } catch {
                             print("❌ Failed to save analysis result to JSON for \(fileName): \(error.localizedDescription)")
@@ -1009,7 +991,8 @@ struct DashboardView: View {
                     
                     // Log analysis completed event
                     AnalyticsService.log(.analysisCompleted, parameters: [
-                        "overall_score": String(format: "%.1f", result.overallScore)
+                        "overall_score": String(format: "%.1f", result.overallScore),
+                        "backend": result.usedLocalModel ? "local" : "claude"
                     ])
 
                     // Reload the list and update statistics
@@ -1091,6 +1074,7 @@ struct DashboardView: View {
             let genre = audioFile.genre
             let mixStage = audioFile.mixStage
             let isDemo = audioFile.isDemoFile
+            let history = audioFile.analysisHistory
 
             do {
                 // Construct fileURL inside background task to avoid blocking main thread
@@ -1102,8 +1086,10 @@ struct DashboardView: View {
 
                 // Now update UI and SwiftData on main actor
                 await MainActor.run {
-                    // Increment usage count
-                    subscriptionSvc.incrementAnalysisCount()
+                    // Increment usage count — skip for on-device analysis, which doesn't touch the Claude quota
+                    if !result.usedLocalModel {
+                        subscriptionSvc.incrementAnalysisCount()
+                    }
 
                     // Log free analysis count event
                     let remainingFree = subscriptionSvc.remainingFreeAnalyses
@@ -1125,7 +1111,7 @@ struct DashboardView: View {
                     // Save to iCloud Drive as JSON (background, but ensure it happens)
                     Task.detached(priority: .background) {
                         do {
-                            try AnalysisResultPersistence.shared.saveAnalysisResult(result, forAudioFile: fileName, isDemo: isDemo)
+                            try AnalysisResultPersistence.shared.saveAnalysisResult(result, forAudioFile: fileName, isDemo: isDemo, history: history)
                             print("✅ Successfully saved analysis result to JSON for \(fileName)")
                         } catch {
                             print("❌ Failed to save analysis result to JSON for \(fileName): \(error.localizedDescription)")
@@ -1138,7 +1124,8 @@ struct DashboardView: View {
                         (4 - subscriptionSvc.remainingFreeAnalyses)
                     AnalyticsService.log(.analysisCompleted, parameters: [
                         "score": String(format: "%.1f", result.overallScore),
-                        "analysis_count": String(usedCount)
+                        "analysis_count": String(usedCount),
+                        "backend": result.usedLocalModel ? "local" : "claude"
                     ])
 
                     // Update statistics after analysis
@@ -1174,84 +1161,97 @@ struct DashboardView: View {
     }
     
     private func checkAndDownloadMissingFiles() async {
-        
-        var missingFiles: [(AudioFile, URL)] = []
-        var orphanedRecords: [AudioFile] = []
-        
-        for file in audioFiles {
-            let fileURL = file.fileURL
-            let fileExists = FileManager.default.fileExists(atPath: fileURL.path)
-            
-            
+        // Snapshot on the Main Actor — the loop below must not touch live AudioFile
+        // objects off-actor (SwiftData model objects are tied to the Main Actor's
+        // model container, so we only carry plain Sendable values across).
+        let snapshot = await MainActor.run {
+            audioFiles.map { (fileName: $0.fileName, fileURL: $0.fileURL, isDemoFile: $0.isDemoFile) }
+        }
+
+        var missingFileURLs: [URL] = []
+        var orphanedFileNames: [String] = []
+
+        for entry in snapshot {
+            let fileExists = FileManager.default.fileExists(atPath: entry.fileURL.path)
+
             if !fileExists {
                 // Check if it's in iCloud but not downloaded, or truly deleted
                 do {
-                    let values = try fileURL.resourceValues(forKeys: [
+                    let values = try entry.fileURL.resourceValues(forKeys: [
                         URLResourceKey.isUbiquitousItemKey,
                         URLResourceKey.ubiquitousItemDownloadingStatusKey,
                         URLResourceKey.ubiquitousItemIsUploadedKey
                     ])
-                    
+
                     let isICloud = values.isUbiquitousItem ?? false
                     let downloadStatus = values.ubiquitousItemDownloadingStatus
                     let isUploaded = values.ubiquitousItemIsUploaded ?? false
-                    
-                    
+
                     // If file is in iCloud AND has a valid download status AND is uploaded, try to download
                     if isICloud && isUploaded && downloadStatus != nil {
-                        missingFiles.append((file, fileURL))
-                    } else {
-                        // File doesn't exist in iCloud or is being deleted - orphaned record
-                        orphanedRecords.append(file)
+                        missingFileURLs.append(entry.fileURL)
+                    } else if !entry.isDemoFile {
+                        // File doesn't exist in iCloud or is being deleted - orphaned record.
+                        // Never delete demo file records — their physical files are re-created from bundle.
+                        orphanedFileNames.append(entry.fileName)
                     }
                 } catch {
                     // If we can't get resource values and file doesn't exist, it's orphaned
-                    orphanedRecords.append(file)
+                    if !entry.isDemoFile {
+                        orphanedFileNames.append(entry.fileName)
+                    }
                 }
             }
         }
-        
-        // Clean up orphaned records (files deleted on another device)
-        // Never delete demo file records — their physical files are re-created from bundle
-        let deletableOrphans = orphanedRecords.filter { !$0.isDemoFile }
-        if !deletableOrphans.isEmpty {
-            for record in deletableOrphans {
-                // Also delete the analysis result
-                AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: record.fileName, isDemo: record.isDemoFile)
-                modelContext.delete(record)
-            }
-            do {
-                try modelContext.save()
-            } catch {
+
+        // Clean up orphaned records (files deleted on another device) — back on the Main Actor
+        if !orphanedFileNames.isEmpty {
+            await MainActor.run {
+                let orphanSet = Set(orphanedFileNames)
+                for record in audioFiles where orphanSet.contains(record.fileName) {
+                    // Also delete the analysis result
+                    AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: record.fileName, isDemo: record.isDemoFile)
+                    modelContext.delete(record)
+                }
+                do {
+                    try modelContext.save()
+                } catch {
+                }
             }
         }
-        
+
         // Download missing files that still exist in iCloud
-        if !missingFiles.isEmpty {
-            
+        if !missingFileURLs.isEmpty {
             // Trigger iCloud sync to download missing files
             await iCloudMonitor.syncNow()
-            
+
             // Additional attempt to explicitly download each missing file
-            for (file, fileURL) in missingFiles {
+            for fileURL in missingFileURLs {
                 do {
                     try FileManager.default.startDownloadingUbiquitousItem(at: fileURL)
                 } catch {
                 }
             }
-        } else if orphanedRecords.isEmpty {
         }
     }
     
     /// Remove duplicate entries from the database (keeps oldest import)
     /// Also checks for duplicates by file size + duration to catch cases where filenames differ
     private func removeDuplicateFiles() async {
+        // This function reads/mutates live AudioFile model objects throughout, so the
+        // whole body stays on the Main Actor rather than being split into a Sendable-
+        // snapshot phase like the other sync functions — the launching Task is already
+        // detached, so this only pins the Main Actor for this scoped block's duration,
+        // not the whole sync chain. Its cost is in-memory set/dictionary work plus cheap
+        // fileExists checks, which should be fast at typical library sizes; the O(n²)
+        // second pass below is worth revisiting if that stops being true.
+        await MainActor.run {
         // Fetch all files to check for duplicates
         let descriptor = FetchDescriptor<AudioFile>()
         guard let allFiles = try? modelContext.fetch(descriptor) else {
             return
         }
-        
+
         // Group files by fileName first
         var filesByName: [String: [AudioFile]] = [:]
         for file in allFiles {
@@ -1329,14 +1329,16 @@ struct DashboardView: View {
             for duplicate in duplicatesToDelete {
                 modelContext.delete(duplicate)
             }
-            
+
             do {
                 try modelContext.save()
             } catch {
             }
         }
+        }
     }
-    
+
+
     private func scanAndImportFromiCloud() async {
         // Prevent concurrent scans
         guard !isScanning else {
@@ -1408,10 +1410,12 @@ struct DashboardView: View {
             var imported = 0
             
             // Build a set of demo file names on disk to skip during scanning
-            let demoFileDescriptor = FetchDescriptor<AudioFile>(
-                predicate: #Predicate<AudioFile> { $0.isDemoFile == true }
-            )
-            let demoFileNames = Set((try? modelContext.fetch(demoFileDescriptor))?.map { $0.fileURL.lastPathComponent } ?? [])
+            let demoFileNames = await MainActor.run { () -> Set<String> in
+                let demoFileDescriptor = FetchDescriptor<AudioFile>(
+                    predicate: #Predicate<AudioFile> { $0.isDemoFile == true }
+                )
+                return Set((try? modelContext.fetch(demoFileDescriptor))?.map { $0.fileURL.lastPathComponent } ?? [])
+            }
 
             for (index, fileURL) in audioFiles.enumerated() {
                 // Check if already imported by comparing stored filename
@@ -1462,52 +1466,56 @@ struct DashboardView: View {
                     continue
                 }
                 
-                // Enhanced duplicate check: Check by filename AND file size + duration
-                // This catches duplicates even if CloudKit hasn't synced yet
-                let descriptorByName = FetchDescriptor<AudioFile>(
-                    predicate: #Predicate<AudioFile> { $0.fileName == fileName }
-                )
-                
-                var isDuplicate = false
-                do {
-                    let existingByName = try modelContext.fetch(descriptorByName)
-                    
-                    // Check if any existing file matches by name AND (size + duration)
-                    for existingFile in existingByName {
-                        let sameFileName = existingFile.fileName == fileName
-                        let sameFileSize = existingFile.fileSize == fileSize
-                        let similarDuration = abs(existingFile.duration - duration) < 1.0
-                        
-                        // If name matches, it's definitely a duplicate
-                        // Also check if file physically exists to avoid stale records
-                        if sameFileName {
-                            let fileExists = FileManager.default.fileExists(atPath: existingFile.fileURL.path)
-                            if fileExists {
-                                isDuplicate = true
-                                break
-                            } else {
-                                // Stale record - file doesn't exist, remove it
-                                modelContext.delete(existingFile)
-                                try? modelContext.save()
-                            }
-                        } else if sameFileSize && similarDuration && fileSize > 0 {
-                            // Same size and duration but different name - might be a duplicate
-                            // Check if the existing file's physical file matches this one
-                            let existingFileExists = FileManager.default.fileExists(atPath: existingFile.fileURL.path)
-                            if existingFileExists {
-                                // Compare file URLs to see if they point to the same file
-                                let existingURL = existingFile.fileURL
-                                if existingURL.standardizedFileURL == fileURL.standardizedFileURL {
+                // Enhanced duplicate check: Check by filename AND file size + duration.
+                // This catches duplicates even if CloudKit hasn't synced yet — touches live
+                // AudioFile model objects throughout, so it must run on the Main Actor.
+                let isDuplicate = await MainActor.run { () -> Bool in
+                    let descriptorByName = FetchDescriptor<AudioFile>(
+                        predicate: #Predicate<AudioFile> { $0.fileName == fileName }
+                    )
+
+                    var isDuplicate = false
+                    do {
+                        let existingByName = try modelContext.fetch(descriptorByName)
+
+                        // Check if any existing file matches by name AND (size + duration)
+                        for existingFile in existingByName {
+                            let sameFileName = existingFile.fileName == fileName
+                            let sameFileSize = existingFile.fileSize == fileSize
+                            let similarDuration = abs(existingFile.duration - duration) < 1.0
+
+                            // If name matches, it's definitely a duplicate
+                            // Also check if file physically exists to avoid stale records
+                            if sameFileName {
+                                let fileExists = FileManager.default.fileExists(atPath: existingFile.fileURL.path)
+                                if fileExists {
                                     isDuplicate = true
                                     break
+                                } else {
+                                    // Stale record - file doesn't exist, remove it
+                                    modelContext.delete(existingFile)
+                                    try? modelContext.save()
+                                }
+                            } else if sameFileSize && similarDuration && fileSize > 0 {
+                                // Same size and duration but different name - might be a duplicate
+                                // Check if the existing file's physical file matches this one
+                                let existingFileExists = FileManager.default.fileExists(atPath: existingFile.fileURL.path)
+                                if existingFileExists {
+                                    // Compare file URLs to see if they point to the same file
+                                    let existingURL = existingFile.fileURL
+                                    if existingURL.standardizedFileURL == fileURL.standardizedFileURL {
+                                        isDuplicate = true
+                                        break
+                                    }
                                 }
                             }
                         }
+                    } catch {
+                        // If fetch fails, continue anyway (better to import than skip)
                     }
-                } catch {
-                    // If fetch fails, continue anyway (better to import than skip)
+                    return isDuplicate
                 }
-                
+
                 // Skip if duplicate found
                 if isDuplicate {
                     continue
@@ -1527,54 +1535,68 @@ struct DashboardView: View {
                     
                     // Extract mix stage from filename if present
                     let mixStage = extractMixStageFromFileName(fileName)
-                    
-                    let audioFile = AudioFile(
-                        fileName: fileName,
-                        fileURL: fileURL,
-                        duration: duration,
-                        sampleRate: sampleRate,
-                        bitDepth: 16,
-                        numberOfChannels: channels,
-                        fileSize: fileSize,
-                        genre: nil,  // Genre must be set manually by user
-                        mixStage: mixStage
-                    )
-                    
-                    modelContext.insert(audioFile)
-                    
-                    // IMPORTANT: Save immediately to prevent duplicates from concurrent scans
-                    try modelContext.save()
-                    
-                    // Log file imported event
-                    AnalyticsService.log(.fileImported)
-                    
-                    // Yield to prevent blocking UI during bulk imports
-                    await Task.yield()
-                    
+
+                    // Materialize the analysis-result JSON first — it may exist only as an
+                    // undownloaded iCloud placeholder, which loadAnalysisResult would otherwise
+                    // silently skip. This is a real async call, so it must happen before the
+                    // synchronous MainActor.run block below (files scanned here are never demos).
+                    await AnalysisResultPersistence.shared.ensureAnalysisResultDownloaded(forAudioFile: fileName, isDemo: false)
+
+                    // Create the model object and everything that touches it (insert, save,
+                    // attaching a previously-saved analysis result) together on the Main Actor —
+                    // AudioFile/AnalysisResult are SwiftData model objects and must not cross
+                    // actor boundaries.
+                    await MainActor.run {
+                        let audioFile = AudioFile(
+                            fileName: fileName,
+                            fileURL: fileURL,
+                            duration: duration,
+                            sampleRate: sampleRate,
+                            bitDepth: 16,
+                            numberOfChannels: channels,
+                            fileSize: fileSize,
+                            genre: nil,  // Genre must be set manually by user
+                            mixStage: mixStage
+                        )
+
+                        modelContext.insert(audioFile)
+
+                        // IMPORTANT: Save immediately to prevent duplicates from concurrent scans
+                        try? modelContext.save()
+
+                        // Log file imported event
+                        AnalyticsService.log(.fileImported)
+
 #if targetEnvironment(macCatalyst)
-                    // Reload the list
-                    await MainActor.run { reloadAudioFiles() }
+                        // Reload the list
+                        reloadAudioFiles()
 #endif
-                    
-                    // Try to load analysis result from iCloud Drive
-                    // IMPORTANT: Verify the analysis result matches this file to prevent loading stale results
-                    if let analysisResult = AnalysisResultPersistence.shared.loadAnalysisResult(forAudioFile: fileName, isDemo: audioFile.isDemoFile) {
-                        // Skip results that were cleared by the user (iCloud may re-sync the JSON)
-                        if AnalysisResultPersistence.shared.isResultStale(analysisResult) {
-                            AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: fileName, isDemo: audioFile.isDemoFile)
-                        } else if verifyAnalysisResultMatchesFile(analysisResult: analysisResult, audioFile: audioFile) {
-                            // Verify the analysis result matches the current file by checking file size and duration
-                            // This prevents loading analysis from a previously deleted file with the same name
-                            analysisResult.audioFile = audioFile
-                            audioFile.analysisResult = analysisResult
-                            audioFile.dateAnalyzed = analysisResult.dateAnalyzed
-                            try? modelContext.save()
-                        } else {
-                            // Analysis result doesn't match - delete the stale JSON file
-                            AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: fileName, isDemo: audioFile.isDemoFile)
+
+                        // Try to load analysis result from iCloud Drive.
+                        // IMPORTANT: Verify the analysis result matches this file to prevent loading stale results
+                        if let analysisResult = AnalysisResultPersistence.shared.loadAnalysisResult(forAudioFile: fileName, isDemo: false) {
+                            // Skip results that were cleared by the user (iCloud may re-sync the JSON)
+                            if AnalysisResultPersistence.shared.isResultStale(analysisResult) {
+                                AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: fileName, isDemo: false)
+                            } else if verifyAnalysisResultMatchesFile(analysisResult: analysisResult, audioFile: audioFile) {
+                                analysisResult.audioFile = audioFile
+                                audioFile.analysisResult = analysisResult
+                                audioFile.dateAnalyzed = analysisResult.dateAnalyzed
+                                let savedHistory = AnalysisResultPersistence.shared.loadAnalysisHistory(forAudioFile: fileName, isDemo: false)
+                                let existingIDs = Set(audioFile.analysisHistory.map { $0.id })
+                                for entry in savedHistory where !existingIDs.contains(entry.id) {
+                                    audioFile.analysisHistory.append(entry)
+                                }
+                                try? modelContext.save()
+                            } else {
+                                AnalysisResultPersistence.shared.deleteAnalysisResult(forAudioFile: fileName, isDemo: false)
+                            }
                         }
                     }
-                    
+
+                    // Yield to prevent blocking UI during bulk imports
+                    await Task.yield()
+
                     imported += 1
                 } catch {
                 }
@@ -1592,11 +1614,6 @@ struct DashboardView: View {
             }
             
             if imported > 0 {
-                // Clear cached filtered files to force refresh with new imports
-                await MainActor.run {
-                    cachedFilteredFiles = []
-                    lastFilterHash = 0
-                }
                 
 #if !targetEnvironment(macCatalyst)
                 // Update statistics after importing new files
@@ -1672,6 +1689,13 @@ struct DashboardView: View {
             // 2. Fallback: audioFile.fileName without isDemo (e.g. "Song 4 UNMIXED.analysis.json")
             // 3. Fallback: fileURL.lastPathComponent without isDemo (e.g. "Song 4 UNMIXED.wav.analysis.json")
             let storedName = audioFile.fileURL.lastPathComponent
+
+            // Materialize the JSON before attempting to read it — it may exist only as an
+            // undownloaded iCloud placeholder, which loadAnalysisResult would otherwise skip.
+            await AnalysisResultPersistence.shared.ensureAnalysisResultDownloaded(forAudioFile: audioFile.fileName, isDemo: audioFile.isDemoFile)
+            await AnalysisResultPersistence.shared.ensureAnalysisResultDownloaded(forAudioFile: audioFile.fileName, isDemo: false)
+            await AnalysisResultPersistence.shared.ensureAnalysisResultDownloaded(forAudioFile: storedName, isDemo: false)
+
             let analysisResult: AnalysisResult? =
                 AnalysisResultPersistence.shared.loadAnalysisResult(forAudioFile: audioFile.fileName, isDemo: audioFile.isDemoFile)
                 ?? AnalysisResultPersistence.shared.loadAnalysisResult(forAudioFile: audioFile.fileName, isDemo: false)
@@ -1697,6 +1721,11 @@ struct DashboardView: View {
                         analysisResult.audioFile = audioFile
                         audioFile.analysisResult = analysisResult
                         audioFile.dateAnalyzed = analysisResult.dateAnalyzed
+                        let savedHistory = AnalysisResultPersistence.shared.loadAnalysisHistory(forAudioFile: audioFile.fileName, isDemo: audioFile.isDemoFile)
+                        let existingIDs = Set(audioFile.analysisHistory.map { $0.id })
+                        for entry in savedHistory where !existingIDs.contains(entry.id) {
+                            audioFile.analysisHistory.append(entry)
+                        }
                         loadedCount += 1
                     } else {
                         print("   ⚠️ Analysis result doesn't match file verification")
@@ -1794,10 +1823,6 @@ struct DashboardView: View {
             } catch {
             }
             
-            // Clear cached filtered files to force refresh
-            cachedFilteredFiles = []
-            lastFilterHash = 0
-            
             // Update statistics after deletion
 #if targetEnvironment(macCatalyst)
             Task(priority: .utility) {
@@ -1853,10 +1878,6 @@ struct DashboardView: View {
             AnalyticsService.log(.allFilesDeleted, parameters: [
                 "count": String(allFiles.count)
             ])
-
-            // Clear cached filtered files
-            cachedFilteredFiles = []
-            lastFilterHash = 0
 
             // Update statistics after deletion
 #if targetEnvironment(macCatalyst)

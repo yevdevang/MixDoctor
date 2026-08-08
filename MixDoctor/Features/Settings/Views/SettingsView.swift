@@ -21,6 +21,23 @@ struct SettingsView: View {
         audioFiles.contains { !$0.isDemoFile && $0.analysisResult != nil }
     }
 
+    /// Whether analysis is actually routed to the on-device model right now
+    private var isUsingLocalModel: Bool {
+        subscriptionService.hasLifetimeAccess && viewModel.isLocalModelAvailable
+    }
+
+    private var aiAnalysisFooterText: String {
+        if subscriptionService.hasLifetimeAccess {
+            if viewModel.isLocalModelAvailable {
+                return "Included with your Lifetime Pro purchase — mixes are analyzed on-device, unlimited, forever."
+            } else {
+                return "\(viewModel.localModelUnavailableReason ?? "On-device analysis is unavailable on this device.") Using Claude API instead."
+            }
+        } else {
+            return "Unlock unlimited on-device analysis forever with a one-time Lifetime Pro purchase (requires iOS 26+ or macOS Tahoe 26+). Otherwise, analysis uses the Claude API within your plan's limits."
+        }
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -37,7 +54,7 @@ struct SettingsView: View {
                         
                         Spacer()
                         
-                        if subscriptionService.isProUser {
+                        if subscriptionService.isProUser || subscriptionService.hasLifetimeAccess {
                             Image(systemName: "checkmark.seal.fill")
                                 .foregroundStyle(Color.primaryAccent)
                                 .font(.title2)
@@ -68,7 +85,17 @@ struct SettingsView: View {
                     }
                     .disabled(isRefreshingSubscription)
                     
-                    if !subscriptionService.isProUser {
+                    switch SettingsViewModel.subscriptionActionButton(
+                        isProUser: subscriptionService.isProUser,
+                        hasLifetimeAccess: subscriptionService.hasLifetimeAccess
+                    ) {
+                    case .manageSubscription:
+                        Button("Manage Subscription") {
+                            if let url = URL(string: "https://apps.apple.com/account/subscriptions") {
+                                UIApplication.shared.open(url)
+                            }
+                        }
+                    case .upgradeToPro:
                         Button {
                             AnalyticsService.log(.upgradeButtonTapped)
                             showPaywall = true
@@ -82,12 +109,8 @@ struct SettingsView: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
-                    } else {
-                        Button("Manage Subscription") {
-                            if let url = URL(string: "https://apps.apple.com/account/subscriptions") {
-                                UIApplication.shared.open(url)
-                            }
-                        }
+                    case .none:
+                        EmptyView()
                     }
                 } header: {
                     Text("Subscription")
@@ -110,6 +133,30 @@ struct SettingsView: View {
                     Text("Theme preference syncs automatically across all your devices")
                 }
                 
+                // MARK: - AI Analysis Section
+                Section {
+                    Toggle("Use Local Model", isOn: .constant(isUsingLocalModel))
+                        .disabled(true)
+
+                    if !subscriptionService.hasLifetimeAccess {
+                        Button {
+                            showPaywall = true
+                        } label: {
+                            HStack {
+                                Text("Unlock Local Analysis")
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                } header: {
+                    Text("AI Analysis")
+                } footer: {
+                    Text(aiAnalysisFooterText)
+                }
+
                 // MARK: - Storage Section
                 Section {
                     if let storage = storageInfo {
@@ -252,6 +299,15 @@ struct SettingsView: View {
                     }
                     .foregroundStyle(.orange)
                     .disabled(isClearingAnalysis)
+
+                    // Local override only — reverts to the real RevenueCat entitlement on the
+                    // next updateCustomerInfo() refresh if you actually own/don't own Lifetime.
+                    Button {
+                        subscriptionService.hasLifetimeAccess.toggle()
+                    } label: {
+                        Text(subscriptionService.hasLifetimeAccess ? "Revoke Lifetime Access (Debug)" : "Grant Lifetime Access (Debug)")
+                    }
+                    .foregroundStyle(.purple)
                 }
                 #endif
             }

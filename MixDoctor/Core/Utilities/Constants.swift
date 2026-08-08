@@ -28,7 +28,7 @@ enum AppConstants {
     
     // Versioning
     static let appVersion = "1.0.0"
-    static let analysisVersion = "4.2"  // Fix FFT: use magnitude (not power/mag²) for frequency balance — power was giving 87% bass
+    static let analysisVersion = "4.3"  // Generate + store spectrogram image (sent to Claude, shown in Results)
     
     // Storage
     static let maxStorageGB: Int64 = 10

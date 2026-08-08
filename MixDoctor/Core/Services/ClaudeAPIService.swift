@@ -126,8 +126,12 @@ class ClaudeAPIService {
         }
     }
     
-    /// Send audio analysis metrics to Claude and get AI insights
-    func analyzeAudioMetrics(_ metrics: AudioMetricsForClaude, userGenre: String? = nil, mixStage: String? = nil) async throws -> ClaudeAnalysisResponse {
+    /// Send audio analysis metrics to Claude and get AI insights.
+    /// `spectrogramImage`, when provided (PNG data), is attached as a vision content block so Claude
+    /// reads the track's frequency balance directly from the image rather than a numeric text summary —
+    /// non-visual measurements (loudness, stereo width, phase, dynamic range) still come from `metrics`
+    /// since a spectrogram can't convey them.
+    func analyzeAudioMetrics(_ metrics: AudioMetricsForClaude, spectrogramImage: Data? = nil, userGenre: String? = nil, mixStage: String? = nil) async throws -> ClaudeAnalysisResponse {
         
         // Debug: print ALL key metrics sent to Claude for scoring diagnosis
         print("══════════════════════════════════════════════")
@@ -210,17 +214,43 @@ class ClaudeAPIService {
         // Get separated prompts for caching
         // CACHE VERSION: Update this number when scoring rules change to bust the cache
         let cacheVersion = "v12.0-METAL-GENRE-OVERRIDE"  // Metal/Hard Rock streaming scoring fixed
-        let systemPrompt = getSystemPrompt(isMastered: isMastered, isUnmixed: isUnmixed, genre: genre, mixStage: mixStage) + "\n\n[Scoring Rules Version: \(cacheVersion)]"
-        let userMessage = getUserMessage(metrics: metrics, genre: genre, isMastered: isMastered)
-        
+        var systemPrompt = getSystemPrompt(isMastered: isMastered, isUnmixed: isUnmixed, genre: genre, mixStage: mixStage) + "\n\n[Scoring Rules Version: \(cacheVersion)]"
+        if spectrogramImage != nil {
+            systemPrompt += "\n\n" + spectrogramReadingInstructions
+        }
+        let userMessage = getUserMessage(metrics: metrics, genre: genre, isMastered: isMastered, hasSpectrogramImage: spectrogramImage != nil)
+
+        // When we have a spectrogram, send it as a vision content block alongside the text —
+        // this is Anthropic's multi-block message format (as opposed to the plain-string shorthand).
+        let messageContent: Any
+        if let imageData = spectrogramImage {
+            messageContent = [
+                [
+                    "type": "image",
+                    "source": [
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": imageData.base64EncodedString()
+                    ]
+                ],
+                [
+                    "type": "text",
+                    "text": userMessage
+                ]
+            ]
+        } else {
+            messageContent = userMessage
+        }
+
         let requestBody: [String: Any] = [
             "model": determineModel(isProUser: metrics.isProUser),
             "max_tokens": 800,  // Balanced: enough for detailed responses but faster than 1000
+            "temperature": 0,  // Deterministic scoring — same input should yield the same score, not a creative rewrite each time
             "system": systemPrompt,  // DISABLED CACHING - use fresh prompt every time for accurate scoring
             "messages": [
                 [
                     "role": "user",
-                    "content": userMessage
+                    "content": messageContent
                 ]
             ]
         ]
@@ -588,6 +618,27 @@ class ClaudeAPIService {
         }
     }
     
+    /// Appended to the system prompt whenever a spectrogram image is attached to the request.
+    /// The frequency-balance percentages are intentionally left out of the user message in this
+    /// case (see `getUserMessage`) — Claude reads frequency balance from the image instead.
+    private var spectrogramReadingInstructions: String {
+        """
+        🖼️ SPECTROGRAM IMAGE ATTACHED:
+        You have been given a spectrogram image of this track: time runs left-to-right, frequency runs
+        bottom (20Hz) to top (20kHz) on a log scale, and color/brightness represents energy (dark = quiet,
+        bright yellow/orange = loud).
+
+        Use this image the way a mixing/mastering engineer reads a real-time analyzer:
+        • Judge frequency balance (bass/low-mid/mid/high-mid/high) from the visual energy distribution,
+          not from numeric percentages — none are provided for frequency balance in this message.
+        • Look for muddiness (a dense unbroken band in the low-mid area), harshness or missing air
+          (empty top of the image), masking (overlapping bright regions across the full frequency range
+          in the same time slice), and any narrow bright/dark stripes that suggest resonances or notches.
+        • Still combine this visual read with the loudness, dynamic range, and stereo/phase numbers given
+          below — a spectrogram doesn't show those, so keep using the numeric values for them.
+        """
+    }
+
     private func getSystemPrompt(isMastered: Bool, isUnmixed: Bool, genre: String, mixStage: String? = nil) -> String {
         // LIVE RECORDINGS - special handling
         let isLiveRecording = genre.lowercased() == "live"
@@ -795,7 +846,7 @@ class ClaudeAPIService {
             • Mid (800Hz-3kHz)
             • High Mid (3-8kHz)
             • High (8-20kHz)
-            
+
             🎯 SCORING RULES (0-100 scale) — GENRE-AWARE MASTERED TRACK
 
             ════════════════════════════════════════════════
@@ -1090,7 +1141,7 @@ class ClaudeAPIService {
             
             🎭 STEREO & PHASE:
             • Stereo Width: Excellent 25-45% | Good 20-55% | Wide 55-85%
-            • Phase Coherence: Excellent >75% | Good >60% | Acceptable 40-60%
+            • Phase Coherence: Excellent >40% (bonus-worthy) | Normal/acceptable 20-40% (do NOT call this "poor" or "below professional standards" - it is a routine reading for a mix with real stereo width) | Problem only if sustained negative correlation (actual phase cancellation risk)
             • Mono Compatibility: Good >70% | Acceptable >50%
             
             🎵 FREQUENCY BALANCE (Simplified):
@@ -1099,7 +1150,7 @@ class ClaudeAPIService {
             • Mid (800Hz-3kHz): Ideal 25-35%, Acceptable 18-45%, Problem >50% or <15%
             • High-Mid (3-8kHz): Ideal 12-22%, Acceptable 8-32%, Problem >35% or <5%
             • High (8-20kHz): Ideal 8-18%, Acceptable 4-25%, Problem >30% or <3%
-            
+
             PRE-MASTER MIX SCORING — GENRE-AWARE
             Stage: PRE-MASTER / MIX | Maximum score: 90 (mixes NEVER exceed 90 — masters score 90-100)
 
@@ -1209,7 +1260,22 @@ class ClaudeAPIService {
         }
     }
     
-    private func getUserMessage(metrics: AudioMetricsForClaude, genre: String, isMastered: Bool) -> String {
+    /// When a spectrogram image is attached, frequency balance is read from the image (see
+    /// `spectrogramReadingInstructions`) instead of the numeric percentage walkthrough.
+    private func frequencyBalanceSection(genre: String, metrics: AudioMetricsForClaude, hasSpectrogramImage: Bool) -> String {
+        if hasSpectrogramImage {
+            return """
+            🎵 FREQUENCY BALANCE:
+            Read this directly from the attached spectrogram image (see instructions above) — judge it against \(genre) genre expectations.
+            """
+        }
+        return """
+        🎵 FREQUENCY BALANCE:
+        \(getGenreFrequencyGuidelines(genre: genre, metrics: metrics))
+        """
+    }
+
+    private func getUserMessage(metrics: AudioMetricsForClaude, genre: String, isMastered: Bool, hasSpectrogramImage: Bool = false) -> String {
         // Use genre from metrics if available, otherwise use passed genre
         let finalGenre = metrics.genre ?? genre
         let genreContext = finalGenre.isEmpty ? "" : """
@@ -1263,8 +1329,7 @@ class ClaudeAPIService {
             🎚️ DYNAMIC RANGE: \(String(format: "%.1f", metrics.dynamicRange)) dB
             📉 CREST FACTOR: \(String(format: "%.1f", metrics.truePeakLevel - metrics.rmsLevel)) dB
 
-            🎵 FREQUENCY BALANCE:
-            \(getGenreFrequencyGuidelines(genre: finalGenre, metrics: metrics))
+            \(frequencyBalanceSection(genre: finalGenre, metrics: metrics, hasSpectrogramImage: hasSpectrogramImage))
 
             🚨 DETECTED ISSUES:
             • Clipping: \(metrics.hasClipping ? "❌ YES - MUST ADDRESS IN RECOMMENDATIONS" : "✅ No")
@@ -1312,8 +1377,7 @@ class ClaudeAPIService {
             • Phase Coherence: \(String(format: "%.1f", metrics.phaseCoherence * 100))%
             • Mono Compatibility: \(String(format: "%.1f", metrics.monoCompatibility * 100))%
 
-            🎵 FREQUENCY BALANCE:
-            \(getGenreFrequencyGuidelines(genre: finalGenre, metrics: metrics))
+            \(frequencyBalanceSection(genre: finalGenre, metrics: metrics, hasSpectrogramImage: hasSpectrogramImage))
 
             🚨 PRE-MASTER MIX ISSUES:
             • Clipping: \(metrics.hasClipping ? "❌ YES - MUST ADDRESS IN RECOMMENDATIONS" : "✅ No")

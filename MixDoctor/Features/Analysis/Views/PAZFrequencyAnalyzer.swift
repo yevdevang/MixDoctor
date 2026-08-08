@@ -7,19 +7,22 @@
 
 import SwiftUI
 import Charts
+import UIKit
 
 struct PAZFrequencyAnalyzer: View {
     let result: AnalysisResult
-    
+
     // Capture spectrum data once to avoid SwiftData detachment errors
     private let spectrum: [Float]?
     private let sampleRate: Double?
-    
+    private let spectrogramImage: UIImage?
+
     init(result: AnalysisResult) {
         self.result = result
         // Capture the spectrum data immediately to prevent SwiftData detachment
         self.spectrum = result.frequencySpectrum
         self.sampleRate = result.spectrumSampleRate
+        self.spectrogramImage = result.spectrogramImageData.flatMap { UIImage(data: $0) }
     }
     
     // PAZ-style frequency bands with proper Hz ranges
@@ -234,9 +237,13 @@ struct PAZFrequencyAnalyzer: View {
                 FrequencyChart(
                     bands: frequencyBands,
                     spectrum: spectrum,  // Use captured spectrum data
-                    sampleRate: sampleRate
+                    sampleRate: sampleRate,
+                    spectrogramImage: spectrogramImage
                 )
-                    .frame(height: 250) // Ensure chart doesn't expand
+                    .frame(maxWidth: .infinity)
+                    // Heatmap (170) + curve section (170) + spacing when a spectrogram is shown;
+                    // just the single chart height in the no-spectrogram fallback case.
+                    .frame(height: spectrogramImage != nil ? 350 : 170)
                     .clipped() // Prevent any content from overflowing
                 
                 // Clear divider between chart and frequency breakdown
@@ -392,38 +399,139 @@ struct FrequencyChart: View {
     let bands: [FrequencyBand]
     let spectrum: [Float]?      // REAL FFT data
     let sampleRate: Double?     // Actual sample rate
-    
+    let spectrogramImage: UIImage?  // Real time x frequency spectrogram — same image sent to Claude
+
+    private var nyquist: Double { (sampleRate ?? 44100) / 2 }
+
     var body: some View {
-        // Chart area with spectrum analyzer
-        ZStack {
-            // Use Canvas-based spectrum generator for professional visualization
-            if let fftData = spectrum, let sr = sampleRate, fftData.count > 0 {
-                SpectrumCanvasView(dataPoints: prepareDataPoints(fftData: fftData, sampleRate: sr))
-                    .frame(height: 230)
-            } else {
-                // Fallback: Dark background without text
-                Rectangle()
-                    .fill(Color.black.opacity(0.8))
+        VStack(spacing: 10) {
+            // Heatmap section
+            HStack(alignment: .center, spacing: 6) {
+                ZStack(alignment: .topLeading) {
+                    if let spectrogramImage {
+                        // Show the actual spectrogram — the same picture a sound engineer (and Claude) reads
+                        Image(uiImage: spectrogramImage)
+                            .resizable()
+                            .interpolation(.high)
+                            .aspectRatio(contentMode: .fill)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .clipped()
+                        frequencyAxisOverlay
+                    } else if let fftData = spectrum, let sr = sampleRate, fftData.count > 0 {
+                        // Fallback for older results analyzed before spectrogram generation existed
+                        SpectrumCanvasView(dataPoints: prepareDataPoints(fftData: fftData, sampleRate: sr), maxFrequency: sr / 2)
+                    } else {
+                        // Fallback: Dark background without text
+                        Rectangle()
+                            .fill(Color.black.opacity(0.8))
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+
+                if spectrogramImage != nil {
+                    decibelLegend
+                        .frame(width: 30)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: 170)
+            .padding(6)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.black)
+                    .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+            )
+
+            // Curve section — a classic analyzer curve, built from the same spectrogram-derived
+            // spectrum as the heatmap above, shown as its own chart instead of overlaid on the colors.
+            if spectrogramImage != nil, let fftData = spectrum, let sr = sampleRate, fftData.count > 0 {
+                SpectrumCanvasView(dataPoints: prepareDataPoints(fftData: fftData, sampleRate: sr), maxFrequency: sr / 2)
+                    .frame(maxWidth: .infinity, maxHeight: 170)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                    )
             }
         }
-        .frame(height: 230)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.black)
-                .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-        )
     }
-    
+
+    // MARK: - Frequency axis (y-axis, log scale, matches SpectrogramGenerator's row->frequency mapping)
+
+    private var frequencyTicks: [(label: String, frequency: Double)] {
+        [
+            (formatFrequency(nyquist), nyquist),
+            ("2k", 2000),
+            ("200", 200),
+            ("20", SpectrogramGenerator.minFrequency)
+        ]
+    }
+
+    private func formatFrequency(_ hz: Double) -> String {
+        hz >= 1000 ? String(format: "%.0fk", hz / 1000) : String(format: "%.0f", hz)
+    }
+
+    /// 0 = top of the image (highest frequency), 1 = bottom (lowest) — mirrors SpectrogramGenerator's row mapping.
+    private func verticalFraction(for frequency: Double) -> CGFloat {
+        let logMin = log10(SpectrogramGenerator.minFrequency)
+        let logMax = log10(nyquist)
+        guard logMax > logMin else { return 1 }
+        let t = (log10(frequency) - logMin) / (logMax - logMin)
+        return CGFloat(1 - min(max(t, 0), 1))
+    }
+
+    private var frequencyAxisOverlay: some View {
+        GeometryReader { geo in
+            ForEach(frequencyTicks, id: \.frequency) { tick in
+                Text(tick.label)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .padding(.horizontal, 3)
+                    .padding(.vertical, 1)
+                    .background(Color.black.opacity(0.4))
+                    .cornerRadius(3)
+                    .position(
+                        x: 14,
+                        y: min(max(verticalFraction(for: tick.frequency) * geo.size.height, 6), geo.size.height - 6)
+                    )
+            }
+        }
+    }
+
+    // MARK: - dB legend (matches SpectrogramColorMap used to render the image)
+
+    private var decibelLegend: some View {
+        VStack(spacing: 2) {
+            Text("0")
+                .font(.system(size: 8))
+                .foregroundStyle(.secondary)
+            LinearGradient(
+                gradient: Gradient(colors: stride(from: 1.0, through: 0.0, by: -0.125).map { value in
+                    let c = SpectrogramColorMap.color(for: Float(value))
+                    return Color(red: Double(c.r) / 255, green: Double(c.g) / 255, blue: Double(c.b) / 255)
+                }),
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(width: 12)
+            .frame(maxHeight: .infinity)
+            .cornerRadius(2)
+            Text("-\(Int(SpectrogramGenerator.dynamicRangeDb))")
+                .font(.system(size: 8))
+                .foregroundStyle(.secondary)
+        }
+    }
+
     // Prepare data points for Canvas view
     private func prepareDataPoints(fftData: [Float], sampleRate: Double) -> [(frequency: Double, magnitude: Double)] {
         let nyquist = sampleRate / 2.0
         let binWidth = nyquist / Double(fftData.count)
         
         let minFreq = 20.0
-        let maxFreq = 20000.0
-        
+        let maxFreq = nyquist
+
         var dataPoints: [(frequency: Double, magnitude: Double)] = []
-        
+
         // Debug: show ONLY the bins in audible range
         
         var debugCount = 0
@@ -447,7 +555,6 @@ struct FrequencyChart: View {
         return dataPoints
     }
 }
-
 
 // MARK: - Spectrum Grid
 

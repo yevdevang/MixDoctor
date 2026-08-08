@@ -22,6 +22,7 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
     @Published var customerInfo: CustomerInfo?
     @Published var remainingProAnalyses: Int = 50
     @Published var isWeeklySubscriber: Bool = false
+    @Published var hasLifetimeAccess: Bool = false
 
     // Free tier limits
     private let freeAnalysisLimit = 4
@@ -58,7 +59,15 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
     var hasReachedFreeLimit: Bool {
         !isProUser && remainingFreeAnalyses <= 0
     }
-    
+
+    /// True if the user has paid for access via either a recurring Pro subscription or
+    /// the one-time Lifetime purchase. Single source of truth for "has this user
+    /// purchased something" checks that must account for both — a prior bug treated a
+    /// successful Lifetime purchase as "no purchase" because it only checked `isProUser`.
+    var hasAnyPaidAccess: Bool {
+        isProUser || hasLifetimeAccess
+    }
+
     // MARK: - Initialization
     
     private override init() {
@@ -110,7 +119,8 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
         do {
             let info = try await Purchases.shared.customerInfo()
             customerInfo = info
-            
+            hasLifetimeAccess = info.entitlements["lifetime"]?.isActive == true
+
             // Check if user has active pro entitlement
             let hasProEntitlement = info.entitlements["pro"]?.isActive == true
             print("✨ updateCustomerInfo - Has Pro: \(hasProEntitlement)")
@@ -159,11 +169,18 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
     
     // MARK: - Purchase
     
-    func purchase(package: Package) async throws -> CustomerInfo {
+    /// Note: RevenueCat's purchase call does NOT throw when the user cancels the payment
+    /// sheet — it returns normally with `userCancelled: true` — so callers must check that
+    /// before treating this as a real purchase attempt.
+    func purchase(package: Package) async throws -> PurchaseResultData {
         let result = try await Purchases.shared.purchase(package: package)
         customerInfo = result.customerInfo
 
         print("💳 Purchase result received")
+
+        guard !result.userCancelled else {
+            return result
+        }
 
         // Save subscription type based on package
         let isWeekly = package.packageType == .weekly
@@ -197,15 +214,27 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
             print("   - ⚠️ No valid entitlement detected!")
         }
 
-        return result.customerInfo
+        return result
     }
-    
+
+    /// Purchase the one-time Lifetime Pro unlock. Kept separate from `purchase(package:)`
+    /// since it's a non-consumable with no subscription type/renewal/quota to track.
+    /// Note: RevenueCat's purchase call does NOT throw when the user cancels the payment
+    /// sheet — it returns normally with `userCancelled: true` — so callers must check that.
+    func purchaseLifetime(package: Package) async throws -> PurchaseResultData {
+        let result = try await Purchases.shared.purchase(package: package)
+        customerInfo = result.customerInfo
+        hasLifetimeAccess = result.customerInfo.entitlements["lifetime"]?.isActive == true
+        return result
+    }
+
     // MARK: - Restore Purchases
     
     func restorePurchases() async throws {
         let info = try await Purchases.shared.restorePurchases()
         customerInfo = info
-        
+        hasLifetimeAccess = info.entitlements["lifetime"]?.isActive == true
+
         // Check if user has active pro entitlement
         let hasProEntitlement = info.entitlements["pro"]?.isActive == true
         
@@ -261,6 +290,12 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
     }
     
     func canPerformAnalysis() -> Bool {
+        // Lifetime purchasers get unlimited analysis when it will actually run on-device
+        // (costs nothing). If their device can't run the local model, fall through to
+        // their underlying free/Pro quota instead of unmetered Claude usage.
+        if hasLifetimeAccess && isLocalModelUsable {
+            return true
+        }
         if isProUser {
             // Check Pro monthly limit with automatic reset
             checkProAnalysisReset()
@@ -268,6 +303,14 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
         }
         // Trial users and free users have 4 analyses limit
         return remainingFreeAnalyses > 0
+    }
+
+    /// Whether on-device analysis can actually run right now (OS + Apple Intelligence availability).
+    private var isLocalModelUsable: Bool {
+        if #available(iOS 26.0, *) {
+            return LocalModelAnalysisService.isAvailable
+        }
+        return false
     }
     
     private func checkMonthlyReset() {
@@ -352,6 +395,8 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
             let periodLabel = isWeeklySubscriber ? "week" : "month"
             let used = currentProLimit - remainingProAnalyses
             return "Pro (\(used)/\(currentProLimit) analyses this \(periodLabel))"
+        } else if hasLifetimeAccess {
+            return "Lifetime Pro (Unlimited on-device analysis)"
         } else {
             let used = freeAnalysisLimit - remainingFreeAnalyses
             return "Free (\(used)/\(freeAnalysisLimit) analyses)"
@@ -366,7 +411,8 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
             print("🔄 Delegate: Received updated customerInfo")
             print("⏰ Timestamp: \(Date())")
             self.customerInfo = customerInfo
-            
+            self.hasLifetimeAccess = customerInfo.entitlements["lifetime"]?.isActive == true
+
             // Check if user has active pro entitlement
             let hasProEntitlement = customerInfo.entitlements["pro"]?.isActive == true
             print("✨ Has Pro entitlement: \(hasProEntitlement)")

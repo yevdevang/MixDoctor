@@ -21,54 +21,18 @@ final class AnalysisResultPersistence {
     /// - Parameters:
     ///   - result: The analysis result to save
     ///   - audioFileName: The name of the audio file (without path)
-    func saveAnalysisResult(_ result: AnalysisResult, forAudioFile audioFileName: String, isDemo: Bool = false) throws {
+    func saveAnalysisResult(_ result: AnalysisResult, forAudioFile audioFileName: String, isDemo: Bool = false, history: [AnalysisResult] = []) throws {
         let service = iCloudStorageService.shared
         let audioDir = service.getAudioFilesDirectory()
 
-        // Create JSON filename based on audio filename
         let jsonFileName = analysisFileName(for: audioFileName, isDemo: isDemo)
         let jsonURL = audioDir.appendingPathComponent(jsonFileName)
-        
-        // Convert to dictionary
-        let data: [String: Any] = [
-            "id": result.id.uuidString,
-            "dateAnalyzed": result.dateAnalyzed.timeIntervalSince1970,
-            "analysisVersion": result.analysisVersion,
-            "overallScore": result.overallScore,
-            "stereoWidthScore": result.stereoWidthScore,
-            "phaseCoherence": result.phaseCoherence,
-            "spectralCentroid": result.spectralCentroid,
-            "hasClipping": result.hasClipping,
-            "lowEndBalance": result.lowEndBalance,
-            "lowMidBalance": result.lowMidBalance,
-            "midBalance": result.midBalance,
-            "highMidBalance": result.highMidBalance,
-            "highBalance": result.highBalance,
-            "dynamicRange": result.dynamicRange,
-            "loudnessLUFS": result.loudnessLUFS,
-            "peakLevel": result.peakLevel,
-            "hasPhaseIssues": result.hasPhaseIssues,
-            "hasStereoIssues": result.hasStereoIssues,
-            "hasFrequencyImbalance": result.hasFrequencyImbalance,
-            "hasDynamicRangeIssues": result.hasDynamicRangeIssues,
-            "recommendations": result.recommendations,
-            // Claude AI fields
-            "aiSummary": result.aiSummary as Any,
-            "aiRecommendations": result.aiRecommendations,
-            "claudeScore": result.claudeScore as Any,
-            "isReadyForMastering": result.isReadyForMastering,
-            // FFT spectrum data for visualization
-            "frequencySpectrum": result.frequencySpectrum as Any,
-            "spectrumSampleRate": result.spectrumSampleRate as Any,
-            "rmsLevel": result.rmsLevel,
-            // Unmixed detection fields
-            "isProfessionallyMixed": result.isProfessionallyMixed,
-            "stageMismatch": result.stageMismatch as Any,
-            "monoCompatibility": result.monoCompatibility,
-            "unmixedDetectionData": result.unmixedDetectionData?.base64EncodedString() as Any
-        ]
-        
-        // Convert to JSON
+
+        var data = Self.resultToDictionary(result)
+        if !history.isEmpty {
+            data["analysisHistory"] = history.map { Self.resultToDictionary($0) }
+        }
+
         let jsonData = try JSONSerialization.data(withJSONObject: data, options: .prettyPrinted)
         
         // Check if we're saving to iCloud directory
@@ -185,8 +149,31 @@ final class AnalysisResultPersistence {
         print("✅ Successfully saved analysis result: \(jsonFileName)")
     }
     
+    // MARK: - Download
+
+    /// Ensures the analysis JSON file for `audioFileName` is downloaded from iCloud, if it exists there.
+    /// Mirrors `iCloudStorageService.ensureFileIsDownloaded` for the sibling `.analysis.json` file, since
+    /// analysis results otherwise stay stuck as undownloaded placeholders and `loadAnalysisResult`/
+    /// `loadAnalysisHistory` silently skip them.
+    @discardableResult
+    func ensureAnalysisResultDownloaded(forAudioFile audioFileName: String, isDemo: Bool = false) async -> Bool {
+        let service = iCloudStorageService.shared
+        let audioDir = service.getAudioFilesDirectory()
+        let jsonFileName = analysisFileName(for: audioFileName, isDemo: isDemo)
+        let jsonURL = audioDir.appendingPathComponent(jsonFileName)
+
+        guard FileManager.default.fileExists(atPath: jsonURL.path) else { return false }
+
+        do {
+            try await service.ensureFileIsDownloaded(at: jsonURL)
+            return true
+        } catch {
+            return false
+        }
+    }
+
     // MARK: - Load Analysis Result
-    
+
     /// Loads an analysis result from JSON file if it exists
     /// - Parameter audioFileName: The name of the audio file
     /// - Returns: The loaded analysis result, or nil if no saved result exists
@@ -198,86 +185,151 @@ final class AnalysisResultPersistence {
         let jsonURL = audioDir.appendingPathComponent(jsonFileName)
         
         
-        // Check if file exists
         guard FileManager.default.fileExists(atPath: jsonURL.path) else {
-            
-            // List what files ARE in the directory
-            if let files = try? FileManager.default.contentsOfDirectory(at: audioDir, includingPropertiesForKeys: nil) {
-                for file in files {
-                }
-            }
             return nil
         }
-        
+
+        // Skip iCloud placeholder files — Data(contentsOf:) blocks the calling thread
+        // until the file downloads, which can cause a watchdog kill on the main thread.
+        if let values = try? jsonURL.resourceValues(forKeys: [.ubiquitousItemDownloadingStatusKey]),
+           values.ubiquitousItemDownloadingStatus == .notDownloaded {
+            return nil
+        }
+
         do {
-            // Read JSON data
             let jsonData = try Data(contentsOf: jsonURL)
             guard let data = try JSONSerialization.jsonObject(with: jsonData) as? [String: Any] else {
                 return nil
             }
-            
-            // Create AnalysisResult from data
-            let result = AnalysisResult(audioFile: nil, analysisVersion: data["analysisVersion"] as? String ?? "1.0")
-            
-            if let idString = data["id"] as? String, let id = UUID(uuidString: idString) {
-                result.id = id
-            }
-            
-            if let timestamp = data["dateAnalyzed"] as? TimeInterval {
-                result.dateAnalyzed = Date(timeIntervalSince1970: timestamp)
-            }
-            
-            result.overallScore = data["overallScore"] as? Double ?? 0
-            result.stereoWidthScore = data["stereoWidthScore"] as? Double ?? 0
-            result.phaseCoherence = data["phaseCoherence"] as? Double ?? 0
-            result.spectralCentroid = data["spectralCentroid"] as? Double ?? 0
-            result.hasClipping = data["hasClipping"] as? Bool ?? false
-            result.lowEndBalance = data["lowEndBalance"] as? Double ?? 0
-            result.lowMidBalance = data["lowMidBalance"] as? Double ?? 0
-            result.midBalance = data["midBalance"] as? Double ?? 0
-            result.highMidBalance = data["highMidBalance"] as? Double ?? 0
-            result.highBalance = data["highBalance"] as? Double ?? 0
-            result.dynamicRange = data["dynamicRange"] as? Double ?? 0
-            result.loudnessLUFS = data["loudnessLUFS"] as? Double ?? 0
-            result.peakLevel = data["peakLevel"] as? Double ?? 0
-            result.hasPhaseIssues = data["hasPhaseIssues"] as? Bool ?? false
-            result.hasStereoIssues = data["hasStereoIssues"] as? Bool ?? false
-            result.hasFrequencyImbalance = data["hasFrequencyImbalance"] as? Bool ?? false
-            result.hasDynamicRangeIssues = data["hasDynamicRangeIssues"] as? Bool ?? false
-            result.recommendations = data["recommendations"] as? [String] ?? []
-            
-            // Load Claude AI fields
-            let rawSummary = data["aiSummary"] as? String
-            result.aiSummary = ClaudeAPIService.fixContradictoryAnalysis(analysis: rawSummary, score: result.overallScore)
-            result.aiRecommendations = data["aiRecommendations"] as? [String] ?? []
-            result.claudeScore = data["claudeScore"] as? Int
-            result.isReadyForMastering = data["isReadyForMastering"] as? Bool ?? false
-            
-            // Load FFT spectrum data
-            if let spectrumArray = data["frequencySpectrum"] as? [Double] {
-                result.frequencySpectrum = spectrumArray.map { Float($0) }
-            }
-            result.spectrumSampleRate = data["spectrumSampleRate"] as? Double
-            result.rmsLevel = data["rmsLevel"] as? Double ?? 0
-
-            // Load unmixed detection fields
-            result.isProfessionallyMixed = data["isProfessionallyMixed"] as? Bool ?? true
-            result.stageMismatch = data["stageMismatch"] as? String
-            result.monoCompatibility = data["monoCompatibility"] as? Double ?? 1.0
-            if let base64String = data["unmixedDetectionData"] as? String,
-               let decodedData = Data(base64Encoded: base64String) {
-                result.unmixedDetectionData = decodedData
-            }
-
-            if result.frequencySpectrum != nil {
-            }
-            return result
-            
+            return Self.resultFromDictionary(data)
         } catch {
             return nil
         }
     }
-    
+
+    // MARK: - History
+
+    /// Loads the analysis history (past versions) from the JSON file for an audio file.
+    func loadAnalysisHistory(forAudioFile audioFileName: String, isDemo: Bool = false) -> [AnalysisResult] {
+        let service = iCloudStorageService.shared
+        let audioDir = service.getAudioFilesDirectory()
+        let jsonFileName = analysisFileName(for: audioFileName, isDemo: isDemo)
+        let jsonURL = audioDir.appendingPathComponent(jsonFileName)
+
+        guard FileManager.default.fileExists(atPath: jsonURL.path) else { return [] }
+
+        if let values = try? jsonURL.resourceValues(forKeys: [.ubiquitousItemDownloadingStatusKey]),
+           values.ubiquitousItemDownloadingStatus == .notDownloaded {
+            return []
+        }
+
+        guard let jsonData = try? Data(contentsOf: jsonURL),
+              let data = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+              let historyArray = data["analysisHistory"] as? [[String: Any]] else {
+            return []
+        }
+
+        return historyArray.compactMap { Self.resultFromDictionary($0) }
+    }
+
+    // MARK: - Private Helpers
+
+    private static func resultToDictionary(_ result: AnalysisResult) -> [String: Any] {
+        return [
+            "id": result.id.uuidString,
+            "dateAnalyzed": result.dateAnalyzed.timeIntervalSince1970,
+            "analysisVersion": result.analysisVersion,
+            "overallScore": result.overallScore,
+            "stereoWidthScore": result.stereoWidthScore,
+            "phaseCoherence": result.phaseCoherence,
+            "spectralCentroid": result.spectralCentroid,
+            "hasClipping": result.hasClipping,
+            "lowEndBalance": result.lowEndBalance,
+            "lowMidBalance": result.lowMidBalance,
+            "midBalance": result.midBalance,
+            "highMidBalance": result.highMidBalance,
+            "highBalance": result.highBalance,
+            "dynamicRange": result.dynamicRange,
+            "loudnessLUFS": result.loudnessLUFS,
+            "peakLevel": result.peakLevel,
+            "hasPhaseIssues": result.hasPhaseIssues,
+            "hasStereoIssues": result.hasStereoIssues,
+            "hasFrequencyImbalance": result.hasFrequencyImbalance,
+            "hasDynamicRangeIssues": result.hasDynamicRangeIssues,
+            "recommendations": result.recommendations,
+            "aiSummary": result.aiSummary as Any,
+            "aiRecommendations": result.aiRecommendations,
+            "claudeScore": result.claudeScore as Any,
+            "isReadyForMastering": result.isReadyForMastering,
+            "frequencySpectrum": result.frequencySpectrum as Any,
+            "spectrumSampleRate": result.spectrumSampleRate as Any,
+            "rmsLevel": result.rmsLevel,
+            "isProfessionallyMixed": result.isProfessionallyMixed,
+            "stageMismatch": result.stageMismatch as Any,
+            "monoCompatibility": result.monoCompatibility,
+            "correlationCoefficient": result.correlationCoefficient,
+            "unmixedDetectionData": result.unmixedDetectionData?.base64EncodedString() as Any,
+            "spectrogramImageData": result.spectrogramImageData?.base64EncodedString() as Any
+        ]
+    }
+
+    private static func resultFromDictionary(_ data: [String: Any]) -> AnalysisResult? {
+        let result = AnalysisResult(audioFile: nil, analysisVersion: data["analysisVersion"] as? String ?? "1.0")
+
+        if let idString = data["id"] as? String, let id = UUID(uuidString: idString) {
+            result.id = id
+        }
+        if let timestamp = data["dateAnalyzed"] as? TimeInterval {
+            result.dateAnalyzed = Date(timeIntervalSince1970: timestamp)
+        }
+
+        result.overallScore = data["overallScore"] as? Double ?? 0
+        result.stereoWidthScore = data["stereoWidthScore"] as? Double ?? 0
+        result.phaseCoherence = data["phaseCoherence"] as? Double ?? 0
+        result.spectralCentroid = data["spectralCentroid"] as? Double ?? 0
+        result.hasClipping = data["hasClipping"] as? Bool ?? false
+        result.lowEndBalance = data["lowEndBalance"] as? Double ?? 0
+        result.lowMidBalance = data["lowMidBalance"] as? Double ?? 0
+        result.midBalance = data["midBalance"] as? Double ?? 0
+        result.highMidBalance = data["highMidBalance"] as? Double ?? 0
+        result.highBalance = data["highBalance"] as? Double ?? 0
+        result.dynamicRange = data["dynamicRange"] as? Double ?? 0
+        result.loudnessLUFS = data["loudnessLUFS"] as? Double ?? 0
+        result.peakLevel = data["peakLevel"] as? Double ?? 0
+        result.hasPhaseIssues = data["hasPhaseIssues"] as? Bool ?? false
+        result.hasStereoIssues = data["hasStereoIssues"] as? Bool ?? false
+        result.hasFrequencyImbalance = data["hasFrequencyImbalance"] as? Bool ?? false
+        result.hasDynamicRangeIssues = data["hasDynamicRangeIssues"] as? Bool ?? false
+        result.recommendations = data["recommendations"] as? [String] ?? []
+
+        let rawSummary = data["aiSummary"] as? String
+        result.aiSummary = ClaudeAPIService.fixContradictoryAnalysis(analysis: rawSummary, score: result.overallScore)
+        result.aiRecommendations = data["aiRecommendations"] as? [String] ?? []
+        result.claudeScore = data["claudeScore"] as? Int
+        result.isReadyForMastering = data["isReadyForMastering"] as? Bool ?? false
+
+        if let spectrumArray = data["frequencySpectrum"] as? [Double] {
+            result.frequencySpectrum = spectrumArray.map { Float($0) }
+        }
+        result.spectrumSampleRate = data["spectrumSampleRate"] as? Double
+        result.rmsLevel = data["rmsLevel"] as? Double ?? 0
+
+        result.isProfessionallyMixed = data["isProfessionallyMixed"] as? Bool ?? true
+        result.stageMismatch = data["stageMismatch"] as? String
+        result.monoCompatibility = data["monoCompatibility"] as? Double ?? 1.0
+        result.correlationCoefficient = data["correlationCoefficient"] as? Double ?? 1.0
+        if let base64String = data["unmixedDetectionData"] as? String,
+           let decodedData = Data(base64Encoded: base64String) {
+            result.unmixedDetectionData = decodedData
+        }
+        if let base64String = data["spectrogramImageData"] as? String,
+           let decodedData = Data(base64Encoded: base64String) {
+            result.spectrogramImageData = decodedData
+        }
+
+        return result
+    }
+
     // MARK: - Clear Date Tracking
 
     private static let lastAnalysisClearDateKey = "lastAnalysisClearDate"
