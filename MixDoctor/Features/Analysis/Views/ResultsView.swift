@@ -442,9 +442,13 @@ struct ResultsView: View {
                 Text("Overall Score")
                     .font(.title2)
                     .fontWeight(.semibold)
-                
+
                 Spacer()
-                
+
+                if isArchivableVersion(result) {
+                    analysisSourceBadge(result: result)
+                }
+
                 Button(action: {
                     showScoreGuide = true
                 }) {
@@ -549,6 +553,20 @@ struct ResultsView: View {
                 .fill(Color.backgroundSecondary)
                 .shadow(color: Color.black.opacity(0.05), radius: 10, x: 0, y: 2)
         )
+    }
+
+    /// Small pill indicating which backend produced this score — on-device (Lifetime Pro)
+    /// or Claude — so users can tell at a glance without digging into Settings.
+    private func analysisSourceBadge(result: AnalysisResult) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: result.usedLocalModel ? "cpu" : "cloud.fill")
+            Text(result.usedLocalModel ? "On-Device" : "Claude")
+        }
+        .font(.caption2.weight(.semibold))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Capsule().fill(Color.secondary.opacity(0.12)))
     }
 
     private func modernIssuesSummary(result: AnalysisResult) -> some View {

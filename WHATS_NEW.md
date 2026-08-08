@@ -1,5 +1,20 @@
 # What's New
 
+## Version 2.0.0
+
+### New Features
+
+- **On-Device AI Analysis with Lifetime Pro** — Analyze your mixes entirely on your device using Apple Intelligence, unlocked with a one-time Lifetime Pro purchase. No subscription, no monthly limit, and it works completely offline. Requires iOS 26 or macOS Tahoe (26) or later on a supported device; MixDoctor automatically falls back to Claude on older versions until you update.
+- **Spectrogram-Based AI Analysis** — MixDoctor now generates a spectrogram of your track and sends it directly to Claude, so frequency balance is read visually — the way a mixing engineer reads a real-time analyzer — instead of from raw numbers alone. The spectrogram now appears on the Results screen in place of the old frequency chart.
+
+### Improvements
+
+- **Consistent Scores** — The same track now scores the same way every time you analyze it. Previously, AI scoring could vary slightly between repeat analyses of the exact same file.
+- **Faster, More Responsive Mac App** — Fixed the app freezing while loading your library on launch. Syncing and file scanning now happen in the background instead of locking up the window.
+- Removed the Mix Depth score — it wasn't factored into your overall score and hadn't been validated for accuracy, so we cut it rather than leave a confusing extra number.
+
+---
+
 ## Version 1.2.3
 
 ### New Features

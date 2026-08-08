@@ -282,6 +282,12 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
     }
     
     func canPerformAnalysis() -> Bool {
+        // Lifetime purchasers get unlimited analysis when it will actually run on-device
+        // (costs nothing). If their device can't run the local model, fall through to
+        // their underlying free/Pro quota instead of unmetered Claude usage.
+        if hasLifetimeAccess && isLocalModelUsable {
+            return true
+        }
         if isProUser {
             // Check Pro monthly limit with automatic reset
             checkProAnalysisReset()
@@ -289,6 +295,14 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
         }
         // Trial users and free users have 4 analyses limit
         return remainingFreeAnalyses > 0
+    }
+
+    /// Whether on-device analysis can actually run right now (OS + Apple Intelligence availability).
+    private var isLocalModelUsable: Bool {
+        if #available(iOS 26.0, *) {
+            return LocalModelAnalysisService.isAvailable
+        }
+        return false
     }
     
     private func checkMonthlyReset() {
@@ -373,6 +387,8 @@ public final class SubscriptionService: NSObject, ObservableObject, PurchasesDel
             let periodLabel = isWeeklySubscriber ? "week" : "month"
             let used = currentProLimit - remainingProAnalyses
             return "Pro (\(used)/\(currentProLimit) analyses this \(periodLabel))"
+        } else if hasLifetimeAccess {
+            return "Lifetime Pro (Unlimited on-device analysis)"
         } else {
             let used = freeAnalysisLimit - remainingFreeAnalyses
             return "Free (\(used)/\(freeAnalysisLimit) analyses)"

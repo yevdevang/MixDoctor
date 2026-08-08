@@ -34,7 +34,7 @@ struct SettingsView: View {
                 return "\(viewModel.localModelUnavailableReason ?? "On-device analysis is unavailable on this device.") Using Claude API instead."
             }
         } else {
-            return "Unlock unlimited on-device analysis forever with a one-time Lifetime Pro purchase. Otherwise, analysis uses the Claude API within your plan's limits."
+            return "Unlock unlimited on-device analysis forever with a one-time Lifetime Pro purchase (requires iOS 26+ or macOS Tahoe 26+). Otherwise, analysis uses the Claude API within your plan's limits."
         }
     }
 
@@ -54,7 +54,7 @@ struct SettingsView: View {
                         
                         Spacer()
                         
-                        if subscriptionService.isProUser {
+                        if subscriptionService.isProUser || subscriptionService.hasLifetimeAccess {
                             Image(systemName: "checkmark.seal.fill")
                                 .foregroundStyle(Color.primaryAccent)
                                 .font(.title2)
@@ -85,7 +85,15 @@ struct SettingsView: View {
                     }
                     .disabled(isRefreshingSubscription)
                     
-                    if !subscriptionService.isProUser {
+                    if subscriptionService.isProUser {
+                        // Also has an active subscription (possibly alongside Lifetime) — let them manage/cancel it
+                        Button("Manage Subscription") {
+                            if let url = URL(string: "https://apps.apple.com/account/subscriptions") {
+                                UIApplication.shared.open(url)
+                            }
+                        }
+                    } else if !subscriptionService.hasLifetimeAccess {
+                        // Lifetime already covers unlimited on-device analysis — no upsell needed
                         Button {
                             AnalyticsService.log(.upgradeButtonTapped)
                             showPaywall = true
@@ -97,12 +105,6 @@ struct SettingsView: View {
                                 Image(systemName: "chevron.right")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
-                            }
-                        }
-                    } else {
-                        Button("Manage Subscription") {
-                            if let url = URL(string: "https://apps.apple.com/account/subscriptions") {
-                                UIApplication.shared.open(url)
                             }
                         }
                     }

@@ -46,7 +46,7 @@ final class SettingsViewModel {
         if #available(iOS 26.0, *) {
             return LocalModelAnalysisService.unavailableReason
         }
-        return "On-device analysis requires iOS 26 or later."
+        return "On-device analysis requires iOS 26 or later, or macOS Tahoe (26) or later on Mac."
     }
 
     var showResetConfirmation = false

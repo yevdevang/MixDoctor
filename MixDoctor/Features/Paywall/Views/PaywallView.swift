@@ -318,7 +318,7 @@ struct PaywallView: View {
                 .cornerRadius(14)
                 .disabled(isPurchasingLifetime)
 
-                Text("One-time purchase. Analyze on-device forever, with no monthly limit.")
+                Text("One-time purchase. Analyze on-device forever, with no monthly limit. Requires iOS 26+ or macOS Tahoe (26)+ — falls back to Claude on older versions until you update.")
                     .font(.caption.weight(.semibold))
                     .foregroundColor(.gray)
                     .multilineTextAlignment(.center)
